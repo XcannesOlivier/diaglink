@@ -31,6 +31,8 @@ interface ConversationSidebarProps {
   onNewChat: () => void;
   onDeleteConversation: (conversationId: string) => void;
   onLoadMore: () => void;
+  onCollapse: () => void;
+  canCollapse: boolean;
 }
 
 const useStyles = makeStyles({
@@ -128,9 +130,9 @@ function formatDate(timestamp: number): string {
   const diffMs = now.getTime() - date.getTime();
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7) return `${diffDays} days ago`;
+  if (diffDays === 0) return "Aujourd'hui";
+  if (diffDays === 1) return 'Hier';
+  if (diffDays < 7) return `Il y a ${diffDays} jours`;
   return date.toLocaleDateString();
 }
 
@@ -145,6 +147,8 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
   onNewChat,
   onDeleteConversation,
   onLoadMore,
+  onCollapse,
+  canCollapse,
 }) => {
   const styles = useStyles();
   const [searchQuery, setSearchQuery] = useState('');
@@ -197,7 +201,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
           action={
             <Button
               appearance="subtle"
-              aria-label="Close sidebar"
+              aria-label="Fermer le panneau"
               icon={<Dismiss24Regular />}
               onClick={() => onOpenChange(false)}
             />
@@ -217,13 +221,13 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
             onOpenChange(false);
           }}
         >
-          New Chat
+          Nouvelle conversation
         </Button>
 
         {conversations.length > 0 && (
           <Input
             className={styles.searchBox}
-            placeholder="Search conversations..."
+            placeholder="Rechercher des conversations…"
             value={searchQuery}
             onChange={handleSearchChange}
             contentBefore={<Search24Regular />}
@@ -233,28 +237,28 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                   appearance="transparent"
                   icon={<DismissCircle24Regular />}
                   size="small"
-                  aria-label="Clear search"
+                  aria-label="Effacer la recherche"
                   onClick={handleClearSearch}
                 />
               ) : undefined
             }
-            aria-label="Search conversations"
+            aria-label="Rechercher des conversations"
           />
         )}
 
         {isLoading && conversations.length === 0 ? (
           <div className={styles.spinnerContainer}>
-            <Spinner size="small" label="Loading conversations..." />
+            <Spinner size="small" label="Chargement des conversations…" />
           </div>
         ) : conversations.length === 0 ? (
           <div className={styles.emptyState}>
-            <Text>No conversations yet</Text>
-            <Text size={200}>Start a new chat to begin</Text>
+            <Text>Aucune conversation pour le moment</Text>
+            <Text size={200}>Démarrez une nouvelle conversation pour commencer</Text>
           </div>
         ) : filteredConversations.length === 0 ? (
           <div className={styles.noResults}>
-            <Text>No conversations match</Text>
-            <Text size={200}>Try a different search term</Text>
+            <Text>Aucune conversation ne correspond</Text>
+            <Text size={200}>Essayez un autre terme de recherche</Text>
           </div>
         ) : (
           <>
@@ -287,7 +291,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                       size={300}
                       className={styles.conversationTitle}
                     >
-                      {conversation.title || 'Untitled'}
+                      {conversation.title || 'Sans titre'}
                     </Text>
                     <Text className={styles.conversationDate}>
                       {formatDate(conversation.createdAt)}
@@ -298,7 +302,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                     icon={<Delete24Regular />}
                     size="small"
                     className={styles.deleteButton}
-                    aria-label={`Delete conversation: ${conversation.title || 'Untitled'}`}
+                    aria-label={`Supprimer la conversation : ${conversation.title || 'Sans titre'}`}
                     onClick={(e) => handleDelete(e, conversation.id)}
                   />
                 </div>
@@ -311,7 +315,17 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                 onClick={onLoadMore}
                 disabled={isLoading}
               >
-                {isLoading ? 'Loading...' : 'Load more conversations'}
+                {isLoading ? 'Chargement…' : 'Charger plus de conversations'}
+              </Button>
+            )}
+            {canCollapse && (
+              <Button
+                appearance="subtle"
+                className={styles.loadMoreButton}
+                onClick={onCollapse}
+                disabled={isLoading}
+              >
+                Afficher moins
               </Button>
             )}
           </>

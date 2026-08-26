@@ -2,16 +2,16 @@ import type { IChatItem } from '../types/chat';
 
 export function exportAsMarkdown(messages: IChatItem[], agentName?: string): string {
   const lines: string[] = [];
-  lines.push(`# Conversation with ${agentName || 'AI Agent'}`);
-  lines.push(`_Exported ${new Date().toLocaleString()}_\n`);
+  lines.push(`# Conversation avec ${agentName || 'Agent IA'}`);
+  lines.push(`_Exporté le ${new Date().toLocaleString()}_\n`);
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      lines.push(`## You\n> ${msg.content.replace(/\n/g, '\n> ')}\n`);
+      lines.push(`## Vous\n> ${msg.content.replace(/\n/g, '\n> ')}\n`);
     } else if (msg.role === 'assistant') {
       lines.push(`## ${agentName || 'Assistant'}\n${msg.content}\n`);
     } else if (msg.role === 'approval') {
-      lines.push(`## Tool Approval\n_MCP tool approval: ${msg.mcpApproval?.toolName || 'unknown'}_\n`);
+      lines.push(`## Approbation d'outil\n_Approbation d'outil MCP : ${msg.mcpApproval?.toolName || 'inconnu'}_\n`);
     }
   }
   return lines.join('\n');

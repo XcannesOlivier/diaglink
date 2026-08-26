@@ -138,15 +138,15 @@ function DefaultErrorFallback({ error, resetError }: { error: Error; resetError:
   return (
     <div className={styles.container}>
       <ErrorCircleRegular className={styles.icon} />
-      <Text className={styles.title}>Something went wrong</Text>
+      <Text className={styles.title}>Une erreur est survenue</Text>
       <Text className={styles.message}>
-        An unexpected error occurred. You can try refreshing the page or starting a new chat.
+        Une erreur inattendue s'est produite. Vous pouvez essayer de recharger la page ou de démarrer une nouvelle conversation.
       </Text>
       
       {import.meta.env.DEV && error.stack && (
         <div className={styles.details}>
           <div className={styles.errorText}>
-            <strong>Error:</strong> {error.message}
+            <strong>Erreur :</strong> {error.message}
           </div>
           <pre className={styles.stackTrace}>
             {error.stack}
@@ -156,10 +156,10 @@ function DefaultErrorFallback({ error, resetError }: { error: Error; resetError:
 
       <div className={styles.actions}>
         <Button appearance="primary" onClick={handleReload}>
-          Reload Page
+          Recharger la page
         </Button>
         <Button appearance="secondary" onClick={resetError}>
-          Try Again
+          Réessayer
         </Button>
       </div>
     </div>

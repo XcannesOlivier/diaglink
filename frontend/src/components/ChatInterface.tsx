@@ -7,7 +7,6 @@ import { ChatInput } from "./chat/ChatInput";
 import { DropZone } from "./chat/DropZone";
 import { Waves } from "./animations/Waves";
 import { ErrorMessage } from "./core/ErrorMessage";
-import { KeyboardShortcuts } from "./core/KeyboardShortcuts";
 import { BuiltWithBadge } from "./core/BuiltWithBadge";
 import type { IChatItem } from "../types/chat";
 import type { AppState } from "../types/appState";
@@ -31,9 +30,7 @@ interface ChatInterfaceProps {
   onNewChat?: () => void;
   onCancelStream?: () => void;
   onToggleSidebar?: () => void;
-  onExportConversation?: () => void;
   onRegenerate?: () => void;
-  onEditMessage?: (messageId: string, newText: string) => void;
   onCancelEdit?: () => void;
   isEditing?: boolean;
   onFeedback?: (messageId: string, rating: 'positive' | 'negative') => void;
@@ -48,14 +45,13 @@ interface ChatInterfaceProps {
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
-  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onMcpApproval, onClearError, onRecoveredInputConsumed, onDequeueMessage, onOpenSettings, onNewChat, onCancelStream, onToggleSidebar, onExportConversation, onRegenerate, onEditMessage, onCancelEdit, isEditing, onFeedback, onDownloadFile, hasMessages, disabled, agentName, agentDescription, agentLogo, starterPrompts, conversationId } = props;
+  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onMcpApproval, onClearError, onRecoveredInputConsumed, onDequeueMessage, onOpenSettings, onNewChat, onCancelStream, onToggleSidebar, onRegenerate, onCancelEdit, isEditing, onFeedback, onDownloadFile, hasMessages, disabled, agentName, agentDescription, agentLogo, starterPrompts, conversationId } = props;
   const deferredMessages = useDeferredValue(messages);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [liveRegionMessage, setLiveRegionMessage] = useState<string>('');
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState<File[] | undefined>();
   const dragCounterRef = useRef(0);
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -67,7 +63,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, []);
 
-  const handleShowShortcuts = useCallback(() => setIsShortcutsOpen(true), []);
   const handleDroppedFilesConsumed = useCallback(() => setDroppedFiles(undefined), []);
 
   // Track whether user is near the bottom via IntersectionObserver
@@ -97,16 +92,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
     if (isStreaming) {
       const streamingMessage = messages.find(m => m.id === streamingMessageId);
       if (streamingMessage?.retryAttempt) {
-        setLiveRegionMessage(`Retrying, attempt ${streamingMessage.retryAttempt} of ${streamingMessage.maxRetries}`);
+        setLiveRegionMessage(`Nouvelle tentative, ${streamingMessage.retryAttempt} sur ${streamingMessage.maxRetries}`);
       } else {
-        setLiveRegionMessage('Assistant is responding');
+        setLiveRegionMessage("L'assistant répond");
       }
     } else if (status === 'idle' && messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
-      setLiveRegionMessage('Response complete');
+      setLiveRegionMessage('Réponse terminée');
       const timer = setTimeout(() => setLiveRegionMessage(''), 1000);
       return () => clearTimeout(timer);
     }
   }, [isStreaming, status, messages, streamingMessageId]);
+
+  const effectiveStarterPrompts = starterPrompts && starterPrompts.length > 0 ? starterPrompts : undefined;
 
   const handleSendMessage = (messageText: string, files?: File[]) => {
     if (!messageText.trim() || disabled) return;
@@ -176,7 +173,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
       onDrop={handleDrop}
     >
       <DropZone visible={isDragging} />
-      <KeyboardShortcuts open={isShortcutsOpen} onOpenChange={setIsShortcutsOpen} />
       {/* Live region for announcing streaming status to screen readers */}
       <div 
         role="status" 
@@ -191,7 +187,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
         className={styles.messagesContainer} 
         role="log" 
         aria-live="polite" 
-        aria-label="Chat messages"
+        aria-label="Messages du chat"
         aria-busy={isStreaming}
       >
         <div className={styles.messagesWrapper}>
@@ -200,7 +196,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
               agentName={agentName}
               agentDescription={agentDescription}
               agentLogo={agentLogo}
-              starterPrompts={starterPrompts}
+              starterPrompts={effectiveStarterPrompts}
               onPromptClick={handleStarterPromptClick}
             />
           ) : (
@@ -211,12 +207,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                 }
               </div>
               {(() => {
-                let lastUserIdx = -1;
-                for (let i = deferredMessages.length - 1; i >= 0; i--) {
-                  if (deferredMessages[i].role === 'user') { lastUserIdx = i; break; }
-                }
-                return deferredMessages.map((message, index) => {
-                const isLastUserMessage = message.role === 'user' && index === lastUserIdx && !isStreaming;
+                return deferredMessages.map((message) => {
                 return message.role === "approval" ? (
                   <McpApprovalCard
                     key={message.id}
@@ -244,19 +235,19 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                   <UserMessage 
                     key={message.id} 
                     message={message}
-                    isLastUserMessage={isLastUserMessage}
-                    onEdit={onEditMessage}
                   />
                 ) : (
                   <AssistantMessage 
                     key={message.id} 
                     message={message} 
                     isStreaming={isStreaming && message.id === streamingMessageId}
+                    disabled={isBusy}
                     agentName={agentName}
                     agentLogo={agentLogo}
                     onRegenerate={onRegenerate}
                     onFeedback={onFeedback}
                     onDownloadFile={onDownloadFile}
+                    onSuggestedPromptClick={handleStarterPromptClick}
                   />
                 );
               })
@@ -269,9 +260,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
           <button
             className={styles.newMessagesPill}
             onClick={() => { scrollToBottom(); setHasNewMessages(false); }}
-            aria-label="Scroll to new messages"
+            aria-label="Défiler vers les nouveaux messages"
           >
-            ↓ New messages
+            ↓ Nouveaux messages
           </button>
         )}
       </div>
@@ -283,11 +274,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
               message={typeof error.message === 'string' ? error.message : 
                       typeof error === 'string' ? error :
                       error.originalError?.message || 
-                      'An unexpected error occurred. Please try again.'}
+                      'Une erreur inattendue est survenue. Veuillez réessayer.'}
               recoverable={error.recoverable}
               onRetry={error.action?.handler}
               onDismiss={onClearError}
-              customAction={error.action && error.action.label !== 'Retry' ? {
+              customAction={error.action && error.action.label !== 'Réessayer' ? {
                 label: error.action.label,
                 handler: error.action.handler
               } : undefined}
@@ -303,13 +294,11 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
           onNewChat={onNewChat}
           onToggleSidebar={onToggleSidebar}
           hasMessages={hasMessages}
-          placeholder="Type your message here..."
+          placeholder="Décrivez votre problème ou posez votre question…"
           isStreaming={isStreaming}
           onCancelStream={isStreaming && onCancelStream ? onCancelStream : undefined}
           isEditing={isEditing}
           onCancelEdit={onCancelEdit}
-          onExportConversation={onExportConversation}
-          onShowShortcuts={handleShowShortcuts}
           recoveredInput={recoveredInput}
           recoveredAttachments={recoveredAttachments}
           onRecoveredInputConsumed={onRecoveredInputConsumed}

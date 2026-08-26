@@ -37,20 +37,20 @@ export const McpApprovalCard: React.FC<McpApprovalCardProps> = ({
       <div className={styles.content}>
         <Text className={styles.title}>
           {resolved
-            ? `External tool ${resolved === 'approved' ? 'approved' : 'rejected'}`
-            : 'I need your approval to use an external tool'}
+            ? `Outil externe ${resolved === 'approved' ? 'approuvé' : 'refusé'}`
+            : "J'ai besoin de votre approbation pour utiliser un outil externe"}
         </Text>
         
         <div className={styles.details}>
           <div className={styles.detail}>
-            <Text weight="semibold">Tool:</Text> <Text>{toolName}</Text>
+            <Text weight="semibold">Outil :</Text> <Text>{toolName}</Text>
           </div>
           <div className={styles.detail}>
-            <Text weight="semibold">Server:</Text> <Text>{serverLabel}</Text>
+            <Text weight="semibold">Serveur :</Text> <Text>{serverLabel}</Text>
           </div>
           {args && (
             <details className={styles.argumentsDisclosure}>
-              <summary className={styles.argumentsSummary}>View arguments</summary>
+              <summary className={styles.argumentsSummary}>Voir les arguments</summary>
               <pre className={styles.arguments}>{(() => {
                 try {
                   return JSON.stringify(JSON.parse(args), null, 2);
@@ -65,7 +65,7 @@ export const McpApprovalCard: React.FC<McpApprovalCardProps> = ({
         {resolved ? (
           <div className={styles.resolvedStatus}>
             <Text weight="semibold">
-              {resolved === 'approved' ? '✓ Approved' : '✗ Rejected'}
+              {resolved === 'approved' ? '✓ Approuvé' : '✗ Refusé'}
             </Text>
           </div>
         ) : (
@@ -75,14 +75,14 @@ export const McpApprovalCard: React.FC<McpApprovalCardProps> = ({
               onClick={onApprove} 
               disabled={disabled}
             >
-              Approve
+              Approuver
             </Button>
             <Button 
               appearance="secondary"
               onClick={onReject} 
               disabled={disabled}
             >
-              Reject
+              Refuser
             </Button>
           </div>
         )}

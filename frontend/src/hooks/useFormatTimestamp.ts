@@ -34,31 +34,30 @@ export const useFormatTimestamp = () => {
 
     // Just now (< 1 minute)
     if (diffMinutes < 1) {
-      return 'just now';
+      return 'à l\'instant';
     }
 
     // Minutes ago (< 60 minutes)
     if (diffMinutes < 60) {
-      return `${diffMinutes} minute${diffMinutes === 1 ? '' : 's'} ago`;
+      return `il y a ${diffMinutes} minute${diffMinutes === 1 ? '' : 's'}`;
     }
 
     // Hours ago (< 24 hours)
     if (diffHours < 24) {
-      return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+      return `il y a ${diffHours} heure${diffHours === 1 ? '' : 's'}`;
     }
 
     // Days ago (< 7 days)
     if (diffDays < 7) {
-      return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+      return `il y a ${diffDays} jour${diffDays === 1 ? '' : 's'}`;
     }
 
     // Absolute time for older messages
-    return new Intl.DateTimeFormat('en', {
+    return new Intl.DateTimeFormat('fr', {
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
-      hour12: true,
     }).format(date);
   }, []);
 };

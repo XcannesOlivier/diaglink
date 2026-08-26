@@ -21,27 +21,27 @@ export const UsageInfo: React.FC<UsageInfoProps> = ({ info, duration }) => {
             <span className={styles.divider}>|</span>
           </>
         )}
-        <span>{totalTokens} tokens</span>
+        <span>{totalTokens} jetons</span>
         <button 
           className={styles.infoButton}
-          title="Usage information"
-          aria-label="Show token usage details"
+          title="Informations sur l'utilisation"
+          aria-label="Afficher les détails d'utilisation des jetons"
           type="button"
         >
           <InfoRegular className={styles.infoIcon} />
         </button>
       </div>
       <div className={styles.usageDetails}>
-        <Text weight="semibold" size={200}>Usage Information</Text>
+        <Text weight="semibold" size={200}>Informations sur l'utilisation</Text>
         <Divider className={styles.detailsDivider} />
         <div className={styles.detailsList}>
           <div className={styles.detailsItem}>
-            <Body1 className={styles.detailLabel}>Input</Body1>
-            <Body1 className={styles.detailValue}>{info.promptTokens} tokens</Body1>
+            <Body1 className={styles.detailLabel}>Entrée</Body1>
+            <Body1 className={styles.detailValue}>{info.promptTokens} jetons</Body1>
           </div>
           <div className={styles.detailsItem}>
-            <Body1 className={styles.detailLabel}>Output</Body1>
-            <Body1 className={styles.detailValue}>{info.completionTokens} tokens</Body1>
+            <Body1 className={styles.detailLabel}>Sortie</Body1>
+            <Body1 className={styles.detailValue}>{info.completionTokens} jetons</Body1>
           </div>
         </div>
       </div>

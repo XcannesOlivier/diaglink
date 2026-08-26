@@ -97,7 +97,8 @@ export type AppAction =
   | { type: 'CONVERSATIONS_LOADING' }
   | { type: 'CONVERSATIONS_LOADING_DONE' }
   | { type: 'CONVERSATIONS_TOGGLE_SIDEBAR' }
-  | { type: 'CONVERSATIONS_REMOVE'; conversationId: string };
+  | { type: 'CONVERSATIONS_REMOVE'; conversationId: string }
+  | { type: 'CONVERSATIONS_COLLAPSE'; keepCount: number };
 
 /**
  * Initial state for the application

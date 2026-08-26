@@ -38,43 +38,43 @@ function MessageActionsComponent({ content, onRegenerate, onFeedback }: MessageA
 
   return (
     <div className={styles.actionsBar}>
-      <Tooltip content={copied ? 'Copied!' : 'Copy'} relationship="label" withArrow>
+      <Tooltip content={copied ? 'Copié !' : 'Copier'} relationship="label" withArrow>
         <button
           className={styles.actionButton}
           onClick={handleCopy}
-          aria-label="Copy message"
+          aria-label="Copier le message"
         >
-          {copied && <span className={styles.copiedTooltip} role="status" aria-live="polite">Copied!</span>}
+          {copied && <span className={styles.copiedTooltip} role="status" aria-live="polite">Copié !</span>}
           <CopyRegular fontSize={16} />
         </button>
       </Tooltip>
 
-      <Tooltip content="Regenerate" relationship="label" withArrow>
+      <Tooltip content="Régénérer" relationship="label" withArrow>
         <button
           className={styles.actionButton}
           onClick={onRegenerate}
-          aria-label="Regenerate response"
+          aria-label="Régénérer la réponse"
         >
           <ArrowClockwiseRegular fontSize={16} />
         </button>
       </Tooltip>
 
-      <Tooltip content="Good response" relationship="label" withArrow>
+      <Tooltip content="Bonne réponse" relationship="label" withArrow>
         <button
           className={`${styles.actionButton} ${feedback === 'positive' ? styles.feedbackSelected : ''}`}
           onClick={() => handleFeedback('positive')}
-          aria-label="Good response"
+          aria-label="Bonne réponse"
           aria-pressed={feedback === 'positive'}
         >
           <ThumbLikeRegular fontSize={16} />
         </button>
       </Tooltip>
 
-      <Tooltip content="Bad response" relationship="label" withArrow>
+      <Tooltip content="Mauvaise réponse" relationship="label" withArrow>
         <button
           className={`${styles.actionButton} ${feedback === 'negative' ? styles.feedbackSelected : ''}`}
           onClick={() => handleFeedback('negative')}
-          aria-label="Bad response"
+          aria-label="Mauvaise réponse"
           aria-pressed={feedback === 'negative'}
         >
           <ThumbDislikeRegular fontSize={16} />

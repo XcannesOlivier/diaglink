@@ -25,12 +25,12 @@ export interface AppError {
  * Error messages for different error codes
  */
 export const ERROR_MESSAGES: Record<ErrorCode, string> = {
-  NETWORK: 'Unable to connect to the server. Please check your internet connection and try again.',
-  AUTH: 'Your session has expired. Please sign in again to continue.',
-  STREAM: 'The response was interrupted. Click Retry to continue your conversation.',
-  SERVER: 'The server encountered an error. This has been logged and our team will investigate.',
-  API: 'The request failed. Please try again.',
-  UNKNOWN: 'An unexpected error occurred. Please try again or contact support if the issue persists.',
+  NETWORK: 'Impossible de se connecter au serveur. Vérifiez votre connexion internet et réessayez.',
+  AUTH: 'Votre session a expiré. Veuillez vous reconnecter pour continuer.',
+  STREAM: 'La réponse a été interrompue. Cliquez sur Réessayer pour poursuivre la conversation.',
+  SERVER: 'Le serveur a rencontré une erreur. Elle a été enregistrée et notre équipe va l’examiner.',
+  API: 'La requête a échoué. Veuillez réessayer.',
+  UNKNOWN: 'Une erreur inattendue est survenue. Veuillez réessayer ou contacter le support si le problème persiste.',
 };
 
 /**
@@ -38,34 +38,34 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
  */
 export const DETAILED_ERROR_MESSAGES: Record<ErrorCode, { title: string; description: string; hint: string }> = {
   NETWORK: {
-    title: 'Connection Lost',
-    description: 'Unable to reach the server.',
-    hint: 'Check your internet connection and try again.'
+    title: 'Connexion perdue',
+    description: 'Impossible de joindre le serveur.',
+    hint: 'Vérifiez votre connexion internet et réessayez.'
   },
   AUTH: {
-    title: 'Session Expired',
-    description: 'Your authentication session has timed out.',
-    hint: 'Click "Sign in again" below to continue.'
+    title: 'Session expirée',
+    description: 'Votre session d’authentification a expiré.',
+    hint: 'Cliquez sur « Se reconnecter » ci-dessous pour continuer.'
   },
   STREAM: {
-    title: 'Response Interrupted',
-    description: 'The AI response was interrupted unexpectedly.',
-    hint: 'Click "Retry" to resend your message.'
+    title: 'Réponse interrompue',
+    description: 'La réponse de l’IA a été interrompue de manière inattendue.',
+    hint: 'Cliquez sur « Réessayer » pour renvoyer votre message.'
   },
   SERVER: {
-    title: 'Server Error',
-    description: 'The server encountered an unexpected error.',
-    hint: 'Please try again in a few moments.'
+    title: 'Erreur serveur',
+    description: 'Le serveur a rencontré une erreur inattendue.',
+    hint: 'Veuillez réessayer dans quelques instants.'
   },
   API: {
-    title: 'Request Failed',
-    description: 'The API request could not be completed.',
-    hint: 'Please try again.'
+    title: 'Requête échouée',
+    description: 'La requête API n’a pas pu être complétée.',
+    hint: 'Veuillez réessayer.'
   },
   UNKNOWN: {
-    title: 'Unexpected Error',
-    description: 'Something went wrong.',
-    hint: 'Try refreshing the page or contact support if this continues.'
+    title: 'Erreur inattendue',
+    description: 'Une erreur est survenue.',
+    hint: 'Essayez de recharger la page ou contactez le support si le problème persiste.'
   }
 };
 

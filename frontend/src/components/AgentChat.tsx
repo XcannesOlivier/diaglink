@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import logoDiagLink from '../assets/Logo DiagLink.png';
 import { ChatInterface } from './ChatInterface';
 import { ConversationSidebar } from './ConversationSidebar';
 import { SettingsPanel } from './core/SettingsPanel';
@@ -6,7 +7,6 @@ import { useAppState } from '../hooks/useAppState';
 import { useAuth } from '../hooks/useAuth';
 import { ChatService } from '../services/chatService';
 import { useAppContext } from '../contexts/AppContext';
-import { exportAsMarkdown, downloadMarkdown } from '../utils/exportConversation';
 import { trackFeedback } from '../services/telemetry';
 import type { IChatItem } from '../types/chat';
 import styles from './AgentChat.module.css';
@@ -18,6 +18,9 @@ interface AgentChatProps {
   agentLogo?: string;
   starterPrompts?: string[];
 }
+
+// Number of conversations fetched initially and per "load more" / "show less" step.
+const CONVERSATIONS_PAGE_SIZE = 5;
 
 export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescription, agentLogo, starterPrompts }) => {
   const { chat, state } = useAppState();
@@ -83,10 +86,6 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     dispatch({ type: 'CHAT_REGENERATE' });
   }, [chatService, dispatch]);
 
-  const handleEditMessage = useCallback((messageId: string, newText: string) => {
-    dispatch({ type: 'CHAT_EDIT_MESSAGE', messageId, newText });
-  }, [dispatch]);
-
   const handleFeedback = useCallback((messageId: string, rating: 'positive' | 'negative') => {
     trackFeedback(messageId, chat.currentConversationId, rating);
   }, [chat.currentConversationId]);
@@ -101,7 +100,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     } catch (err) {
       dispatch({
         type: 'CHAT_ERROR',
-        error: { code: 'NETWORK', message: `Failed to download ${fileName}: ${err instanceof Error ? err.message : 'Unknown error'}`, recoverable: true },
+        error: { code: 'NETWORK', message: `Échec du téléchargement de ${fileName} : ${err instanceof Error ? err.message : 'Erreur inconnue'}`, recoverable: true },
       });
     }
   }, [chatService, dispatch]);
@@ -130,22 +129,26 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     }
   };
 
-  const handleExportConversation = useCallback(() => {
-    const md = exportAsMarkdown(chat.messages, agentName);
-    downloadMarkdown(md);
-  }, [chat.messages, agentName]);
-
   const handleToggleSidebar = useCallback(async () => {
     const willOpen = !state.conversations.sidebarOpen;
     dispatch({ type: 'CONVERSATIONS_TOGGLE_SIDEBAR' });
     if (willOpen) {
       dispatch({ type: 'CONVERSATIONS_LOADING' });
       try {
-        const result = await chatService.listConversations();
+        const result = await chatService.listConversations(CONVERSATIONS_PAGE_SIZE);
         dispatch({ type: 'CONVERSATIONS_SET_LIST', conversations: result.conversations, hasMore: result.hasMore });
       } catch (error) {
         console.error('Failed to load conversations:', error);
         dispatch({ type: 'CONVERSATIONS_SET_LIST', conversations: [], hasMore: false });
+        dispatch({
+          type: 'CHAT_ERROR',
+          error: {
+            code: 'API',
+            message: `Impossible de charger l'historique des conversations : ${error instanceof Error ? error.message : 'erreur inconnue'}`,
+            recoverable: true,
+            action: { label: 'Réessayer', handler: () => handleToggleSidebar() },
+          },
+        });
       }
     }
   }, [state.conversations.sidebarOpen, dispatch, chatService]);
@@ -160,7 +163,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     dispatch({ type: 'CONVERSATIONS_LOADING' });
     try {
       const currentCount = state.conversations.list.length;
-      const result = await chatService.listConversations(currentCount + 20);
+      const result = await chatService.listConversations(currentCount + CONVERSATIONS_PAGE_SIZE);
       // Slice off items we already have and append only new ones
       const newItems = result.conversations.slice(currentCount);
       // If no new items returned (e.g., backend limit cap), stop pagination
@@ -171,6 +174,11 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
       dispatch({ type: 'CONVERSATIONS_LOADING_DONE' });
     }
   }, [state.conversations.list.length, dispatch, chatService]);
+
+  const handleCollapseConversations = useCallback(() => {
+    const keepCount = Math.max(CONVERSATIONS_PAGE_SIZE, state.conversations.list.length - CONVERSATIONS_PAGE_SIZE);
+    dispatch({ type: 'CONVERSATIONS_COLLAPSE', keepCount });
+  }, [state.conversations.list.length, dispatch]);
 
   const handleSelectConversation = useCallback(async (conversationId: string) => {
     try {
@@ -208,6 +216,9 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
 
   return (
     <div className={styles.content}>
+      <div className={styles.brandBar}>
+        <img src={logoDiagLink} alt="DiagLink" className={styles.brandLogo} />
+      </div>
       <div className={styles.mainContent}>
         <ChatInterface 
           messages={chat.messages}
@@ -224,9 +235,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           onCancelStream={handleCancelStream}
           onMcpApproval={handleMcpApproval}
           onToggleSidebar={handleToggleSidebar}
-          onExportConversation={handleExportConversation}
           onRegenerate={handleRegenerate}
-          onEditMessage={handleEditMessage}
           onCancelEdit={handleCancelEdit}
           isEditing={!!chat.editSnapshot}
           onFeedback={handleFeedback}
@@ -254,12 +263,13 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
         onNewChat={handleNewChat}
         onDeleteConversation={handleDeleteConversation}
         onLoadMore={handleLoadMoreConversations}
+        onCollapse={handleCollapseConversations}
+        canCollapse={state.conversations.list.length > CONVERSATIONS_PAGE_SIZE}
       />
       
       <SettingsPanel
         isOpen={isSettingsOpen}
         onOpenChange={setIsSettingsOpen}
-        chatService={chatService}
       />
     </div>
   );

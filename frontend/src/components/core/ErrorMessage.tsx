@@ -68,7 +68,7 @@ export function ErrorMessage({
   // Defensive: ensure message is always a string
   const displayMessage = typeof message === 'string' 
     ? message 
-    : 'An error occurred. Please try again.';
+    : 'Une erreur est survenue. Veuillez réessayer.';
 
   return (
     <MessageBar
@@ -89,7 +89,7 @@ export function ErrorMessage({
               appearance="transparent"
               icon={<DismissRegular />}
               size="small"
-              aria-label="Dismiss error"
+              aria-label="Ignorer l'erreur"
             />
           ) : undefined
         }
@@ -101,7 +101,7 @@ export function ErrorMessage({
             icon={<ArrowClockwiseRegular />}
             size="small"
           >
-            Retry
+            Réessayer
           </Button>
         )}
         {customAction && (

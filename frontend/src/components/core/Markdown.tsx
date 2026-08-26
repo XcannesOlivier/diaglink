@@ -72,9 +72,9 @@ const CodeBlock = memo<CodeBlockProps>(
             size="small"
             onClick={handleCopy}
             className={`${styles.copyButton} ${copied ? styles.copyButtonCopied : ''}`}
-            aria-label={copied ? 'Copied' : 'Copy code'}
+            aria-label={copied ? 'Copié' : 'Copier le code'}
           >
-            {copied ? 'Copied!' : 'Copy'}
+            {copied ? 'Copié !' : 'Copier'}
           </Button>
         </div>
         <SyntaxHighlighter
@@ -158,7 +158,7 @@ function createDownloadableComponents(
           <a
             href="#"
             className={styles.link}
-            aria-label={`Download ${match.label}`}
+            aria-label={`Télécharger ${match.label}`}
             onClick={(e) => { e.preventDefault(); onDownloadFile(match.fileId!, match.label, match.containerId); }}
           >
             {children}

@@ -1,6 +1,6 @@
 import { Suspense, memo } from 'react';
-import { Spinner, Badge, Tooltip } from '@fluentui/react-components';
-import { Attach24Regular, ImageRegular, EditRegular } from '@fluentui/react-icons';
+import { Spinner, Badge } from '@fluentui/react-components';
+import { Attach24Regular, ImageRegular } from '@fluentui/react-icons';
 import { UserMessage as CopilotUserMessage } from '@fluentui-copilot/react-copilot-chat';
 import { Markdown } from '../core/Markdown';
 import { useFormatTimestamp } from '../../hooks/useFormatTimestamp';
@@ -9,19 +9,17 @@ import styles from './UserMessage.module.css';
 
 interface UserMessageProps {
   message: IChatItem;
-  isLastUserMessage?: boolean;
-  onEdit?: (messageId: string, text: string) => void;
 }
 
 function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 Bytes';
+  if (bytes === 0) return '0 o';
   const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const sizes = ['o', 'Ko', 'Mo', 'Go'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 }
 
-function UserMessageComponent({ message, isLastUserMessage, onEdit }: UserMessageProps) {
+function UserMessageComponent({ message }: UserMessageProps) {
   const formatTimestamp = useFormatTimestamp();
   const timestamp = message.more?.time ? formatTimestamp(new Date(message.more.time)) : '';
 
@@ -79,17 +77,6 @@ function UserMessageComponent({ message, isLastUserMessage, onEdit }: UserMessag
           </div>
         )}
     </CopilotUserMessage>
-      {isLastUserMessage && onEdit && (
-        <Tooltip content="Edit message" relationship="label" withArrow>
-          <button
-            className={styles.editTrigger}
-            onClick={() => onEdit(message.id, message.content)}
-            aria-label="Edit message"
-          >
-            <EditRegular fontSize={16} />
-          </button>
-        </Tooltip>
-      )}
     </div>
   );
 }
@@ -98,7 +85,6 @@ export const UserMessage = memo(UserMessageComponent, (prev, next) => {
   return (
     prev.message.id === next.message.id &&
     prev.message.content === next.message.content &&
-    prev.message.attachments?.length === next.message.attachments?.length &&
-    prev.isLastUserMessage === next.isLastUserMessage
+    prev.message.attachments?.length === next.message.attachments?.length
   );
 });

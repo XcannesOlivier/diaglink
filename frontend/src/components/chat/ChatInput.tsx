@@ -5,7 +5,7 @@ import {
   type ImperativeControlPluginRef,
 } from '@fluentui-copilot/react-copilot';
 import { Button, Toast, ToastTitle, Toaster, useId, useToastController, Text, makeStyles, tokens, Menu, MenuTrigger, MenuPopover, MenuList, MenuItem } from '@fluentui/react-components';
-import { Attach24Regular, Stop24Regular, MoreHorizontal24Regular, History24Regular, Settings24Regular, ChatAdd24Regular, ArrowDownload24Regular, Keyboard24Regular } from '@fluentui/react-icons';
+import { Attach24Regular, MoreHorizontal24Regular, History24Regular, Settings24Regular, ChatAdd24Regular } from '@fluentui/react-icons';
 import { FilePreview } from './FilePreview';
 import { VoiceInput } from './VoiceInput';
 import { MessageQueue } from './MessageQueue';
@@ -44,8 +44,6 @@ interface ChatInputProps {
   onOpenSettings?: () => void;
   onNewChat?: () => void;
   onToggleSidebar?: () => void;
-  onExportConversation?: () => void;
-  onShowShortcuts?: () => void;
   hasMessages?: boolean;
   isStreaming?: boolean;
   onCancelStream?: () => void;
@@ -70,12 +68,10 @@ const focusInput = (containerRef: React.RefObject<HTMLDivElement | null>) => {
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSubmit,
   disabled = false,
-  placeholder = "Type your message...",
+  placeholder = "Décrivez votre problème ou posez votre question…",
   onOpenSettings,
   onNewChat,
   onToggleSidebar,
-  onExportConversation,
-  onShowShortcuts,
   hasMessages = false,
   isStreaming = false,
   onCancelStream,
@@ -324,10 +320,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    // Escape to cancel streaming
-    if (event.key === 'Escape' && isStreaming) {
-      event.preventDefault();
-      handleCancelStream();
+    // Escape to cancel streaming or exit edit mode (no visible cancel button anymore)
+    if (event.key === 'Escape') {
+      if (isEditing) {
+        event.preventDefault();
+        onCancelEdit?.();
+      } else if (isStreaming) {
+        event.preventDefault();
+        handleCancelStream();
+      }
     }
   };
 
@@ -349,7 +350,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         />
         <div className={styles.inputWrapper}>
         <ChatInputFluent
-          aria-label="Chat Input"
+          aria-label="Zone de saisie du chat"
           aria-describedby={showCounter ? charCounterId : undefined}
           charactersRemainingMessage={() => ``}
           disabled={disabled}
@@ -363,7 +364,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         {showCounter && (
           <div className={counterStyles.container} id={charCounterId}>
             <Text className={`${counterStyles.text} ${getCounterStyle()}`}>
-              {charCount} / {CHAR_MAX_RECOMMENDED} characters (recommended limit)
+              {charCount} / {CHAR_MAX_RECOMMENDED} caractères (limite recommandée)
             </Text>
           </div>
         )}
@@ -377,16 +378,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               icon={<Attach24Regular />}
               onClick={handleAttachClick}
               disabled={disabled}
-              aria-label="Attach files"
-            />
-            <Button
-              appearance="subtle"
-              icon={<Stop24Regular />}
-              onClick={isEditing ? onCancelEdit : handleCancelStream}
-              disabled={!isStreaming && !isEditing}
-              aria-label={isEditing ? "Cancel edit" : "Cancel response"}
-              title={isEditing ? "Cancel edit" : undefined}
-              className={styles.cancelButton}
+              aria-label="Joindre des fichiers"
             />
             <VoiceInput
               onTranscript={handleVoiceTranscript}
@@ -398,7 +390,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 icon={<ChatAdd24Regular />}
                 onClick={onNewChat}
                 disabled={disabled || !hasMessages}
-                aria-label="New chat"
+                aria-label="Nouvelle conversation"
               />
             )}
             <Menu>
@@ -406,29 +398,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 <Button
                   appearance="subtle"
                   icon={<MoreHorizontal24Regular />}
-                  aria-label="More options"
+                  aria-label="Plus d'options"
                 />
               </MenuTrigger>
               <MenuPopover>
                 <MenuList>
                   {onToggleSidebar && (
                     <MenuItem icon={<History24Regular />} onClick={onToggleSidebar} disabled={disabled}>
-                      Conversation history
-                    </MenuItem>
-                  )}
-                  {onExportConversation && (
-                    <MenuItem icon={<ArrowDownload24Regular />} onClick={onExportConversation} disabled={disabled || !hasMessages}>
-                      Export as Markdown
-                    </MenuItem>
-                  )}
-                  {onShowShortcuts && (
-                    <MenuItem icon={<Keyboard24Regular />} onClick={onShowShortcuts}>
-                      Keyboard shortcuts
+                      Historique des conversations
                     </MenuItem>
                   )}
                   {onOpenSettings && (
                     <MenuItem icon={<Settings24Regular />} onClick={onOpenSettings} disabled={disabled}>
-                      Settings
+                      Paramètres
                     </MenuItem>
                   )}
                 </MenuList>
@@ -444,7 +426,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         style={{ display: 'none' }}
         onChange={handleFileSelect}
         accept="image/*,.pdf,.txt,.md,.csv,.json,.html,.xml"
-        aria-label="Upload files"
+        aria-label="Téléverser des fichiers"
       />
     </div>
     </>

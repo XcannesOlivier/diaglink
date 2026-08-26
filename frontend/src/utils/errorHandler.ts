@@ -40,7 +40,7 @@ export function createAppError(
   // Add retry action for recoverable errors
   if (appError.recoverable && retryHandler) {
     appError.action = {
-      label: 'Retry',
+      label: 'Réessayer',
       handler: retryHandler,
     };
   }

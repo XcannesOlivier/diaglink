@@ -19,13 +19,13 @@ export const BuiltWithBadge: React.FC<BuiltWithBadgeProps> = ({ className }) => 
       className={`${styles.badge} ${className || ''}`}
       onClick={handleClick}
       type="button"
-      aria-label="Built with Microsoft Foundry"
+      aria-label="Créé avec Microsoft Foundry"
     >
       <span className={styles.logo}>
         <AIFoundryLogo />
       </span>
       <Caption1Strong className={styles.text}>
-        Build & deploy AI agents with
+        Propulsé par
       </Caption1Strong>
       <Caption1Strong className={styles.brand}>
         Microsoft Foundry

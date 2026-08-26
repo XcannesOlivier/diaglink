@@ -554,6 +554,17 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         },
       };
 
+    case 'CONVERSATIONS_COLLAPSE':
+      return {
+        ...state,
+        conversations: {
+          ...state.conversations,
+          list: state.conversations.list.slice(0, action.keepCount),
+          // Items were hidden, not deleted server-side, so more can be reloaded.
+          hasMore: true,
+        },
+      };
+
     default:
       // TypeScript ensures all actions are handled (exhaustiveness check)
       return state;

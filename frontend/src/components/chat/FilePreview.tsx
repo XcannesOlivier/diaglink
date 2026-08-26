@@ -208,9 +208,9 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ files, onRemove, disab
   }, [files]);
 
   const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
+    if (bytes === 0) return '0 o';
     const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const sizes = ['o', 'Ko', 'Mo', 'Go'];
     const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
     return `${Math.round(bytes / Math.pow(k, i) * 10) / 10} ${sizes[i]}`;
   };
@@ -241,7 +241,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ files, onRemove, disab
   if (files.length === 0) return null;
 
   return (
-    <div className={styles.container} role="list" aria-label="Attached files">
+    <div className={styles.container} role="list" aria-label="Fichiers joints">
       {files.map((file, index) => {
         const fileKey = getFileKey(file);
         const mimeType = getEffectiveMimeType(file);
@@ -282,7 +282,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ files, onRemove, disab
               icon={<Dismiss24Regular />}
               onClick={() => onRemove(index)}
               disabled={disabled}
-              aria-label={`Remove ${file.name}`}
+              aria-label={`Supprimer ${file.name}`}
               className={styles.removeButton}
             />
           </div>

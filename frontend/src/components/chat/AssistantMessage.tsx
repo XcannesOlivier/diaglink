@@ -4,23 +4,23 @@ import { CopilotMessage } from '@fluentui-copilot/react-copilot-chat';
 import { DocumentRegular, GlobeRegular, FolderRegular, OpenRegular, ArrowSyncRegular } from '@fluentui/react-icons';
 import { Markdown } from '../core/Markdown';
 import { AgentIcon } from '../core/AgentIcon';
-import { UsageInfo } from './UsageInfo';
 import { MessageActions } from './MessageActions';
 import { useFormatTimestamp } from '../../hooks/useFormatTimestamp';
 import { parseContentWithCitations } from '../../utils/citationParser';
+import { extractTrailingQuestions } from '../../utils/extractTrailingQuestions';
 import type { IChatItem, IAnnotation } from '../../types/chat';
 import styles from './AssistantMessage.module.css';
 
 function getToolUseLabel(toolName: string): string {
   switch (toolName) {
     case 'file_search':
-      return 'Searching files\u2026';
+      return 'Recherche de fichiers\u2026';
     case 'code_interpreter':
-      return 'Running code\u2026';
+      return 'Exécution du code\u2026';
     case 'function_call':
-      return 'Calling tool\u2026';
+      return "Appel de l'outil\u2026";
     default:
-      return 'Working\u2026';
+      return 'Traitement\u2026';
   }
 }
 
@@ -29,9 +29,11 @@ interface AssistantMessageProps {
   agentName?: string;
   agentLogo?: string;
   isStreaming?: boolean;
+  disabled?: boolean;
   onRegenerate?: () => void;
   onFeedback?: (messageId: string, rating: 'positive' | 'negative') => void;
   onDownloadFile?: (fileId: string, fileName: string, containerId?: string) => void;
+  onSuggestedPromptClick?: (prompt: string) => void;
 }
 
 function AssistantMessageComponent({ 
@@ -39,9 +41,11 @@ function AssistantMessageComponent({
   agentName = 'AI Assistant',
   agentLogo,
   isStreaming = false,
+  disabled = false,
   onRegenerate,
   onFeedback,
   onDownloadFile,
+  onSuggestedPromptClick,
 }: AssistantMessageProps) {
   const formatTimestamp = useFormatTimestamp();
   const timestamp = message.more?.time ? formatTimestamp(new Date(message.more.time)) : '';
@@ -56,6 +60,19 @@ function AssistantMessageComponent({
     if (!hasAnnotations) return null;
     return parseContentWithCitations(message.content, message.annotations);
   }, [message.content, message.annotations, hasAnnotations]);
+
+  // Only extract once the response is complete, so prompts don't flicker while streaming.
+  // The trailing question block is stripped from the visible text to avoid duplicating it below as clickable chips.
+  const { visibleContent, suggestedPrompts } = useMemo(() => {
+    if (isStreaming || !message.content) {
+      return { visibleContent: message.content, suggestedPrompts: [] as string[] };
+    }
+    const { questions, contentWithoutQuestions } = extractTrailingQuestions(message.content, 3);
+    return {
+      visibleContent: questions.length > 0 ? contentWithoutQuestions : message.content,
+      suggestedPrompts: questions,
+    };
+  }, [message.content, isStreaming]);
 
   // Get unique annotations with consistent indices
   // If the parser found citations (inline placeholders), use those
@@ -117,8 +134,8 @@ function AssistantMessageComponent({
 
     const citationNumber = index;
     const tooltipContent = annotation.quote 
-      ? `${annotation.label}${count > 1 ? ` (referenced ${count} times)` : ''}\n\n"${annotation.quote.slice(0, 200)}${annotation.quote.length > 200 ? '...' : ''}"`
-      : `${annotation.label}${count > 1 ? ` (referenced ${count} times)` : ''}`;
+      ? `${annotation.label}${count > 1 ? ` (référencé ${count} fois)` : ''}\n\n"${annotation.quote.slice(0, 200)}${annotation.quote.length > 200 ? '...' : ''}"`
+      : `${annotation.label}${count > 1 ? ` (référencé ${count} fois)` : ''}`;
 
     const hasFileDownload = (annotation.type === 'file_path' || annotation.type === 'container_file_citation') && annotation.fileId;
     const isClickable = (annotation.type === 'uri_citation' && annotation.url) || hasFileDownload;
@@ -152,7 +169,7 @@ function AssistantMessageComponent({
           onClick={isClickable ? handleClick : undefined}
           onKeyDown={isClickable ? handleKeyDown : undefined}
           role={isClickable ? 'button' : undefined}
-          aria-label={isClickable ? (hasFileDownload ? `Download ${annotation.label}` : `Open ${annotation.label}`) : undefined}
+          aria-label={isClickable ? (hasFileDownload ? `Télécharger ${annotation.label}` : `Ouvrir ${annotation.label}`) : undefined}
           tabIndex={isClickable ? 0 : undefined}
         >
           <span className={styles.citationNumber}>{citationNumber}</span>
@@ -178,7 +195,7 @@ function AssistantMessageComponent({
       name={agentName}
       loadingState="none"
       className={styles.copilotMessage}
-      disclaimer={<span>AI-generated content may be incorrect</span>}
+      disclaimer={<span>Le contenu généré par l'IA peut être incorrect</span>}
       footnote={
         <div className={styles.footnoteContainer}>
           {hasAnnotations && !isStreaming && (
@@ -189,12 +206,6 @@ function AssistantMessageComponent({
           <div className={styles.metadataRow}>
             <div className={styles.metadataLeft}>
               {timestamp && <span className={styles.timestamp}>{timestamp}</span>}
-              {message.more?.usage && (
-                <UsageInfo 
-                  info={message.more.usage} 
-                  duration={message.duration} 
-                />
-              )}
             </div>
             {!isStreaming && message.content && onRegenerate && (
               <MessageActions
@@ -214,7 +225,7 @@ function AssistantMessageComponent({
             <Text size={200}>{getToolUseLabel(message.activeToolUse)}</Text>
           </div>
         ) : (
-          <div className={styles.loadingDots} role="status" aria-label="Assistant is thinking">
+          <div className={styles.loadingDots} role="status" aria-label="L'assistant réfléchit">
             <span></span>
             <span></span>
             <span></span>
@@ -224,14 +235,14 @@ function AssistantMessageComponent({
         <div className={styles.retryingState}>
           <ArrowSyncRegular className={styles.retryingIcon} />
           <Text size={200}>
-            Retrying ({message.retryAttempt}/{message.maxRetries})...
+            Nouvelle tentative ({message.retryAttempt}/{message.maxRetries})...
           </Text>
         </div>
       ) : (
         <>
           <Suspense fallback={<Spinner size="small" />}>
             <Markdown 
-              content={message.content} 
+              content={visibleContent} 
               annotations={message.annotations}
               onCitationClick={handleCitationClick}
               onDownloadFile={onDownloadFile}
@@ -241,6 +252,21 @@ function AssistantMessageComponent({
             <div className={styles.toolUseIndicator} role="status" aria-label={getToolUseLabel(message.activeToolUse)}>
               <Spinner size="tiny" />
               <Text size={200}>{getToolUseLabel(message.activeToolUse)}</Text>
+            </div>
+          )}
+          {suggestedPrompts.length > 0 && onSuggestedPromptClick && (
+            <div className={styles.suggestedPrompts}>
+              {suggestedPrompts.map((prompt, index) => (
+                <button
+                  key={`suggested-${message.id}-${index}`}
+                  type="button"
+                  className={styles.suggestedPromptChip}
+                  onClick={() => onSuggestedPromptClick(prompt)}
+                  disabled={disabled}
+                >
+                  {prompt}
+                </button>
+              ))}
             </div>
           )}
         </>
@@ -254,6 +280,7 @@ export const AssistantMessage = memo(AssistantMessageComponent, (prev, next) => 
     prev.message.id === next.message.id &&
     prev.message.content === next.message.content &&
     prev.isStreaming === next.isStreaming &&
+    prev.disabled === next.disabled &&
     prev.agentLogo === next.agentLogo &&
     prev.message.more?.usage === next.message.more?.usage &&
     prev.message.annotations?.length === next.message.annotations?.length &&

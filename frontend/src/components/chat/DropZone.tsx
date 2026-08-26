@@ -12,8 +12,8 @@ export const DropZone: React.FC<DropZoneProps> = ({ visible }) => {
     <div className={styles.overlay} role="status" aria-live="polite">
       <div className={styles.dropArea}>
         <ArrowUploadRegular className={styles.icon} aria-hidden="true" />
-        <span className={styles.label}>Drop files here</span>
-        <span className={styles.hint}>Images, PDFs, and text files supported</span>
+        <span className={styles.label}>Déposez les fichiers ici</span>
+        <span className={styles.hint}>Images, PDF et fichiers texte pris en charge</span>
       </div>
     </div>
   );

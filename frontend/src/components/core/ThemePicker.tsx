@@ -16,17 +16,12 @@ export function ThemePicker() {
       {
         key: 'Light',
         value: 'Light',
-        text: 'Light',
+        text: 'Clair',
       },
       {
         key: 'Dark',
         value: 'Dark',
-        text: 'Dark',
-      },
-      {
-        key: 'System',
-        value: 'System',
-        text: 'System',
+        text: 'Sombre',
       },
     ],
     []
@@ -35,7 +30,7 @@ export function ThemePicker() {
   const selectedThemeText = useMemo(
     () =>
       options.find((opt) => opt.key === (savedTheme ?? 'Light'))?.text ??
-      'Light',
+      'Clair',
     [savedTheme, options]
   );
 
@@ -46,7 +41,7 @@ export function ThemePicker() {
 
   return (
     <>
-      <Label htmlFor="ThemePickerDropdown">Theme</Label>
+      <Label htmlFor="ThemePickerDropdown">Thème</Label>
       <Dropdown
         id="ThemePickerDropdown"
         onOptionSelect={(_, { optionValue }) => {

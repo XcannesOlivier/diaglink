@@ -27,7 +27,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
     if (!SpeechRecognitionCtor) {
       dispatchToast(
         <Toast>
-          <ToastTitle>Voice input not supported in this browser</ToastTitle>
+          <ToastTitle>La saisie vocale n'est pas prise en charge par ce navigateur</ToastTitle>
         </Toast>,
         { intent: 'warning' },
       );
@@ -44,7 +44,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
     const recognition = new SpeechRecognitionCtor();
     recognition.continuous = false;
     recognition.interimResults = false;
-    recognition.lang = 'en-US';
+    recognition.lang = 'fr-FR';
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       const transcript = event.results?.[0]?.[0]?.transcript;
@@ -61,9 +61,9 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
       setIsListening(false);
 
       const msg =
-        event.error === 'not-allowed' ? 'Microphone access denied. Check browser permissions.' :
-        event.error === 'no-speech'   ? 'No speech detected. Please try again.' :
-        event.error === 'network'     ? 'Network error during voice input.' :
+        event.error === 'not-allowed' ? 'Accès au microphone refusé. Vérifiez les autorisations du navigateur.' :
+        event.error === 'no-speech'   ? 'Aucune parole détectée. Veuillez réessayer.' :
+        event.error === 'network'     ? 'Erreur réseau lors de la saisie vocale.' :
         undefined;
 
       if (msg) {
@@ -87,7 +87,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
         icon={isListening ? <MicOffRegular /> : <MicRegular />}
         onClick={toggleListening}
         disabled={disabled}
-        aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+        aria-label={isListening ? 'Arrêter la saisie vocale' : 'Démarrer la saisie vocale'}
         aria-pressed={isListening}
         className={`${styles.voiceButton} ${isListening ? styles.listening : ''}`}
       >

@@ -856,15 +856,14 @@ public class AgentFrameworkService : IDisposable
         {
             _logger.LogInformation("Listing conversations (limit={Limit})", limit);
 
-            // Pin to the same resolved version metadata/streaming use.
-            var resolvedAgent = await GetAgentAsync(cancellationToken);
-            var resolvedVersion = _configuredAgentVersion ?? resolvedAgent.Version;
-
             var conversations = new List<ConversationSummary>();
             // Fetch limit+1 to detect if more conversations exist beyond the requested page
             var fetchLimit = limit + 1;
+            // No agent filter: ProjectConversationCreationOptions doesn't support tagging a conversation
+            // with an agent at creation time, so GetProjectConversationsAsync(AgentReference) never matches
+            // conversations created by this app — list all conversations in the project instead.
             await foreach (var conv in GetProjectClient().ProjectOpenAIClient.GetProjectConversationsClient().GetProjectConversationsAsync(
-                new AgentReference(_agentId, resolvedVersion), cancellationToken: cancellationToken))
+                limit: fetchLimit, cancellationToken: cancellationToken))
             {
                 conversations.Add(new ConversationSummary
                 {

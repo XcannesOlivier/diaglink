@@ -20,17 +20,17 @@ interface Shortcut {
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
 const shortcuts: Shortcut[] = [
-  { keys: [[isMac ? '⌘' : 'Ctrl', 'N']], description: 'New chat' },
-  { keys: [['Escape']], description: 'Cancel streaming' },
-  { keys: [['Enter']], description: 'Send message' },
-  { keys: [['Shift', 'Enter']], description: 'New line' },
+  { keys: [[isMac ? '⌘' : 'Ctrl', 'N']], description: 'Nouvelle conversation' },
+  { keys: [['Escape']], description: 'Annuler la génération' },
+  { keys: [['Enter']], description: 'Envoyer le message' },
+  { keys: [['Shift', 'Enter']], description: 'Nouvelle ligne' },
 ];
 
 export const KeyboardShortcuts: React.FC<KeyboardShortcutsProps> = ({ open, onOpenChange }) => {
   return (
     <Dialog open={open} onOpenChange={(_e, data) => onOpenChange(data.open)}>
       <DialogSurface className={styles.backdrop}>
-        <DialogTitle className={styles.title}>Keyboard Shortcuts</DialogTitle>
+        <DialogTitle className={styles.title}>Raccourcis clavier</DialogTitle>
         <DialogBody>
           <DialogContent>
             <div className={styles.grid}>

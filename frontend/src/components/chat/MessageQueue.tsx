@@ -16,8 +16,8 @@ export const MessageQueue: React.FC<MessageQueueProps> = ({ messages, onRemove }
   if (messages.length === 0) return null;
 
   return (
-    <div className={styles.queue} role="list" aria-label="Queued messages">
-      <span className={styles.label}>Queued:</span>
+    <div className={styles.queue} role="list" aria-label="Messages en attente">
+      <span className={styles.label}>En attente :</span>
       {messages.map((msg, i) => (
         <span key={i} role="listitem" className={styles.chip}>
           {msg.files && msg.files.length > 0 && <Attach24Regular style={{ fontSize: 12 }} />}
@@ -27,7 +27,7 @@ export const MessageQueue: React.FC<MessageQueueProps> = ({ messages, onRemove }
             icon={<DismissRegular />}
             size="small"
             onClick={() => onRemove(i)}
-            aria-label="Remove queued message"
+            aria-label="Supprimer le message en attente"
             className={styles.dismissButton}
           />
         </span>

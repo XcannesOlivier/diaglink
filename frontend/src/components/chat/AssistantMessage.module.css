@@ -203,6 +203,42 @@
   margin-left: 4px;
 }
 
+/* Suggested follow-up prompts extracted from the end of the response */
+.suggestedPrompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.suggestedPromptChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 16px;
+  background-color: var(--colorNeutralBackground1);
+  border: 1px solid var(--colorNeutralStroke1);
+  color: var(--colorBrandForeground1);
+  font-size: 13px;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.suggestedPromptChip:hover:not(:disabled) {
+  border-color: var(--colorBrandStroke1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.suggestedPromptChip:focus-visible {
+  outline: 2px solid var(--colorBrandStroke1);
+  outline-offset: 1px;
+}
+
+.suggestedPromptChip:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 /* Footnote layout */
 .footnoteContainer {
   display: flex;

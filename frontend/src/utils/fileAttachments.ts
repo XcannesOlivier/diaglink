@@ -72,16 +72,16 @@ export function validateImageFile(file: File): FileValidationResult {
   const mimeType = getEffectiveMimeType(file);
   
   if (!mimeType.startsWith('image/')) {
-    return { valid: false, error: `"${file.name}" is not an image file` };
+    return { valid: false, error: `"${file.name}" n'est pas un fichier image` };
   }
 
   if (!ALLOWED_IMAGE_TYPES.includes(mimeType)) {
-    return { valid: false, error: `"${file.name}" format not supported. Use PNG, JPEG, GIF, or WebP` };
+    return { valid: false, error: `Format de "${file.name}" non pris en charge. Utilisez PNG, JPEG, GIF ou WebP` };
   }
 
   if (file.size > MAX_FILE_SIZE) {
     const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-    return { valid: false, error: `"${file.name}" is ${sizeMB}MB. Maximum file size is 5MB` };
+    return { valid: false, error: `"${file.name}" fait ${sizeMB} Mo. La taille maximale est de 5 Mo` };
   }
 
   return { valid: true };
@@ -99,13 +99,13 @@ export function validateDocumentFile(file: File): FileValidationResult {
   if (!ALLOWED_DOCUMENT_TYPES.includes(mimeType)) {
     return { 
       valid: false, 
-      error: `"${file.name}" format not supported. Use PDF, TXT, MD, CSV, JSON, HTML, or XML` 
+      error: `Format de "${file.name}" non pris en charge. Utilisez PDF, TXT, MD, CSV, JSON, HTML ou XML` 
     };
   }
 
   if (file.size > MAX_DOCUMENT_SIZE) {
     const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-    return { valid: false, error: `"${file.name}" is ${sizeMB}MB. Maximum file size is 20MB` };
+    return { valid: false, error: `"${file.name}" fait ${sizeMB} Mo. La taille maximale est de 20 Mo` };
   }
 
   return { valid: true };
@@ -127,7 +127,7 @@ export function validateFile(file: File): FileValidationResult {
   } else {
     return { 
       valid: false, 
-      error: `"${file.name}" is not a supported file type` 
+      error: `"${file.name}" n'est pas un type de fichier pris en charge` 
     };
   }
 }
@@ -145,7 +145,7 @@ export function validateFileCount(files: File[], currentFileCount: number = 0): 
   if (totalCount > MAX_FILE_COUNT) {
     return { 
       valid: false, 
-      error: `Maximum ${MAX_FILE_COUNT} files allowed. You have ${currentFileCount} attached and are trying to add ${files.length} more` 
+      error: `Maximum ${MAX_FILE_COUNT} fichiers autorisés. Vous en avez déjà ${currentFileCount} joints et essayez d'en ajouter ${files.length} de plus` 
     };
   }
 
