@@ -23,6 +23,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  box-sizing: border-box;
 }
 
 /* Messages wrapper - constrain max width for readability */
@@ -131,7 +132,32 @@
 
 /* Built with badge - centered under input */
 .builtWithBadge {
-  padding-bottom: 0.5rem;
+  padding-bottom: 0;
+}
+
+/* Row that shows "Powered by" + Foundry + DiagLink logo */
+.poweredRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start; /* align left */
+  gap: 12px;
+  padding: 0.5rem 1rem 0.5rem 1rem; /* left/right padding, matches chat input spacing */
+}
+
+.diagLinkLogo {
+  height: 49px;
+  width: auto;
+  opacity: 0.98;
+}
+
+@media (max-width: 1000px) {
+  .poweredRow {
+    display: none;
+  }
+
+  .diagLinkLogo {
+    height: 30px;
+  }
 }
 
 .editBanner {
@@ -155,4 +181,16 @@
 
 .undoButton:hover {
   color: var(--colorBrandForeground2);
+}
+
+/* Mobile: full-width chat, reduced side padding so it stays readable at 320px */
+@media (max-width: 768px) {
+  .messagesContainer {
+    padding: 1rem 0.75rem;
+  }
+
+  .messagesWrapper,
+  .errorWrapper {
+    max-width: 100%;
+  }
 }

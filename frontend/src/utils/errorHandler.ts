@@ -52,6 +52,7 @@ export function createAppError(
  * Determine error code from HTTP response
  */
 export function getErrorCodeFromResponse(response: Response): ErrorCode {
+  if (response.status === 402) return 'AiCreditExhausted';
   // Match Azure sample pattern: check status codes explicitly
   if (response.status === 401 || response.status === 403) {
     return 'AUTH';
@@ -173,3 +174,4 @@ export async function retryWithBackoff<T>(
   
   throw lastError;
 }
+

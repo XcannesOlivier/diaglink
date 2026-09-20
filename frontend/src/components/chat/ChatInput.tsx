@@ -4,9 +4,10 @@ import {
   ImperativeControlPlugin,
   type ImperativeControlPluginRef,
 } from '@fluentui-copilot/react-copilot';
-import { Button, Toast, ToastTitle, Toaster, useId, useToastController, Text, makeStyles, tokens, Menu, MenuTrigger, MenuPopover, MenuList, MenuItem } from '@fluentui/react-components';
-import { Attach24Regular, MoreHorizontal24Regular, History24Regular, Settings24Regular, ChatAdd24Regular } from '@fluentui/react-icons';
+import { Button, Tooltip, Toast, ToastTitle, Toaster, useId, useToastController, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Attach24Regular, History24Regular, Navigation24Regular, ChatAdd24Regular } from '@fluentui/react-icons';
 import { FilePreview } from './FilePreview';
+import { MachineDocuments } from './MachineDocuments';
 import { VoiceInput } from './VoiceInput';
 import { MessageQueue } from './MessageQueue';
 import { validateFile, validateFileCount } from '../../utils/fileAttachments';
@@ -41,9 +42,9 @@ interface ChatInputProps {
   onSubmit: (value: string, files?: File[]) => void;
   disabled?: boolean;
   placeholder?: string;
-  onOpenSettings?: () => void;
   onNewChat?: () => void;
   onToggleSidebar?: () => void;
+  onOpenMobileMenu?: () => void;
   hasMessages?: boolean;
   isStreaming?: boolean;
   onCancelStream?: () => void;
@@ -56,6 +57,8 @@ interface ChatInputProps {
   onDequeueMessage?: (index: number) => void;
   droppedFiles?: File[];
   onDroppedFilesConsumed?: () => void;
+  onChangeMachine?: () => void;
+  machineId?: string;
 }
 
 const focusInput = (containerRef: React.RefObject<HTMLDivElement | null>) => {
@@ -65,13 +68,33 @@ const focusInput = (containerRef: React.RefObject<HTMLDivElement | null>) => {
   }
 };
 
+const blurInputOnCompactScreens = (
+  containerRef: React.RefObject<HTMLDivElement | null>
+) => {
+  if (!window.matchMedia('(max-width: 1000px)').matches) {
+    return;
+  }
+
+  setTimeout(() => {
+    const editableDiv = containerRef.current?.querySelector(
+      '[contenteditable="true"]'
+    ) as HTMLElement | null;
+
+    editableDiv?.blur();
+
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  }, 100);
+};
+
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSubmit,
   disabled = false,
   placeholder = "Décrivez votre problème ou posez votre question…",
-  onOpenSettings,
   onNewChat,
   onToggleSidebar,
+  onOpenMobileMenu,
   hasMessages = false,
   isStreaming = false,
   onCancelStream,
@@ -84,6 +107,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onDequeueMessage,
   droppedFiles,
   onDroppedFilesConsumed,
+  onChangeMachine,
+  machineId,
 }) => {
   const [inputText, setInputText] = useState<string>("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -117,7 +142,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   // Restore focus after message is sent (when status changes from disabled back to enabled)
   useEffect(() => {
-    if (!disabled && !isStreaming) {
+    if (!disabled && !isStreaming && !window.matchMedia('(max-width: 1000px)').matches) {
       // Small delay to allow state to settle
       const timer = setTimeout(() => focusInput(inputContainerRef), 50);
       return () => clearTimeout(timer);
@@ -208,6 +233,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       setInputText("");
       setSelectedFiles([]);
       controlRef.current?.setInputText("");
+      blurInputOnCompactScreens(inputContainerRef);
     }
   };
 
@@ -373,49 +399,61 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         )}
         <div className={styles.buttonRow}>
           <div className={styles.actionButtons}>
-            <Button
-              appearance="subtle"
-              icon={<Attach24Regular />}
-              onClick={handleAttachClick}
-              disabled={disabled}
-              aria-label="Joindre des fichiers"
-            />
+            {onChangeMachine && (
+              <Button
+                size="small"
+                appearance="secondary"
+                onClick={onChangeMachine}
+              >
+                <span className={styles.changeMachineDesktopLabel}>Changer de machine</span>
+                <span className={styles.changeMachineCompactLabel}>Machines</span>
+              </Button>
+            )}
+            <MachineDocuments key={machineId ?? 'no-machine'} machineId={machineId} />
+            <Tooltip content="Joindre un fichier" relationship="label" withArrow>
+              <Button
+                appearance="subtle"
+                icon={<Attach24Regular />}
+                onClick={handleAttachClick}
+                disabled={disabled}
+                aria-label="Joindre un fichier"
+              />
+            </Tooltip>
             <VoiceInput
               onTranscript={handleVoiceTranscript}
               disabled={disabled}
             />
             {onNewChat && (
-              <Button
-                appearance="subtle"
-                icon={<ChatAdd24Regular />}
-                onClick={onNewChat}
-                disabled={disabled || !hasMessages}
-                aria-label="Nouvelle conversation"
-              />
-            )}
-            <Menu>
-              <MenuTrigger disableButtonEnhancement>
+              <Tooltip content="Nouvelle conversation" relationship="label" withArrow>
                 <Button
                   appearance="subtle"
-                  icon={<MoreHorizontal24Regular />}
-                  aria-label="Plus d'options"
+                  icon={<ChatAdd24Regular />}
+                  onClick={onNewChat}
+                  disabled={disabled || !hasMessages}
+                  aria-label="Nouvelle conversation"
                 />
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  {onToggleSidebar && (
-                    <MenuItem icon={<History24Regular />} onClick={onToggleSidebar} disabled={disabled}>
-                      Historique des conversations
-                    </MenuItem>
-                  )}
-                  {onOpenSettings && (
-                    <MenuItem icon={<Settings24Regular />} onClick={onOpenSettings} disabled={disabled}>
-                      Paramètres
-                    </MenuItem>
-                  )}
-                </MenuList>
-              </MenuPopover>
-            </Menu>
+              </Tooltip>
+            )}
+            {onToggleSidebar && (
+              <Tooltip content="Historique des conversations" relationship="label" withArrow>
+                <Button
+                  appearance="subtle"
+                  icon={<History24Regular />}
+                  onClick={onToggleSidebar}
+                  disabled={disabled}
+                  aria-label="Historique des conversations"
+                />
+              </Tooltip>
+            )}
+            {onOpenMobileMenu && (
+              <Button
+                className={styles.mobileMenuButton}
+                appearance="subtle"
+                icon={<Navigation24Regular />}
+                onClick={onOpenMobileMenu}
+                aria-label="Ouvrir le menu"
+              />
+            )}
           </div>
         </div>
       </div>

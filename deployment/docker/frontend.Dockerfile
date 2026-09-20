@@ -49,7 +49,7 @@ COPY backend/ ./backend/
 RUN dotnet publish backend/WebApp.Api/WebApp.Api.csproj -c Release -o /app/publish
 
 # Stage 3: Runtime - .NET API serving both backend and frontend static files
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
 
 WORKDIR /app
 

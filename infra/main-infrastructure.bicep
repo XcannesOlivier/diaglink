@@ -81,7 +81,31 @@ resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-
     isolationScope: 'Regional'
   }
 }
+module foundryRoleAssignment './foundry-role-assignment.bicep' = {
+  name: 'foundry-role-assignment'
+  scope: resourceGroup('rg-ai-knowledge-dev')
+  params: {
+    principalId: managedIdentity.properties.principalId
+    foundryAccountName: 'diaglink-foundry-prod'
+  }
+}
 
 output managedIdentityId string = managedIdentity.id
 output managedIdentityPrincipalId string = managedIdentity.properties.principalId
 output managedIdentityClientId string = managedIdentity.properties.clientId
+
+// Azure Communication Services Email — OTP login codes (Entra ID auth via existing Managed Identity, no keys)
+module communicationEmail './core/host/communication-email.bicep' = {
+  name: 'communication-email'
+  params: {
+    resourceToken: resourceToken
+    dataLocation: 'Europe'
+    tags: allTags
+    managedIdentityPrincipalId: managedIdentity.properties.principalId
+  }
+}
+
+output acsEndpoint string = communicationEmail.outputs.acsEndpoint
+output communicationServiceId string = communicationEmail.outputs.communicationServiceId
+output emailServiceId string = communicationEmail.outputs.emailServiceId
+output domainId string = communicationEmail.outputs.domainId

@@ -37,7 +37,7 @@ interface ConversationSidebarProps {
 
 const useStyles = makeStyles({
   drawer: {
-    width: '320px',
+    width: 'min(90vw, 360px)',
   },
   newChatButton: {
     width: '100%',

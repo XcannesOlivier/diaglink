@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Button, Toast, ToastTitle, Toaster, useId, useToastController } from '@fluentui/react-components';
+import { Button, Tooltip, Toast, ToastTitle, Toaster, useId, useToastController } from '@fluentui/react-components';
 import { MicRegular, MicOffRegular } from '@fluentui/react-icons';
 import styles from './VoiceInput.module.css';
 
@@ -82,17 +82,19 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
   return (
     <>
       <Toaster toasterId={toasterId} position="top-end" />
-      <Button
-        appearance="subtle"
-        icon={isListening ? <MicOffRegular /> : <MicRegular />}
-        onClick={toggleListening}
-        disabled={disabled}
-        aria-label={isListening ? 'Arrêter la saisie vocale' : 'Démarrer la saisie vocale'}
-        aria-pressed={isListening}
-        className={`${styles.voiceButton} ${isListening ? styles.listening : ''}`}
-      >
-        {isListening && <span className={styles.pulsingDot} />}
-      </Button>
+      <Tooltip content="Microphone" relationship="label" withArrow>
+        <Button
+          appearance="subtle"
+          icon={isListening ? <MicOffRegular /> : <MicRegular />}
+          onClick={toggleListening}
+          disabled={disabled}
+          aria-label="Microphone"
+          aria-pressed={isListening}
+          className={`${styles.voiceButton} ${isListening ? styles.listening : ''}`}
+        >
+          {isListening && <span className={styles.pulsingDot} />}
+        </Button>
+      </Tooltip>
     </>
   );
 };

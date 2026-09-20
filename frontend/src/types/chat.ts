@@ -26,9 +26,14 @@ export interface IMcpApprovalRequest {
 
 export interface IUsageInfo {
   duration?: number;           // Response time in milliseconds
-  promptTokens: number;        // Input token count
-  completionTokens: number;    // Output token count
-  totalTokens?: number;        // Total token count
+  promptTokens: number | null; // null means unknown, not zero
+  completionTokens: number | null;
+  totalTokens?: number | null;
+  available?: boolean;
+  completed?: boolean;
+  model?: string | null;
+  modelSource?: string | null;
+  agentVersion?: string | null;
 }
 
 export interface IFileAttachment {

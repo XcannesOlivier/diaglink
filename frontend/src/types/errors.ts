@@ -8,6 +8,7 @@ export type ErrorCode =
   | 'STREAM'       // SSE streaming errors
   | 'SERVER'       // 400/500 server response errors
   | 'API'          // REST API errors (conversation management, etc.)
+  | 'AiCreditExhausted'
   | 'UNKNOWN';     // Unclassified errors
 
 export interface AppError {
@@ -25,6 +26,7 @@ export interface AppError {
  * Error messages for different error codes
  */
 export const ERROR_MESSAGES: Record<ErrorCode, string> = {
+  AiCreditExhausted: 'Crédit IA épuisé. Rechargez le portefeuille de votre entreprise pour continuer.',
   NETWORK: 'Impossible de se connecter au serveur. Vérifiez votre connexion internet et réessayez.',
   AUTH: 'Votre session a expiré. Veuillez vous reconnecter pour continuer.',
   STREAM: 'La réponse a été interrompue. Cliquez sur Réessayer pour poursuivre la conversation.',
@@ -37,6 +39,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
  * Detailed user-friendly messages with recovery hints
  */
 export const DETAILED_ERROR_MESSAGES: Record<ErrorCode, { title: string; description: string; hint: string }> = {
+  AiCreditExhausted: { title: 'Crédit IA épuisé', description: 'Le crédit IA disponible est épuisé.', hint: 'Rechargez le portefeuille de votre entreprise, puis renvoyez votre message. L’historique reste accessible.' },
   NETWORK: {
     title: 'Connexion perdue',
     description: 'Impossible de joindre le serveur.',
@@ -75,7 +78,7 @@ export const DETAILED_ERROR_MESSAGES: Record<ErrorCode, { title: string; descrip
 export function isRecoverableError(code: ErrorCode): boolean {
   // AUTH requires re-login, UNKNOWN may indicate critical failure
   // NETWORK, STREAM, and SERVER errors are typically recoverable with retry
-  return code !== 'AUTH' && code !== 'UNKNOWN';
+  return code !== 'AiCreditExhausted' && code !== 'AUTH' && code !== 'UNKNOWN';
 }
 
 /**
@@ -90,3 +93,4 @@ export function isAppError(error: unknown): error is AppError {
     'recoverable' in error
   );
 }
+

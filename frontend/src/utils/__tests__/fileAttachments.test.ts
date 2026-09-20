@@ -85,7 +85,7 @@ describe('validateImageFile', () => {
       const result = validateImageFile(file);
 
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('5MB');
+      expect(result.error).toContain('5 Mo');
     });
 
     it('accepts images exactly at 5MB limit', () => {
@@ -101,7 +101,7 @@ describe('validateImageFile', () => {
       const result = validateImageFile(file);
 
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('not an image');
+      expect(result.error).toContain("n'est pas un fichier image");
     });
 
     it('rejects unsupported image formats', () => {
@@ -109,7 +109,7 @@ describe('validateImageFile', () => {
       const result = validateImageFile(file);
 
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('not supported');
+      expect(result.error).toContain('non pris en charge');
     });
   });
 });
@@ -165,7 +165,7 @@ describe('validateDocumentFile', () => {
       const result = validateDocumentFile(file);
 
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('20MB');
+      expect(result.error).toContain('20 Mo');
     });
   });
 
@@ -175,7 +175,7 @@ describe('validateDocumentFile', () => {
       const result = validateDocumentFile(file);
 
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('not supported');
+      expect(result.error).toContain('non pris en charge');
     });
   });
 });
@@ -198,7 +198,7 @@ describe('validateFile', () => {
     const result = validateFile(file);
 
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('not a supported file type');
+    expect(result.error).toContain("n'est pas un type de fichier pris en charge");
   });
 });
 
@@ -226,7 +226,7 @@ describe('validateFileCount', () => {
     const result = validateFileCount(files, 9);
 
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('Maximum 10 files');
+    expect(result.error).toContain('Maximum 10 fichiers');
   });
 
   it('provides helpful error message with counts', () => {
@@ -237,8 +237,8 @@ describe('validateFileCount', () => {
     ];
     const result = validateFileCount(files, 8);
 
-    expect(result.error).toContain('8 attached');
-    expect(result.error).toContain('3 more');
+    expect(result.error).toContain('8 joints');
+    expect(result.error).toContain('3 de plus');
   });
 });
 
@@ -271,13 +271,13 @@ describe('convertFilesToDataUris', () => {
   it('throws error for invalid file type', async () => {
     const file = createMockFile('test.exe', 'application/x-msdownload', 100);
     
-    await expect(convertFilesToDataUris([file])).rejects.toThrow('not a supported file type');
+    await expect(convertFilesToDataUris([file])).rejects.toThrow("n'est pas un type de fichier pris en charge");
   });
 
   it('throws error for oversized image', async () => {
     const file = createMockFile('huge.png', 'image/png', 6 * 1024 * 1024);
     
-    await expect(convertFilesToDataUris([file])).rejects.toThrow('Maximum file size is 5MB');
+    await expect(convertFilesToDataUris([file])).rejects.toThrow('La taille maximale est de 5 Mo');
   });
 
   it('corrects MIME type in data URI based on extension', async () => {

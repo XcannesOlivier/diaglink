@@ -117,8 +117,24 @@
   "markdown.validate.enabled": false,
   "markdown.validate.ignoredLinks": ["**"],
 
-  "[markdown]": {
+    "[markdown]": {
     "editor.defaultFormatter": null,
     "editor.formatOnSave": false
+  },
+
+  // ============================================
+  // Explorer - Hide technical folders
+  // ============================================
+  "files.exclude": {
+    "**/.git": true,
+    "**/.azure": true,
+    "**/.config": true,
+    "**/.devcontainer": true,
+    "**/.github": true,
+    "**/bin": true,
+    "**/obj": true,
+    "**/node_modules": true,
+    "**/TestResults": true,
+    "logs": true
   }
 }

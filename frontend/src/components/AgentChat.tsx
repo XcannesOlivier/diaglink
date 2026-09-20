@@ -1,13 +1,16 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import logoDiagLink from '../assets/Logo DiagLink.png';
+import React, { useMemo, useCallback, useEffect, useRef, useState } from 'react';
+import { Button, Toaster, Toast, ToastTitle, useId, useToastController } from '@fluentui/react-components';
+// logoDiagLink removed from header; branding moved to chat footer
 import { ChatInterface } from './ChatInterface';
 import { ConversationSidebar } from './ConversationSidebar';
-import { SettingsPanel } from './core/SettingsPanel';
 import { useAppState } from '../hooks/useAppState';
 import { useAuth } from '../hooks/useAuth';
 import { ChatService } from '../services/chatService';
+import { getMachines } from '../services/machineService';
+import type { MachineDto } from '../types/machine';
 import { useAppContext } from '../contexts/AppContext';
 import { trackFeedback } from '../services/telemetry';
+import { isSuperAdmin, isCompanyAdmin } from '../utils/roles';
 import type { IChatItem } from '../types/chat';
 import styles from './AgentChat.module.css';
 
@@ -17,30 +20,77 @@ interface AgentChatProps {
   agentDescription?: string;
   agentLogo?: string;
   starterPrompts?: string[];
+  // Called when a protected request using an active DiagLink session gets rejected (401) —
+  // lets the app fall back to the login screen. No-op for the Microsoft/MSAL path.
+  onDiagLinkSessionExpired?: () => void;
+  // Set when the user picks the "Historique" nav entry — opens the existing conversation
+  // sidebar once instead of introducing a separate history screen.
+  autoOpenHistory?: boolean;
+  onOpenMobileMenu?: () => void;
 }
 
 // Number of conversations fetched initially and per "load more" / "show less" step.
 const CONVERSATIONS_PAGE_SIZE = 5;
 
-export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescription, agentLogo, starterPrompts }) => {
+export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescription, agentLogo, starterPrompts, onDiagLinkSessionExpired, autoOpenHistory, onOpenMobileMenu }) => {
   const { chat, state } = useAppState();
   const { dispatch } = useAppContext();
   const { getAccessToken } = useAuth();
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const machineToasterId = useId('machine-toaster');
+  const { dispatchToast: dispatchMachineToast } = useToastController(machineToasterId);
 
   // Create service instances
   const apiUrl = import.meta.env.VITE_API_URL || '/api';
   
   const chatService = useMemo(() => {
-    return new ChatService(apiUrl, getAccessToken, dispatch);
-  }, [apiUrl, getAccessToken, dispatch]);
+    return new ChatService(apiUrl, getAccessToken, dispatch, onDiagLinkSessionExpired);
+  }, [apiUrl, getAccessToken, dispatch, onDiagLinkSessionExpired]);
 
   const handleSendMessage = async (text: string, files?: File[]) => {
     if (chat.status === 'streaming' || chat.status === 'sending') {
       dispatch({ type: 'CHAT_QUEUE_MESSAGE', text, files });
       return;
     }
-    await chatService.sendMessage(text, chat.currentConversationId, files);
+    // If starting a new conversation, require a selected machine. Offer a toast with machines to choose from.
+    if (!chat.currentConversationId && !state.machine.selected) {
+      try {
+        const result = await getMachines(getAccessToken);
+        if (result.kind === 'success' && result.data.length > 0) {
+          const machines = result.data as MachineDto[];
+          dispatchMachineToast(
+            <Toast>
+              <ToastTitle>Sélectionnez une machine</ToastTitle>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                {machines.map(m => (
+                  <Button
+                    key={m.id}
+                    appearance="subtle"
+                      onClick={async () => {
+                      dispatch({ type: 'MACHINE_SELECT', machine: { id: m.id, name: m.name, reference: m.reference ?? null } });
+                      try {
+                        await chatService.sendMessage(text, null, files, m.id);
+                      } catch {
+                        // sendMessage will dispatch errors itself
+                      }
+                    }}
+                  >
+                    {m.name}
+                  </Button>
+                ))}
+              </div>
+            </Toast>,
+            { intent: 'info' }
+          );
+        } else {
+          dispatch({ type: 'CHAT_ERROR', error: { message: 'Aucune machine disponible.', recoverable: false, code: 'API' } });
+        }
+      } catch {
+        dispatch({ type: 'CHAT_ERROR', error: { message: 'Impossible de charger la liste des machines.', recoverable: true, code: 'API' } });
+      }
+      return;
+    }
+
+    await chatService.sendMessage(text, chat.currentConversationId, files, state.machine.selected?.id);
   };
 
   // Drain the queue when the stream completes
@@ -159,6 +209,14 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     }
   }, [state.conversations.sidebarOpen, dispatch]);
 
+  // "Historique" nav entry re-uses this same chat surface — just opens the sidebar once.
+  useEffect(() => {
+    if (autoOpenHistory && !state.conversations.sidebarOpen) {
+      void handleToggleSidebar();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenHistory]);
+
   const handleLoadMoreConversations = useCallback(async () => {
     dispatch({ type: 'CONVERSATIONS_LOADING' });
     try {
@@ -194,10 +252,23 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
         }));
 
       dispatch({ type: 'CHAT_LOAD_CONVERSATION', conversationId, messages: chatItems });
+
+      // The conversation determines the active machine, not the other way around — resync from the
+      // already-fetched conversation list (machineId/machineName come from GET /api/conversations).
+      const summary = state.conversations.list.find(c => c.id === conversationId);
+      if (summary?.machineId && summary.machineName) {
+        dispatch({
+          type: 'MACHINE_SELECT',
+          machine: { id: summary.machineId, name: summary.machineName, reference: null },
+        });
+      } else {
+        // Legacy conversation with no bound machine — clear any stale selection.
+        dispatch({ type: 'MACHINE_CLEAR' });
+      }
     } catch (error) {
       console.error('Failed to load conversation:', error);
     }
-  }, [chatService, dispatch]);
+  }, [chatService, dispatch, state.conversations.list]);
 
   const handleDeleteConversation = useCallback(async (conversationId: string) => {
     // Remove from UI immediately (optimistic)
@@ -214,12 +285,57 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     }
   }, [chatService, dispatch, chat.currentConversationId]);
 
+  const handleChangeMachine = useCallback(() => {
+    dispatch({ type: 'UI_SET_VIEW', view: 'machines' });
+  }, [dispatch]);
+
+  // Panneau local de confirmation de machine — masqué pour la session tant que la même
+  // machine reste active (sessionStorage), réaffiché si l'id de machine change.
+  const [showMachineConfirmation, setShowMachineConfirmation] = useState(true);
+
+  useEffect(() => {
+    const confirmedMachineId = sessionStorage.getItem('diaglink-confirmed-machine-id');
+    setShowMachineConfirmation(confirmedMachineId !== state.machine.selected?.id);
+  }, [state.machine.selected?.id]);
+
+  const handleKeepMachine = useCallback(() => {
+    if (state.machine.selected) {
+      sessionStorage.setItem('diaglink-confirmed-machine-id', state.machine.selected.id);
+    }
+    setShowMachineConfirmation(false);
+  }, [state.machine.selected]);
+
+  const canAccessAdministration = isSuperAdmin(state.auth.currentUser) || isCompanyAdmin(state.auth.currentUser);
+
   return (
     <div className={styles.content}>
-      <div className={styles.brandBar}>
-        <img src={logoDiagLink} alt="DiagLink" className={styles.brandLogo} />
-      </div>
-      <div className={styles.mainContent}>
+      <Toaster toasterId={machineToasterId} position="top-end" />
+      {/* top brand logo removed to avoid duplication with header/footer */}
+
+      <div className={showMachineConfirmation && state.machine.selected ? `${styles.mainContent} ${styles.mainContentWithPanel}` : styles.mainContent}>
+        {showMachineConfirmation && state.machine.selected && (
+          <div className={styles.machineConfirmationCard}>
+            <div className={styles.machineConfirmationContent}>
+              <div className={styles.machineConfirmationText}>
+                <div style={{ fontSize: 12, opacity: 0.7 }}>Machine actuelle</div>
+                <div style={{ fontSize: 18, fontWeight: 600 }}>{state.machine.selected.name}</div>
+              </div>
+              <div className={styles.machineConfirmationActions}>
+                <Button appearance="primary" onClick={handleKeepMachine}>
+                  Garder cette machine
+                </Button>
+                <Button appearance="secondary" onClick={handleChangeMachine}>
+                  Changer de machine
+                </Button>
+                {canAccessAdministration && (
+                  <Button appearance="secondary" onClick={handleKeepMachine}>
+                    Administration
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         <ChatInterface 
           messages={chat.messages}
           status={chat.status}
@@ -230,11 +346,11 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           onSendMessage={handleSendMessage}
           onClearError={handleClearError}
           onRecoveredInputConsumed={handleRecoveredInputConsumed}
-          onOpenSettings={() => setIsSettingsOpen(true)}
           onNewChat={handleNewChat}
           onCancelStream={handleCancelStream}
           onMcpApproval={handleMcpApproval}
           onToggleSidebar={handleToggleSidebar}
+          onOpenMobileMenu={onOpenMobileMenu}
           onRegenerate={handleRegenerate}
           onCancelEdit={handleCancelEdit}
           isEditing={!!chat.editSnapshot}
@@ -249,6 +365,8 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           agentDescription={agentDescription}
           agentLogo={agentLogo}
           starterPrompts={starterPrompts}
+          onChangeMachine={handleChangeMachine}
+          machineId={state.machine.selected?.id}
         />
       </div>
 
@@ -267,10 +385,6 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
         canCollapse={state.conversations.list.length > CONVERSATIONS_PAGE_SIZE}
       />
       
-      <SettingsPanel
-        isOpen={isSettingsOpen}
-        onOpenChange={setIsSettingsOpen}
-      />
     </div>
   );
 };

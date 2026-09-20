@@ -1,5 +1,6 @@
 .chatInputContainer {
-  padding: 1rem;
+  /* Match messages column horizontal padding so the input lines up centered */
+  padding: 1rem 1.5rem;
   background: transparent;
   width: 100%;
   max-width: 900px;
@@ -7,6 +8,15 @@
   flex-shrink: 0;
   position: relative;
   z-index: 1;
+  box-sizing: border-box;
+}
+
+/* Ensure sizing respects parent widths on small screens */
+.chatInputContainer,
+.inputWrapper,
+.attachmentsPreview,
+.buttonRow {
+  box-sizing: border-box;
 }
 
 .inputWrapper {
@@ -17,6 +27,7 @@
   border: 1px solid var(--colorNeutralStroke1);
   box-shadow: var(--shadow4);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  min-width: 0;
 }
 
 .inputWrapper:focus-within {
@@ -28,17 +39,34 @@
   max-height: 120px;
   width: 100%;
   background: transparent;
-  border: none;
-  border-radius: 8px;
+  border: none !important;
+  border-radius: 0 !important;
 }
 
 .inputWrapper :global(.fui-ChatInput) :global(textarea) {
   background: transparent;
   min-height: 40px;
+  min-width: 0; /* allow textarea to shrink inside flex */
 }
 
 .inputWrapper :global(.fui-ChatInput) :global(.fui-ChatInput__container) {
   background: transparent;
+}
+
+.inputWrapper :global(.fai-ChatInput__banner) {
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.inputWrapper :global(.fai-ChatInput__banner)::before,
+.inputWrapper :global(.fai-ChatInput__banner)::after {
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.inputWrapper :global(.fai-ChatInput__editor),
+.inputWrapper :global(.fai-EditorInput__placeholderValue) {
+  font-size: 16px !important;
 }
 
 /* Style the built-in send button to match our subtle buttons */
@@ -109,7 +137,6 @@
   align-items: center;
   justify-content: flex-end;
   padding: 0.5rem 0.75rem;
-  border-top: 1px solid var(--colorNeutralStroke2);
   gap: 0.5rem;
 }
 
@@ -117,6 +144,70 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  min-width: 0;
+}
+
+.changeMachineCompactLabel {
+  display: none;
+}
+
+.mobileMenuButton {
+  display: none !important;
+}
+
+/* Responsive adjustments for small screens to prevent overflow */
+@media (max-width: 768px) {
+  .chatInputContainer {
+    /* keep same horizontal padding as messages area on small screens */
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+    max-width: 900px; /* align with messagesWrapper */
+  }
+
+
+  .inputWrapper {
+    border-radius: 6px;
+    /* ensure the input wrapper is centered within the container */
+    margin-left: auto;
+    margin-right: auto;
+    /* ensure input fills available width within container and stays centered */
+    max-width: 900px;
+    width: 100%;
+  }
+
+  .buttonRow {
+    padding: 0.5rem 0.5rem;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
+  .actionButtons {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  .attachmentName {
+    max-width: calc(100% - 96px); /* leave room for action buttons */
+  }
+}
+
+@media (max-width: 1000px) {
+  .changeMachineDesktopLabel {
+    display: none;
+  }
+
+  .changeMachineCompactLabel {
+    display: inline;
+  }
+
+  .documentsLabel {
+    display: none;
+  }
+
+  .mobileMenuButton {
+    display: inline-flex !important;
+  }
 }
 
 .divider {

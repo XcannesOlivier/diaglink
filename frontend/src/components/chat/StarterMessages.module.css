@@ -22,19 +22,47 @@
   text-align: center;
 }
 
-.emptyStateAgentIcon {
-  width: 48px;
-  height: 48px;
-}
-
 .welcome,
 .caption {
   text-align: center;
   text-wrap: balance;
 }
 
+.mobileAgentTitle {
+  display: none;
+}
+
+.desktopAgentTitle {
+  display: block;
+}
+
 .caption {
   max-width: 600px;
+}
+
+@media (max-width: 1000px) {
+  .desktopAgentTitle {
+    display: none !important;
+  }
+
+  .mobileAgentTitle {
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
+    text-align: center;
+  }
+
+  .mobileAgentTitleMain,
+  .mobileAgentMachineName {
+    text-align: center;
+    text-wrap: balance;
+  }
+
+  .mobileAgentMachineName {
+    overflow-wrap: anywhere;
+  }
 }
 
 /* Starter prompts list - card-style layout with responsive wrapping */
@@ -95,11 +123,6 @@
   .promptCard {
     max-width: 100%;
     min-height: 3.5rem;
-  }
-
-  /* Hide 3rd and beyond on small screens */
-  .promptList li:nth-child(n+4) {
-    display: none;
   }
 }
 

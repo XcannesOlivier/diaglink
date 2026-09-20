@@ -1,4 +1,5 @@
 import type { AppState, AppAction } from '../types/appState';
+import { resolveView } from '../utils/navigation';
 
 /**
  * Main application state reducer.
@@ -24,6 +25,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           status: 'authenticated',
           user: action.user,
           error: null,
+          currentUser: state.auth.currentUser,
         },
       };
 
@@ -33,6 +35,25 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         auth: {
           ...state.auth,
           status: 'unauthenticated',
+          currentUser: null,
+        },
+      };
+
+    case 'AUTH_CURRENT_USER_LOADED':
+      return {
+        ...state,
+        auth: {
+          ...state.auth,
+          currentUser: action.currentUser,
+        },
+      };
+
+    case 'AUTH_CURRENT_USER_CLEARED':
+      return {
+        ...state,
+        auth: {
+          ...state.auth,
+          currentUser: null,
         },
       };
 
@@ -562,6 +583,33 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           list: state.conversations.list.slice(0, action.keepCount),
           // Items were hidden, not deleted server-side, so more can be reloaded.
           hasMore: true,
+        },
+      };
+
+    // === Navigation Actions ===
+    case 'UI_SET_VIEW':
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          currentView: resolveView(action.view, state.auth.currentUser?.role),
+        },
+      };
+
+    // === Machine Selection Actions ===
+    case 'MACHINE_SELECT':
+      return {
+        ...state,
+        machine: {
+          selected: action.machine,
+        },
+      };
+
+    case 'MACHINE_CLEAR':
+      return {
+        ...state,
+        machine: {
+          selected: null,
         },
       };
 

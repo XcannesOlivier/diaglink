@@ -44,9 +44,14 @@ export interface SseAnnotationsEvent extends SseEvent {
 export interface SseUsageEvent extends SseEvent {
   type: 'usage';
   data: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+    available?: boolean;
+    completed?: boolean;
+    model?: string | null;
+    modelSource?: string | null;
+    agentVersion?: string | null;
     duration: number;
   };
 }

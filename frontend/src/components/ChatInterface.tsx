@@ -8,6 +8,7 @@ import { DropZone } from "./chat/DropZone";
 import { Waves } from "./animations/Waves";
 import { ErrorMessage } from "./core/ErrorMessage";
 import { BuiltWithBadge } from "./core/BuiltWithBadge";
+import logoDiagLink from '../assets/Logo DiagLink.png';
 import type { IChatItem } from "../types/chat";
 import type { AppState } from "../types/appState";
 import type { AppError } from "../types/errors";
@@ -26,10 +27,10 @@ interface ChatInterfaceProps {
   onClearError?: () => void;
   onRecoveredInputConsumed?: () => void;
   onDequeueMessage?: (index: number) => void;
-  onOpenSettings?: () => void;
   onNewChat?: () => void;
   onCancelStream?: () => void;
   onToggleSidebar?: () => void;
+  onOpenMobileMenu?: () => void;
   onRegenerate?: () => void;
   onCancelEdit?: () => void;
   isEditing?: boolean;
@@ -42,10 +43,12 @@ interface ChatInterfaceProps {
   agentLogo?: string;
   starterPrompts?: string[];
   conversationId?: string | null;
+  onChangeMachine?: () => void;
+  machineId?: string;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
-  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onMcpApproval, onClearError, onRecoveredInputConsumed, onDequeueMessage, onOpenSettings, onNewChat, onCancelStream, onToggleSidebar, onRegenerate, onCancelEdit, isEditing, onFeedback, onDownloadFile, hasMessages, disabled, agentName, agentDescription, agentLogo, starterPrompts, conversationId } = props;
+  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onMcpApproval, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onDownloadFile, hasMessages, disabled, agentName, agentDescription, agentLogo, starterPrompts, conversationId, onChangeMachine } = props;
   const deferredMessages = useDeferredValue(messages);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [liveRegionMessage, setLiveRegionMessage] = useState<string>('');
@@ -195,7 +198,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
             <StarterMessages 
               agentName={agentName}
               agentDescription={agentDescription}
-              agentLogo={agentLogo}
               starterPrompts={effectiveStarterPrompts}
               onPromptClick={handleStarterPromptClick}
             />
@@ -243,7 +245,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                     isStreaming={isStreaming && message.id === streamingMessageId}
                     disabled={isBusy}
                     agentName={agentName}
-                    agentLogo={agentLogo}
                     onRegenerate={onRegenerate}
                     onFeedback={onFeedback}
                     onDownloadFile={onDownloadFile}
@@ -290,9 +291,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
         <ChatInput
           onSubmit={handleSendMessage}
           disabled={isBusy}
-          onOpenSettings={onOpenSettings}
           onNewChat={onNewChat}
           onToggleSidebar={onToggleSidebar}
+          onOpenMobileMenu={onOpenMobileMenu}
           hasMessages={hasMessages}
           placeholder="Décrivez votre problème ou posez votre question…"
           isStreaming={isStreaming}
@@ -306,8 +307,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
           onDequeueMessage={onDequeueMessage}
           droppedFiles={droppedFiles}
           onDroppedFilesConsumed={handleDroppedFilesConsumed}
+          onChangeMachine={onChangeMachine}
+          machineId={props.machineId}
         />
-        <BuiltWithBadge className={styles.builtWithBadge} />
+        <div className={styles.poweredRow}>
+          <img src={logoDiagLink} alt="DiagLink" className={styles.diagLinkLogo} />
+          <BuiltWithBadge className={styles.builtWithBadge} />
+        </div>
       </div>
     </div>
   );

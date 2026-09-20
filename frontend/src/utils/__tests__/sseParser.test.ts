@@ -27,6 +27,19 @@ describe('parseSseLine', () => {
       expect(result?.type).toBe('done');
     });
 
+    it('preserves unknown usage separately from a measured zero', () => {
+      const unknown = parseSseLine('data: {"type":"usage","available":false,"completed":true,"promptTokens":null,"completionTokens":null,"totalTokens":null,"model":"deployment-a","agentVersion":"2"}');
+      expect(unknown?.data.available).toBe(false);
+      expect(unknown?.data.promptTokens).toBeNull();
+      expect(unknown?.data.completionTokens).toBeNull();
+      expect(unknown?.data.totalTokens).toBeNull();
+      expect(unknown?.data.model).toBe('deployment-a');
+      expect(unknown?.data.agentVersion).toBe('2');
+      const zero = parseSseLine('data: {"type":"usage","available":true,"promptTokens":0,"completionTokens":0,"totalTokens":0}');
+      expect(zero?.data.available).toBe(true);
+      expect(zero?.data.totalTokens).toBe(0);
+    });
+
     it('parses a usage event with token counts', () => {
       const line = 'data: {"type":"usage","promptTokens":100,"completionTokens":50,"totalTokens":150,"duration":1234}';
       const result = parseSseLine(line);

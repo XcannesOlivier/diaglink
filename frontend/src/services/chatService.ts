@@ -18,6 +18,7 @@ import {
   createAttachmentMetadata,
 } from '../utils/fileAttachments';
 import { parseSseLine, splitSseBuffer } from '../utils/sseParser';
+import { getApiAuthHeaders, clearDiagLinkSession } from '../utils/apiAuth';
 
 /**
  * ChatService handles all chat-related API operations.
@@ -43,33 +44,49 @@ export class ChatService {
   private apiUrl: string;
   private getAccessToken: () => Promise<string | null>;
   private dispatch: Dispatch<AppAction>;
+  private onDiagLinkSessionExpired?: () => void;
   private currentStreamAbort?: AbortController;
   // Flag indicating an intentional user cancellation of the active stream.
   private streamCancelled = false;
+  // Which auth mode produced the headers for the most recent request — scopes 401 handling to DiagLink.
+  private lastAuthMode: 'diaglink' | 'microsoft' = 'microsoft';
 
   constructor(
     apiUrl: string,
     getAccessToken: () => Promise<string | null>,
-    dispatch: Dispatch<AppAction>
+    dispatch: Dispatch<AppAction>,
+    onDiagLinkSessionExpired?: () => void
   ) {
     this.apiUrl = apiUrl;
     this.getAccessToken = getAccessToken;
     this.dispatch = dispatch;
+    this.onDiagLinkSessionExpired = onDiagLinkSessionExpired;
   }
 
   /**
-   * Acquire authentication token using MSAL.
-   * Attempts silent acquisition first, falls back to popup if needed.
-   * 
-   * @returns Access token string
-   * @throws {Error} If token acquisition fails
+   * Resolve headers for a protected API call: DiagLink session takes precedence when present
+   * in sessionStorage, otherwise falls back to the Microsoft MSAL bearer token as before.
+   * @throws {AppError} If neither authentication path yields a usable credential
    */
-  private async ensureAuthToken(): Promise<string> {
-    const token = await this.getAccessToken();
-    if (!token) {
-      throw createAppError(new Error('Failed to acquire access token'), 'AUTH');
+  private async getAuthHeaders(): Promise<Record<string, string>> {
+    try {
+      const { headers, mode } = await getApiAuthHeaders(this.getAccessToken);
+      this.lastAuthMode = mode;
+      return headers;
+    } catch (error) {
+      throw createAppError(error, 'AUTH');
     }
-    return token;
+  }
+
+  /**
+   * Ends an invalid DiagLink session on 401: clears sessionStorage and notifies the app so it
+   * falls back to the login screen. No-op for Microsoft responses or non-401 statuses.
+   */
+  private handleUnauthorized(response: Response): void {
+    if (response.status === 401 && this.lastAuthMode === 'diaglink') {
+      clearDiagLinkSession();
+      this.onDiagLinkSessionExpired?.();
+    }
   }
 
   /**
@@ -133,11 +150,15 @@ export class ChatService {
     message: string,
     conversationId: string | null,
     imageDataUris: string[],
-    fileDataUris: Array<{ dataUri: string; fileName: string; mimeType: string }>
+    fileDataUris: Array<{ dataUri: string; fileName: string; mimeType: string }>,
+    machineId?: string
   ): Record<string, unknown> {
     return {
       message,
       conversationId,
+      // Only meaningful (and only ever sent) when starting a new conversation — an existing
+      // conversation's machine is re-derived server-side from SQL, never from the client.
+      machineId: conversationId ? undefined : machineId,
       imageDataUris: imageDataUris.length > 0 ? imageDataUris : undefined,
       fileDataUris: fileDataUris.length > 0 ? fileDataUris : undefined,
     };
@@ -156,7 +177,7 @@ export class ChatService {
    */
   private async initiateStream(
     url: string,
-    token: string,
+    authHeaders: Record<string, string>,
     body: Record<string, unknown>,
     signal: AbortSignal
   ): Promise<Response> {
@@ -164,13 +185,14 @@ export class ChatService {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        ...authHeaders,
       },
       body: JSON.stringify(body),
       signal,
     });
 
     if (!res.ok) {
+      this.handleUnauthorized(res);
       const errorMessage = await parseErrorFromResponse(res);
       const errorCode = getErrorCodeFromResponse(res);
       throw createAppError(new Error(errorMessage), errorCode);
@@ -193,7 +215,8 @@ export class ChatService {
   async sendMessage(
     messageText: string,
     currentConversationId: string | null,
-    files?: File[]
+    files?: File[],
+    machineId?: string
   ): Promise<void> {
     if (this.currentStreamAbort) {
       this.streamCancelled = true;
@@ -201,9 +224,9 @@ export class ChatService {
       this.dispatch({ type: 'CHAT_CANCEL_STREAM' });
     }
 
-    let token: string;
+    let authHeaders: Record<string, string>;
     try {
-      token = await this.ensureAuthToken();
+      authHeaders = await this.getAuthHeaders();
     } catch (error) {
       if (isTokenExpiredError(error)) {
         this.dispatch({ type: 'AUTH_TOKEN_EXPIRED' });
@@ -244,9 +267,12 @@ export class ChatService {
       messageText,
       currentConversationId,
       imageDataUris,
-      fileDataUris
+      fileDataUris,
+      machineId
     );
 
+    // Each retry can launch another billable provider response after partial consumption.
+    // Usage events describe individual attempts, not an idempotent total for this UI message.
     const maxRetries = 3;
     let lastError: unknown;
 
@@ -267,7 +293,7 @@ export class ChatService {
 
         const response = await this.initiateStream(
           `${this.apiUrl}/chat/stream`,
-          token,
+          authHeaders,
           requestBody,
           this.currentStreamAbort.signal
         );
@@ -288,6 +314,11 @@ export class ChatService {
 
         if (isTokenExpiredError(error)) {
           this.dispatch({ type: 'AUTH_TOKEN_EXPIRED' });
+          throw error;
+        }
+
+        if (isAppError(error) && error.code === 'AiCreditExhausted') {
+          this.dispatch({ type: 'CHAT_RECOVER_MESSAGE', messageText, error, retryCount: 0 });
           throw error;
         }
 
@@ -439,6 +470,11 @@ export class ChatService {
                   promptTokens: event.data.promptTokens,
                   completionTokens: event.data.completionTokens,
                   totalTokens: event.data.totalTokens,
+                  available: event.data.available,
+                  completed: event.data.completed,
+                  model: event.data.model,
+                  modelSource: event.data.modelSource,
+                  agentVersion: event.data.agentVersion,
                   duration: event.data.duration,
                 },
               });
@@ -499,7 +535,7 @@ export class ChatService {
     conversationId: string
   ): Promise<void> {
     try {
-      const token = await this.ensureAuthToken();
+      const authHeaders = await this.getAuthHeaders();
 
       const assistantMessageId = Date.now().toString();
       this.dispatch({ type: 'CHAT_ADD_ASSISTANT_MESSAGE', messageId: assistantMessageId });
@@ -526,7 +562,7 @@ export class ChatService {
         async () =>
           this.initiateStream(
             `${this.apiUrl}/chat/stream`,
-            token,
+            authHeaders,
             requestBody,
             this.currentStreamAbort!.signal
           ),
@@ -586,12 +622,15 @@ export class ChatService {
   }
 
   async downloadFile(fileId: string, fileName?: string, containerId?: string): Promise<void> {
-    const token = await this.ensureAuthToken();
+    const authHeaders = await this.getAuthHeaders();
     const params = containerId ? `?containerId=${encodeURIComponent(containerId)}` : '';
     const response = await fetch(`${this.apiUrl}/files/${encodeURIComponent(fileId)}${params}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders,
     });
-    if (!response.ok) throw new Error(`File download failed: ${response.status}`);
+    if (!response.ok) {
+      this.handleUnauthorized(response);
+      throw new Error(`File download failed: ${response.status}`);
+    }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -608,14 +647,13 @@ export class ChatService {
    * @returns Array of conversation summaries
    */
   async listConversations(limit: number = 20): Promise<{ conversations: ConversationSummary[]; hasMore: boolean }> {
-    const token = await this.ensureAuthToken();
+    const authHeaders = await this.getAuthHeaders();
     const response = await fetch(`${this.apiUrl}/conversations?limit=${limit}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: authHeaders,
     });
 
     if (!response.ok) {
+      this.handleUnauthorized(response);
       throw createAppError(new Error(`Failed to list conversations: ${response.status}`), 'API');
     }
 
@@ -628,14 +666,13 @@ export class ChatService {
    * @returns Array of conversation messages
    */
   async getConversationMessages(conversationId: string): Promise<ConversationMessageInfo[]> {
-    const token = await this.ensureAuthToken();
+    const authHeaders = await this.getAuthHeaders();
     const response = await fetch(`${this.apiUrl}/conversations/${conversationId}/messages`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: authHeaders,
     });
 
     if (!response.ok) {
+      this.handleUnauthorized(response);
       throw createAppError(new Error(`Failed to get conversation messages: ${response.status}`), 'API');
     }
 
@@ -647,15 +684,14 @@ export class ChatService {
    * @param conversationId - The conversation ID to delete
    */
   async deleteConversation(conversationId: string): Promise<void> {
-    const token = await this.ensureAuthToken();
+    const authHeaders = await this.getAuthHeaders();
     const response = await fetch(`${this.apiUrl}/conversations/${conversationId}`, {
       method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: authHeaders,
     });
 
     if (!response.ok) {
+      this.handleUnauthorized(response);
       throw createAppError(new Error(`Failed to delete conversation: ${response.status}`), 'API');
     }
   }
@@ -665,11 +701,12 @@ export class ChatService {
    * Scoped to files whose names begin with the web-app upload prefix (see backend).
    */
   async getUploadedFilesInfo(): Promise<{ count: number; totalBytes: number }> {
-    const token = await this.ensureAuthToken();
+    const authHeaders = await this.getAuthHeaders();
     const response = await fetch(`${this.apiUrl}/files/uploaded`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders,
     });
     if (!response.ok) {
+      this.handleUnauthorized(response);
       throw createAppError(new Error(`Failed to list uploaded files: ${response.status}`), 'API');
     }
     return response.json();
@@ -679,14 +716,16 @@ export class ChatService {
    * Delete every uploaded file that this web app previously uploaded for image attachments.
    */
   async cleanupUploadedFiles(): Promise<{ deleted: number; failed: number }> {
-    const token = await this.ensureAuthToken();
+    const authHeaders = await this.getAuthHeaders();
     const response = await fetch(`${this.apiUrl}/files/cleanup`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders,
     });
     if (!response.ok) {
+      this.handleUnauthorized(response);
       throw createAppError(new Error(`Failed to clean up uploaded files: ${response.status}`), 'API');
     }
     return response.json();
   }
 }
+

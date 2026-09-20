@@ -13,6 +13,12 @@ param userAssignedIdentityId string = ''
 param oboManagedIdentityClientId string = ''
 param appInsightsConnectionString string = ''
 param appInsightsFrontendConnectionString string = ''
+param acsEndpoint string = ''
+param senderAddress string = ''
+@secure()
+param authOtpPepper string
+@secure()
+param azureStorageConnectionString string
 
 var abbrs = loadJsonContent('./abbreviations.json')
 
@@ -68,7 +74,71 @@ var oboEnv = !empty(entraBackendClientId) ? [
   }
 ] : []
 
-var containerEnv = concat(baseEnv, miEnv, oboEnv)
+// SQL connection string for conversation-history persistence — existing 'diaglink' Azure SQL DB,
+// Managed Identity auth (no secret). Reuses the same user-assigned MI as MANAGED_IDENTITY_CLIENT_ID.
+var diagLinkEnv = [
+  {
+    name: 'ConnectionStrings__DiagLink'
+    value: 'Server=tcp:sql-diaglink.database.windows.net,1433;Database=diaglink;Authentication=Active Directory Managed Identity;User Id=${oboManagedIdentityClientId};Encrypt=True;TrustServerCertificate=False;Connection Timeout=60;'
+  }
+]
+
+// ACS endpoint + sender address for sending OTP emails — both non-secret
+var emailEnv = [
+  {
+    name: 'Email__AcsEndpoint'
+    value: acsEndpoint
+  }
+  {
+    name: 'Email__SenderAddress'
+    value: senderAddress
+  }
+]
+
+var authEnv = [
+  {
+    name: 'Auth__OtpPepper'
+    secretRef: 'auth-otp-pepper'
+  }
+]
+
+var storageEnv = [
+  {
+    name: 'AZURE_STORAGE_CONNECTION_STRING'
+    secretRef: 'azure-storage-connection-string'
+  }
+]
+
+var containerSecrets = [
+  {
+    name: 'auth-otp-pepper'
+    value: authOtpPepper
+  }
+  {
+    name: 'azure-storage-connection-string'
+    value: azureStorageConnectionString
+  }
+]
+
+// Share the non-secret tariff identities with local/backend configuration.
+var pricingIdentities = loadJsonContent('../backend/WebApp.Api/appsettings.json').AiPricingIdentity.Deployments
+var pricingIdentityEnvGroups = [for (identity, index) in pricingIdentities: [
+  {
+    name: 'AiPricingIdentity__Deployments__${index}__ProjectEndpoint'
+    value: identity.ProjectEndpoint
+  }
+  {
+    name: 'AiPricingIdentity__Deployments__${index}__Deployment'
+    value: identity.Deployment
+  }
+  {
+    name: 'AiPricingIdentity__Deployments__${index}__Provider'
+    value: identity.Provider
+  }
+]]
+var pricingIdentityEnv = flatten(pricingIdentityEnvGroups)
+
+var containerEnv = concat(baseEnv, miEnv, oboEnv, diagLinkEnv, emailEnv, authEnv, storageEnv, pricingIdentityEnv)
 
 // Single Container App - serves both frontend and backend
 module webApp './core/host/container-app.bicep' = {
@@ -86,6 +156,7 @@ module webApp './core/host/container-app.bicep' = {
     external: true
     healthProbePath: '/api/health'
     userAssignedIdentityId: userAssignedIdentityId
+    secrets: containerSecrets
   }
 }
 

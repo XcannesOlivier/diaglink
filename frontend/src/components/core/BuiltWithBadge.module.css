@@ -20,6 +20,16 @@
   color: var(--colorNeutralForeground3);
 }
 
+.poweredByText {
+  display: inline;
+}
+
+@media (max-width: 1000px) {
+  .poweredByText {
+    display: none !important;
+  }
+}
+
 .brand {
   color: var(--colorNeutralForeground1);
 }

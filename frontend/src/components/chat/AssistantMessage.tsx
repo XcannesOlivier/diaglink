@@ -3,7 +3,6 @@ import { Spinner, Tooltip, Text } from '@fluentui/react-components';
 import { CopilotMessage } from '@fluentui-copilot/react-copilot-chat';
 import { DocumentRegular, GlobeRegular, FolderRegular, OpenRegular, ArrowSyncRegular } from '@fluentui/react-icons';
 import { Markdown } from '../core/Markdown';
-import { AgentIcon } from '../core/AgentIcon';
 import { MessageActions } from './MessageActions';
 import { useFormatTimestamp } from '../../hooks/useFormatTimestamp';
 import { parseContentWithCitations } from '../../utils/citationParser';
@@ -27,7 +26,6 @@ function getToolUseLabel(toolName: string): string {
 interface AssistantMessageProps {
   message: IChatItem;
   agentName?: string;
-  agentLogo?: string;
   isStreaming?: boolean;
   disabled?: boolean;
   onRegenerate?: () => void;
@@ -39,7 +37,6 @@ interface AssistantMessageProps {
 function AssistantMessageComponent({ 
   message, 
   agentName = 'AI Assistant',
-  agentLogo,
   isStreaming = false,
   disabled = false,
   onRegenerate,
@@ -191,11 +188,11 @@ function AssistantMessageComponent({
   return (
     <CopilotMessage
       id={`msg-${message.id}`}
-      avatar={<AgentIcon logoUrl={agentLogo} />}
+      avatar={<div aria-hidden="true" className={styles.hiddenAvatar} />}
       name={agentName}
       loadingState="none"
       className={styles.copilotMessage}
-      disclaimer={<span>Le contenu généré par l'IA peut être incorrect</span>}
+      disclaimer={null}
       footnote={
         <div className={styles.footnoteContainer}>
           {hasAnnotations && !isStreaming && (
@@ -281,7 +278,6 @@ export const AssistantMessage = memo(AssistantMessageComponent, (prev, next) => 
     prev.message.content === next.message.content &&
     prev.isStreaming === next.isStreaming &&
     prev.disabled === next.disabled &&
-    prev.agentLogo === next.agentLogo &&
     prev.message.more?.usage === next.message.more?.usage &&
     prev.message.annotations?.length === next.message.annotations?.length &&
     prev.message.retryAttempt === next.message.retryAttempt &&

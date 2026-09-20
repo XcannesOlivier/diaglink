@@ -10,7 +10,8 @@ interface UsageInfoProps {
 
 export const UsageInfo: React.FC<UsageInfoProps> = ({ info, duration }) => {
   const durationMs = duration ?? info.duration;
-  const totalTokens = info.totalTokens ?? (info.promptTokens + info.completionTokens);
+  const available = info.available !== false && info.promptTokens != null && info.completionTokens != null;
+  const totalTokens = available ? info.totalTokens ?? (info.promptTokens! + info.completionTokens!) : null;
   
   return (
     <div className={styles.usageInfoContainer}>
@@ -21,7 +22,7 @@ export const UsageInfo: React.FC<UsageInfoProps> = ({ info, duration }) => {
             <span className={styles.divider}>|</span>
           </>
         )}
-        <span>{totalTokens} jetons</span>
+        <span>{totalTokens === null ? 'Usage inconnu' : `${totalTokens} jetons`}</span>
         <button 
           className={styles.infoButton}
           title="Informations sur l'utilisation"
@@ -37,11 +38,11 @@ export const UsageInfo: React.FC<UsageInfoProps> = ({ info, duration }) => {
         <div className={styles.detailsList}>
           <div className={styles.detailsItem}>
             <Body1 className={styles.detailLabel}>Entrée</Body1>
-            <Body1 className={styles.detailValue}>{info.promptTokens} jetons</Body1>
+            <Body1 className={styles.detailValue}>{available ? `${info.promptTokens} jetons` : 'Inconnu'}</Body1>
           </div>
           <div className={styles.detailsItem}>
             <Body1 className={styles.detailLabel}>Sortie</Body1>
-            <Body1 className={styles.detailValue}>{info.completionTokens} jetons</Body1>
+            <Body1 className={styles.detailValue}>{available ? `${info.completionTokens} jetons` : 'Inconnu'}</Body1>
           </div>
         </div>
       </div>

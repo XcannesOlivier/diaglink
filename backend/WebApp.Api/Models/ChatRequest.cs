@@ -5,6 +5,12 @@ public record ChatRequest
     public required string Message { get; init; }
     public string? ConversationId { get; init; }
     /// <summary>
+    /// Machine this conversation is scoped to. Required (server-enforced) when starting a new
+    /// conversation (ConversationId is null); ignored for resumed conversations, where the
+    /// machine is re-derived from the existing SQL row (see /api/chat/stream).
+    /// </summary>
+    public Guid? MachineId { get; init; }
+    /// <summary>
     /// Base64-encoded image data URIs (e.g., data:image/png;base64,iVBORw0KG...)
     /// Images are sent inline with the message, no file upload needed.
     /// </summary>

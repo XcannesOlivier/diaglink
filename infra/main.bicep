@@ -31,6 +31,17 @@ param webImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'  // Place
 @description('Default tags applied by Azure Policy (optional)')
 param defaultTags object = {}
 
+@description('ACS Email sender address on the Azure-managed domain (known only after first ACS deployment)')
+param senderAddress string = 'DoNotReply@60976bb3-7a7c-4471-818d-5d3fe79e4503.azurecomm.net'
+
+@secure()
+@description('Pepper used to HMAC one-time login codes; supply from azd secret AUTH_OTP_PEPPER.')
+param authOtpPepper string
+
+@secure()
+@description('Azure Storage connection string used by BlobStorageService for PDF uploads.')
+param azureStorageConnectionString string
+
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var appTags = {
@@ -89,6 +100,10 @@ module app 'main-app.bicep' = {
     oboManagedIdentityClientId: infrastructure.outputs.managedIdentityClientId
     appInsightsConnectionString: infrastructure.outputs.appInsightsConnectionString
     appInsightsFrontendConnectionString: infrastructure.outputs.appInsightsFrontendConnectionString
+    acsEndpoint: infrastructure.outputs.acsEndpoint
+    senderAddress: senderAddress
+    authOtpPepper: authOtpPepper
+    azureStorageConnectionString: azureStorageConnectionString
   }
 }
 

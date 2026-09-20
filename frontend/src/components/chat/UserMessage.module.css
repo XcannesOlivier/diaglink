@@ -6,6 +6,10 @@
   animation: fadeIn 0.3s ease-in;
 }
 
+.userMessage :global(.fai-UserMessage__message) {
+  border-color: var(--colorBrandStroke1);
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

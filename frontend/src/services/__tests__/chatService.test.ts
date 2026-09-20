@@ -23,6 +23,15 @@ describe('ChatService', () => {
   });
 
   describe('listConversations', () => {
+    it('does not retry an exhausted-credit message and history remains readable', async () => {
+      const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ code: 'AiCreditExhausted' }), { status: 402 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ conversations: [], hasMore: false })));
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(chatService.sendMessage('Question', null, [], 'machine')).rejects.toMatchObject({ code: 'AiCreditExhausted' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'CHAT_RECOVER_MESSAGE', error: expect.objectContaining({ code: 'AiCreditExhausted' }) }));
+      await expect(chatService.listConversations()).resolves.toMatchObject({ conversations: [] });
+    });
     it('calls fetch with default limit of 20', async () => {
       const mockResponse = { conversations: [], hasMore: false };
       const fetchMock = vi.fn().mockResolvedValue({

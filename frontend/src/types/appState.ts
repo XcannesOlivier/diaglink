@@ -1,14 +1,19 @@
 import type { AccountInfo } from '@azure/msal-browser';
 import type { IChatItem, IUsageInfo, IAnnotation, IMcpApprovalRequest, IFileAttachment } from './chat';
 import type { AppError } from './errors';
+import type { CurrentUser } from './currentUser';
+import type { AppView } from './navigation';
+import type { SelectedMachine } from './machine';
 
 // Re-export types for convenience
-export type { IChatItem, IUsageInfo, IAnnotation, IMcpApprovalRequest, IFileAttachment };
+export type { IChatItem, IUsageInfo, IAnnotation, IMcpApprovalRequest, IFileAttachment, CurrentUser, AppView, SelectedMachine };
 
 export interface ConversationSummary {
   id: string;
   title: string | null;
   createdAt: number;
+  machineId?: string | null;
+  machineName?: string | null;
 }
 
 export interface ConversationMessageInfo {
@@ -26,6 +31,9 @@ export interface AppState {
     status: 'initializing' | 'authenticated' | 'unauthenticated' | 'error';
     user: AccountInfo | null;
     error: string | null;
+    // DiagLink identity (role/companyId), resolved server-side via GET /api/auth/me — populated for
+    // both the Microsoft and the DiagLink OTP authentication paths, independently of `status`/`user` above.
+    currentUser: CurrentUser | null;
   };
   
   // Chat operations state
@@ -53,6 +61,13 @@ export interface AppState {
   // UI coordination state
   ui: {
     chatInputEnabled: boolean; // Disable during streaming/errors
+    // Role-gated navigation destination — see utils/navigation.ts for allowed views per role.
+    currentView: AppView;
+  };
+
+  // Machine currently scoping the active/next conversation (see MachinesView -> AgentChat wiring)
+  machine: {
+    selected: SelectedMachine | null;
   };
 }
 
@@ -64,6 +79,11 @@ export type AppAction =
   // Auth actions
   | { type: 'AUTH_INITIALIZED'; user: AccountInfo }
   | { type: 'AUTH_TOKEN_EXPIRED' }
+  | { type: 'AUTH_CURRENT_USER_LOADED'; currentUser: CurrentUser }
+  | { type: 'AUTH_CURRENT_USER_CLEARED' }
+
+  // Navigation actions
+  | { type: 'UI_SET_VIEW'; view: AppView }
   
   // Chat actions
   | { type: 'CHAT_SEND_MESSAGE'; message: IChatItem }
@@ -98,7 +118,11 @@ export type AppAction =
   | { type: 'CONVERSATIONS_LOADING_DONE' }
   | { type: 'CONVERSATIONS_TOGGLE_SIDEBAR' }
   | { type: 'CONVERSATIONS_REMOVE'; conversationId: string }
-  | { type: 'CONVERSATIONS_COLLAPSE'; keepCount: number };
+  | { type: 'CONVERSATIONS_COLLAPSE'; keepCount: number }
+
+  // Machine selection actions
+  | { type: 'MACHINE_SELECT'; machine: SelectedMachine }
+  | { type: 'MACHINE_CLEAR' };
 
 /**
  * Initial state for the application
@@ -108,6 +132,7 @@ export const initialAppState: AppState = {
     status: 'initializing',
     user: null,
     error: null,
+    currentUser: null,
   },
   chat: {
     status: 'idle',
@@ -129,5 +154,9 @@ export const initialAppState: AppState = {
   },
   ui: {
     chatInputEnabled: true,
+    currentView: 'chat',
+  },
+  machine: {
+    selected: null,
   },
 };

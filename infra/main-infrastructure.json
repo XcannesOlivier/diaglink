@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.37.4.10188",
-      "templateHash": "9585437898948451558"
+      "version": "0.46.1.21595",
+      "templateHash": "14712465080606419260"
     }
   },
   "parameters": {
@@ -25,14 +25,30 @@
       "containerRegistryRegistries": "cr",
       "appManagedEnvironments": "cae-",
       "appContainerApps": "ca-",
-      "operationalInsightsWorkspaces": "law-"
+      "operationalInsightsWorkspaces": "law-",
+      "insightsComponents": "appi-",
+      "managedIdentityUserAssignedIdentities": "id-"
     },
-    "abbrs": "[variables('$fxv#0')]"
+    "abbrs": "[variables('$fxv#0')]",
+    "defaultTags": {
+      "azd-env-name": "[parameters('resourceToken')]"
+    },
+    "allTags": "[union(parameters('tags'), variables('defaultTags'))]"
   },
   "resources": [
     {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2024-11-30",
+      "name": "[format('{0}web-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('allTags')]",
+      "properties": {
+        "isolationScope": "Regional"
+      }
+    },
+    {
       "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2022-09-01",
+      "apiVersion": "2025-04-01",
       "name": "log-analytics",
       "properties": {
         "expressionEvaluationOptions": {
@@ -47,7 +63,7 @@
             "value": "[parameters('location')]"
           },
           "tags": {
-            "value": "[parameters('tags')]"
+            "value": "[variables('allTags')]"
           }
         },
         "template": {
@@ -56,8 +72,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.37.4.10188",
-              "templateHash": "13124921449369191279"
+              "version": "0.46.1.21595",
+              "templateHash": "15272242227093573482"
             }
           },
           "parameters": {
@@ -69,12 +85,19 @@
             },
             "tags": {
               "type": "object"
+            },
+            "retentionInDays": {
+              "type": "int",
+              "defaultValue": 30,
+              "metadata": {
+                "description": "Number of days to retain logs"
+              }
             }
           },
           "resources": [
             {
               "type": "Microsoft.OperationalInsights/workspaces",
-              "apiVersion": "2022-10-01",
+              "apiVersion": "2023-09-01",
               "name": "[parameters('name')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
@@ -82,7 +105,7 @@
                 "sku": {
                   "name": "PerGB2018"
                 },
-                "retentionInDays": 30
+                "retentionInDays": "[parameters('retentionInDays')]"
               }
             }
           ],
@@ -97,7 +120,7 @@
             },
             "customerId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', parameters('name')), '2022-10-01').customerId]"
+              "value": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', parameters('name')), '2023-09-01').customerId]"
             }
           }
         }
@@ -105,7 +128,205 @@
     },
     {
       "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2022-09-01",
+      "apiVersion": "2025-04-01",
+      "name": "appInsights",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}{1}', variables('abbrs').insightsComponents, parameters('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('allTags')]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'log-analytics'), '2025-04-01').outputs.id.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "4134719351257290686"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string",
+              "metadata": {
+                "description": "Application Insights resource name"
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Azure region"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Resource tags"
+              }
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Log Analytics workspace resource ID for data ingestion"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Insights/components",
+              "apiVersion": "2020-02-02",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "web",
+              "properties": {
+                "Application_Type": "web",
+                "WorkspaceResourceId": "[parameters('logAnalyticsWorkspaceId')]"
+              }
+            }
+          ],
+          "outputs": {
+            "connectionString": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('name')), '2020-02-02').ConnectionString]"
+            },
+            "instrumentationKey": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('name')), '2020-02-02').InstrumentationKey]"
+            },
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Insights/components', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'log-analytics')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "appInsightsFrontend",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}fe-{1}', variables('abbrs').insightsComponents, parameters('resourceToken'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('allTags')]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'log-analytics'), '2025-04-01').outputs.id.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "4134719351257290686"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string",
+              "metadata": {
+                "description": "Application Insights resource name"
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Azure region"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Resource tags"
+              }
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Log Analytics workspace resource ID for data ingestion"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Insights/components",
+              "apiVersion": "2020-02-02",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "web",
+              "properties": {
+                "Application_Type": "web",
+                "WorkspaceResourceId": "[parameters('logAnalyticsWorkspaceId')]"
+              }
+            }
+          ],
+          "outputs": {
+            "connectionString": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('name')), '2020-02-02').ConnectionString]"
+            },
+            "instrumentationKey": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/components', parameters('name')), '2020-02-02').InstrumentationKey]"
+            },
+            "id": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Insights/components', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[parameters('name')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'log-analytics')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
       "name": "container-registry",
       "properties": {
         "expressionEvaluationOptions": {
@@ -120,7 +341,10 @@
             "value": "[parameters('location')]"
           },
           "tags": {
-            "value": "[parameters('tags')]"
+            "value": "[variables('allTags')]"
+          },
+          "acrPullPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}web-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken'))), '2024-11-30').principalId]"
           }
         },
         "template": {
@@ -129,8 +353,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.37.4.10188",
-              "templateHash": "4080743181909764307"
+              "version": "0.46.1.21595",
+              "templateHash": "3003640575178547347"
             }
           },
           "parameters": {
@@ -142,12 +366,19 @@
             },
             "tags": {
               "type": "object"
+            },
+            "acrPullPrincipalId": {
+              "type": "string",
+              "defaultValue": ""
             }
+          },
+          "variables": {
+            "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d"
           },
           "resources": [
             {
               "type": "Microsoft.ContainerRegistry/registries",
-              "apiVersion": "2023-01-01-preview",
+              "apiVersion": "2023-07-01",
               "name": "[parameters('name')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
@@ -155,9 +386,24 @@
                 "name": "Basic"
               },
               "properties": {
-                "adminUserEnabled": true,
+                "adminUserEnabled": false,
                 "publicNetworkAccess": "Enabled"
               }
+            },
+            {
+              "condition": "[not(empty(parameters('acrPullPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('name'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('name')), parameters('acrPullPrincipalId'), variables('acrPullRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPullRoleId'))]",
+                "principalId": "[parameters('acrPullPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ContainerRegistry/registries', parameters('name'))]"
+              ]
             }
           ],
           "outputs": {
@@ -167,7 +413,7 @@
             },
             "loginServer": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('name')), '2023-01-01-preview').loginServer]"
+              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('name')), '2023-07-01').loginServer]"
             },
             "id": {
               "type": "string",
@@ -175,11 +421,14 @@
             }
           }
         }
-      }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}web-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken')))]"
+      ]
     },
     {
       "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2022-09-01",
+      "apiVersion": "2025-04-01",
       "name": "container-apps-environment",
       "properties": {
         "expressionEvaluationOptions": {
@@ -194,10 +443,10 @@
             "value": "[parameters('location')]"
           },
           "tags": {
-            "value": "[parameters('tags')]"
+            "value": "[variables('allTags')]"
           },
           "logAnalyticsWorkspaceId": {
-            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'log-analytics'), '2022-09-01').outputs.id.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'log-analytics'), '2025-04-01').outputs.id.value]"
           }
         },
         "template": {
@@ -206,8 +455,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.37.4.10188",
-              "templateHash": "5822929751234981563"
+              "version": "0.46.1.21595",
+              "templateHash": "15762921203236207197"
             }
           },
           "parameters": {
@@ -227,7 +476,7 @@
           "resources": [
             {
               "type": "Microsoft.App/managedEnvironments",
-              "apiVersion": "2023-05-01",
+              "apiVersion": "2024-03-01",
               "name": "[parameters('name')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
@@ -235,8 +484,8 @@
                 "appLogsConfiguration": {
                   "destination": "log-analytics",
                   "logAnalyticsConfiguration": {
-                    "customerId": "[reference(parameters('logAnalyticsWorkspaceId'), '2022-10-01').customerId]",
-                    "sharedKey": "[listKeys(parameters('logAnalyticsWorkspaceId'), '2022-10-01').primarySharedKey]"
+                    "customerId": "[reference(parameters('logAnalyticsWorkspaceId'), '2023-09-01').customerId]",
+                    "sharedKey": "[listKeys(parameters('logAnalyticsWorkspaceId'), '2023-09-01').primarySharedKey]"
                   }
                 }
               }
@@ -257,20 +506,277 @@
       "dependsOn": [
         "[resourceId('Microsoft.Resources/deployments', 'log-analytics')]"
       ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "foundry-role-assignment",
+      "resourceGroup": "rg-ai-knowledge-dev",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "principalId": {
+            "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}web-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken'))), '2024-11-30').principalId]"
+          },
+          "foundryAccountName": {
+            "value": "diaglink-foundry-prod"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "12933190730163758906"
+            }
+          },
+          "parameters": {
+            "principalId": {
+              "type": "string"
+            },
+            "foundryAccountName": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "foundryUserRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d')]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), 'foundry-user-web-managed-identity')]",
+              "properties": {
+                "roleDefinitionId": "[variables('foundryUserRoleDefinitionId')]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}web-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "communication-email",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "resourceToken": {
+            "value": "[parameters('resourceToken')]"
+          },
+          "dataLocation": {
+            "value": "Europe"
+          },
+          "tags": {
+            "value": "[variables('allTags')]"
+          },
+          "managedIdentityPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}web-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken'))), '2024-11-30').principalId]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "3953923261314140526"
+            }
+          },
+          "parameters": {
+            "resourceToken": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "global"
+            },
+            "dataLocation": {
+              "type": "string",
+              "defaultValue": "Europe"
+            },
+            "managedIdentityPrincipalId": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Communication/emailServices",
+              "apiVersion": "2023-04-01",
+              "name": "[format('acs-email-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "dataLocation": "[parameters('dataLocation')]"
+              }
+            },
+            {
+              "type": "Microsoft.Communication/emailServices/domains",
+              "apiVersion": "2023-04-01",
+              "name": "[format('{0}/{1}', format('acs-email-{0}', parameters('resourceToken')), 'AzureManagedDomain')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "domainManagement": "AzureManaged",
+                "userEngagementTracking": "Disabled"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Communication/emailServices', format('acs-email-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Communication/communicationServices",
+              "apiVersion": "2023-04-01",
+              "name": "[format('acs-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "dataLocation": "[parameters('dataLocation')]",
+                "linkedDomains": [
+                  "[resourceId('Microsoft.Communication/emailServices/domains', format('acs-email-{0}', parameters('resourceToken')), 'AzureManagedDomain')]"
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Communication/emailServices/domains', format('acs-email-{0}', parameters('resourceToken')), 'AzureManagedDomain')]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleDefinitions",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken'))), 'DiagLinkCommunicationEmailSender')]",
+              "properties": {
+                "roleName": "DiagLink Communication Email Sender",
+                "description": "Minimal permissions to send email via Azure Communication Services using Entra ID auth (no connection string/access key).",
+                "type": "CustomRole",
+                "permissions": [
+                  {
+                    "actions": [
+                      "Microsoft.Communication/CommunicationServices/Read",
+                      "Microsoft.Communication/CommunicationServices/Write",
+                      "Microsoft.Communication/EmailServices/write"
+                    ],
+                    "notActions": []
+                  }
+                ],
+                "assignableScopes": [
+                  "[resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken')))]"
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken')))]",
+              "name": "[guid(resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken'))), parameters('managedIdentityPrincipalId'), resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken'))), 'DiagLinkCommunicationEmailSender')))]",
+              "properties": {
+                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken'))), 'DiagLinkCommunicationEmailSender'))]",
+                "principalId": "[parameters('managedIdentityPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken'))), 'DiagLinkCommunicationEmailSender'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "acsEndpoint": {
+              "type": "string",
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken'))), '2023-04-01').hostName)]"
+            },
+            "communicationServiceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Communication/communicationServices', format('acs-{0}', parameters('resourceToken')))]"
+            },
+            "emailServiceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Communication/emailServices', format('acs-email-{0}', parameters('resourceToken')))]"
+            },
+            "domainId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Communication/emailServices/domains', format('acs-email-{0}', parameters('resourceToken')), 'AzureManagedDomain')]"
+            },
+            "domainName": {
+              "type": "string",
+              "value": "AzureManagedDomain"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}web-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken')))]"
+      ]
     }
   ],
   "outputs": {
+    "appInsightsConnectionString": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appInsights'), '2025-04-01').outputs.connectionString.value]"
+    },
+    "appInsightsFrontendConnectionString": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appInsightsFrontend'), '2025-04-01').outputs.connectionString.value]"
+    },
     "containerRegistryName": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2022-09-01').outputs.name.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.name.value]"
     },
     "containerRegistryLoginServer": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2022-09-01').outputs.loginServer.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.loginServer.value]"
     },
     "containerAppsEnvironmentId": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-apps-environment'), '2022-09-01').outputs.id.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'container-apps-environment'), '2025-04-01').outputs.id.value]"
+    },
+    "managedIdentityId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}web-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken')))]"
+    },
+    "managedIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}web-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken'))), '2024-11-30').principalId]"
+    },
+    "managedIdentityClientId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}web-{1}', variables('abbrs').managedIdentityUserAssignedIdentities, parameters('resourceToken'))), '2024-11-30').clientId]"
+    },
+    "acsEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'communication-email'), '2025-04-01').outputs.acsEndpoint.value]"
+    },
+    "communicationServiceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'communication-email'), '2025-04-01').outputs.communicationServiceId.value]"
+    },
+    "emailServiceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'communication-email'), '2025-04-01').outputs.emailServiceId.value]"
+    },
+    "domainId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'communication-email'), '2025-04-01').outputs.domainId.value]"
     }
   }
 }

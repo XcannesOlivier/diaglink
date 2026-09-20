@@ -11,6 +11,7 @@ function createInitialState(): AppState {
       status: 'unauthenticated',
       user: null,
       error: null,
+      currentUser: null,
     },
     chat: {
       status: 'idle',
@@ -26,12 +27,16 @@ function createInitialState(): AppState {
     },
     ui: {
       chatInputEnabled: true,
+      currentView: 'chat',
     },
     conversations: {
       list: [],
       isLoading: false,
       sidebarOpen: false,
       hasMore: false,
+    },
+    machine: {
+      selected: null,
     },
   };
 }
@@ -1445,6 +1450,34 @@ describe('appReducer', () => {
     });
   });
 
+  describe('UI_SET_VIEW', () => {
+    it('sets the requested view when allowed for the current role', () => {
+      const state = createInitialState();
+      state.auth.currentUser = { userId: 'u1', companyId: 'c1', role: 'company_admin' };
+
+      const result = appReducer(state, { type: 'UI_SET_VIEW', view: 'users' });
+
+      expect(result.ui.currentView).toBe('users');
+    });
+
+    it('falls back to chat when the requested view is not allowed for the current role', () => {
+      const state = createInitialState();
+      state.auth.currentUser = { userId: 'u1', companyId: 'c1', role: 'technician' };
+
+      const result = appReducer(state, { type: 'UI_SET_VIEW', view: 'users' });
+
+      expect(result.ui.currentView).toBe('chat');
+    });
+
+    it('falls back to chat when there is no current user yet', () => {
+      const state = createInitialState();
+
+      const result = appReducer(state, { type: 'UI_SET_VIEW', view: 'machines' });
+
+      expect(result.ui.currentView).toBe('chat');
+    });
+  });
+
   describe('state shape', () => {
     it('snapshot drifts when state fields are added or removed', () => {
       const getShape = (obj: Record<string, unknown>, prefix = ''): string[] => {
@@ -1462,6 +1495,7 @@ describe('appReducer', () => {
       expect(shape).toMatchInlineSnapshot(`
         [
           "auth",
+          "auth.currentUser",
           "auth.error",
           "auth.status",
           "auth.user",
@@ -1481,10 +1515,36 @@ describe('appReducer', () => {
           "conversations.isLoading",
           "conversations.list",
           "conversations.sidebarOpen",
+          "machine",
+          "machine.selected",
           "ui",
           "ui.chatInputEnabled",
+          "ui.currentView",
         ]
       `);
+    });
+  });
+
+  describe('MACHINE_SELECT', () => {
+    it('sets the selected machine', () => {
+      const state = createInitialState();
+      const result = appReducer(state, {
+        type: 'MACHINE_SELECT',
+        machine: { id: 'm1', name: 'Presse P1', reference: 'X100' },
+      });
+
+      expect(result.machine.selected).toEqual({ id: 'm1', name: 'Presse P1', reference: 'X100' });
+    });
+  });
+
+  describe('MACHINE_CLEAR', () => {
+    it('clears the selected machine', () => {
+      const state = createInitialState();
+      state.machine.selected = { id: 'm1', name: 'Presse P1', reference: null };
+
+      const result = appReducer(state, { type: 'MACHINE_CLEAR' });
+
+      expect(result.machine.selected).toBeNull();
     });
   });
 });

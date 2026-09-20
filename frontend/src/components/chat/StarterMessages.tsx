@@ -1,12 +1,10 @@
 import type { ReactNode } from 'react';
 import { Body1, Subtitle1 } from '@fluentui/react-components';
-import { AgentIcon } from '../core/AgentIcon';
 import styles from './StarterMessages.module.css';
 
 interface IStarterMessageProps {
   agentName?: string;
   agentDescription?: string;
-  agentLogo?: string;
   /**
    * Starter prompts from agent metadata.
    * If not provided, falls back to default prompts.
@@ -28,7 +26,6 @@ const defaultStarterPrompts = [
 export const StarterMessages = ({
   agentName,
   agentDescription,
-  agentLogo,
   starterPrompts,
   onPromptClick,
 }: IStarterMessageProps): ReactNode => {
@@ -36,18 +33,24 @@ export const StarterMessages = ({
   const prompts = starterPrompts && starterPrompts.length > 0 
     ? starterPrompts 
     : defaultStarterPrompts;
+  const displayAgentName = agentName?.replace(/-/g, ' ').trim();
+  const mobileTitlePrefix = 'Assistant Technique';
+  const mobileMachineName = displayAgentName?.startsWith(mobileTitlePrefix)
+    ? displayAgentName.slice(mobileTitlePrefix.length).trim()
+    : displayAgentName;
 
   return (
     <div className={styles.zeroprompt}>
       <div className={styles.content}>
-        <AgentIcon
-          alt={agentName ?? "Agent"}
-          size="large"
-          logoUrl={agentLogo}
-        />
-        <Subtitle1 className={styles.welcome}>
-          {agentName ?? 'Assistant Technique'}
+        <Subtitle1 className={`${styles.welcome} ${styles.desktopAgentTitle}`}>
+          {displayAgentName ?? 'Assistant Technique'}
         </Subtitle1>
+        <div className={styles.mobileAgentTitle}>
+          <Subtitle1 className={styles.mobileAgentTitleMain}>{mobileTitlePrefix}</Subtitle1>
+          {mobileMachineName && mobileMachineName !== mobileTitlePrefix && (
+            <Subtitle1 className={styles.mobileAgentMachineName}>{mobileMachineName}</Subtitle1>
+          )}
+        </div>
         {agentDescription && (
           <Body1 className={styles.caption}>{agentDescription}</Body1>
         )}

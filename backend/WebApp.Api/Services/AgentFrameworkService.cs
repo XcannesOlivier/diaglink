@@ -8,7 +8,9 @@ using OpenAI.Responses;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Web;
 using System.Runtime.CompilerServices;
+using System.Text;
 using WebApp.Api.Models;
+using WebApp.Api.Models.Entities;
 
 namespace WebApp.Api.Services;
 
@@ -26,6 +28,7 @@ public class AgentFrameworkService : IDisposable
 {
     private readonly string _agentEndpoint;
     private readonly string _agentId;
+    private readonly AiPricingIdentityResolver _pricingIdentityResolver;
     /// <summary>
     /// Optional concrete agent version id (e.g. "3") from <c>AI_AGENT_VERSION</c>.
     /// When set, the agent is pinned to that immutable version for both metadata
@@ -43,12 +46,17 @@ public class AgentFrameworkService : IDisposable
     private readonly bool _useObo;
     private readonly TokenCredential _fallbackCredential;
 
-    // Agent metadata cache (static - shared across requests)
-    private static ProjectsAgentVersion? s_cachedAgentVersion;
-    private static AgentMetadataResponse? s_cachedMetadata;
+    // Agent metadata caches, keyed by BuildAgentCacheKey(projectEndpoint, agentId, version). Never a
+    // single shared slot, so resolving Machine A's agent can never leak into a response for Machine B.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ProjectsAgentVersion> s_cachedAgentVersions = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, AgentMetadataResponse> s_cachedMetadataByKey = new();
     private static readonly SemaphoreSlim s_agentLock = new(1, 1);
     // MI assertion cache (static - user-independent, safe to share across requests)
     private static ManagedIdentityClientAssertion? s_miAssertion;
+    // AIProjectClient cache keyed by project endpoint. MI mode shares one client per endpoint across
+    // requests; OBO mode caches per endpoint for the lifetime of this scoped/per-request instance only.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, AIProjectClient> s_miProjectClientsByEndpoint = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AIProjectClient> _oboProjectClientsByEndpoint = new();
 
     private readonly IHttpClientFactory _httpClientFactory;
 
@@ -58,18 +66,17 @@ public class AgentFrameworkService : IDisposable
     /// </summary>
     public const string WebAppUploadFilenamePrefix = "webapp-upload-";
 
-    // Per-request project client
-    private AIProjectClient? _projectClient;
     private bool _disposed = false;
-    private ResponseTokenUsage? _lastUsage;
 
     public AgentFrameworkService(
         IConfiguration configuration,
         ILogger<AgentFrameworkService> logger,
         IHttpClientFactory httpClientFactory,
+        AiPricingIdentityResolver pricingIdentityResolver,
         IHttpContextAccessor? httpContextAccessor = null)
     {
         _logger = logger;
+        _pricingIdentityResolver = pricingIdentityResolver;
         _httpClientFactory = httpClientFactory;
         _httpContextAccessor = httpContextAccessor;
 
@@ -136,31 +143,31 @@ public class AgentFrameworkService : IDisposable
             // in CreateOboCredential(). Safe here because the constructor runs once per scoped instance.
             s_miAssertion ??= new ManagedIdentityClientAssertion(managedIdentityClientId: _managedIdentityClientId);
 
-            // No cached project client in OBO mode — created per-request with user's token
+            // Project clients are created lazily per endpoint by GetProjectClient(endpoint).
         }
         else
         {
             _logger.LogInformation("MI mode: using managed identity for all API calls");
-            _projectClient = new AIProjectClient(new Uri(_agentEndpoint), _fallbackCredential);
         }
 
         _logger.LogInformation("AIProjectClient initialized successfully");
     }
 
     /// <summary>
-    /// Get AIProjectClient — OBO mode creates per-request with user's identity, MI mode uses cached client.
+    /// Get AIProjectClient for the given project endpoint — OBO mode creates per-request with the
+    /// user's identity, MI mode uses a client cached per endpoint. Keyed by endpoint (not a single
+    /// slot) so different machines' MachineAssistantConfiguration.ProjectEndpoint never collide.
     /// </summary>
-    private AIProjectClient GetProjectClient()
+    private AIProjectClient GetProjectClient(string projectEndpoint)
     {
-        // MI mode: return cached client
         if (!_useObo)
         {
-            _projectClient ??= new AIProjectClient(new Uri(_agentEndpoint), _fallbackCredential);
-            return _projectClient;
+            return s_miProjectClientsByEndpoint.GetOrAdd(
+                projectEndpoint,
+                endpoint => new AIProjectClient(new Uri(endpoint), _fallbackCredential));
         }
 
-        // OBO: create per-request client with user's token (cached for request lifetime)
-        if (_projectClient is null)
+        return _oboProjectClientsByEndpoint.GetOrAdd(projectEndpoint, endpoint =>
         {
             var userToken = ExtractBearerToken();
             if (string.IsNullOrEmpty(userToken))
@@ -171,12 +178,13 @@ public class AgentFrameworkService : IDisposable
             }
 
             var oboCredential = CreateOboCredential(userToken);
-            _logger.LogDebug("Created OBO credential for request");
-            _projectClient = new AIProjectClient(new Uri(_agentEndpoint), oboCredential);
-        }
-
-        return _projectClient;
+            _logger.LogDebug("Created OBO credential for request (endpoint={Endpoint})", endpoint);
+            return new AIProjectClient(new Uri(endpoint), oboCredential);
+        });
     }
+
+    /// <summary>Legacy overload — resolves the client for the globally-configured (env var) agent endpoint.</summary>
+    private AIProjectClient GetProjectClient() => GetProjectClient(_agentEndpoint);
 
     /// <summary>
     /// Create OBO credential using the user's JWT and managed identity FIC assertion.
@@ -210,41 +218,49 @@ public class AgentFrameworkService : IDisposable
 
     /// <summary>
     /// Load the agent version metadata via AgentAdministrationClient (v2 Agents API).
-    /// When <see cref="_configuredAgentVersion"/> is set, fetches that specific version by id.
-    /// When unset, lists versions in descending order and picks the first (= newest).
+    /// When <paramref name="assistantConfig"/> is supplied (machine-scoped chat), resolves that
+    /// machine's ProjectEndpoint/AgentId/AgentVersion; otherwise falls back to the legacy
+    /// globally-configured (env var) agent for backward compatibility with pre-existing conversations.
+    /// Cached per (endpoint, agentId, version) key — never a single shared slot — so resolving
+    /// Machine A's agent can never be returned for a Machine B request.
     /// </summary>
-    private async Task<ProjectsAgentVersion> GetAgentAsync(CancellationToken cancellationToken = default)
+    private async Task<ProjectsAgentVersion> GetAgentAsync(ResolvedAssistantConfiguration? assistantConfig, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (s_cachedAgentVersion != null)
-            return s_cachedAgentVersion;
+        var effectiveEndpoint = assistantConfig?.ProjectEndpoint ?? _agentEndpoint;
+        var effectiveAgentId = assistantConfig?.AgentId ?? _agentId;
+        var effectiveVersion = assistantConfig?.AgentVersion ?? _configuredAgentVersion;
+        var cacheKey = BuildAgentCacheKey(effectiveEndpoint, effectiveAgentId, effectiveVersion);
+
+        if (s_cachedAgentVersions.TryGetValue(cacheKey, out var cachedVersion))
+            return cachedVersion;
 
         await s_agentLock.WaitAsync(cancellationToken);
         try
         {
-            if (s_cachedAgentVersion != null)
-                return s_cachedAgentVersion;
+            if (s_cachedAgentVersions.TryGetValue(cacheKey, out cachedVersion))
+                return cachedVersion;
 
             // Use the same credential path as all other operations (MI or OBO)
-            var client = GetProjectClient();
+            var client = GetProjectClient(effectiveEndpoint);
 
             ProjectsAgentVersion? loaded;
-            if (!string.IsNullOrWhiteSpace(_configuredAgentVersion))
+            if (!string.IsNullOrWhiteSpace(effectiveVersion))
             {
-                _logger.LogInformation("Loading agent: {AgentId} version={Version}", _agentId, _configuredAgentVersion);
+                _logger.LogInformation("Loading agent: {AgentId} version={Version}", effectiveAgentId, effectiveVersion);
                 var response = await client.AgentAdministrationClient.GetAgentVersionAsync(
-                    _agentId,
-                    _configuredAgentVersion!,
+                    effectiveAgentId,
+                    effectiveVersion!,
                     cancellationToken);
                 loaded = response.Value;
             }
             else
             {
-                _logger.LogInformation("Loading agent: {AgentId} version=<latest>", _agentId);
+                _logger.LogInformation("Loading agent: {AgentId} version=<latest>", effectiveAgentId);
                 loaded = null;
                 await foreach (var v in client.AgentAdministrationClient.GetAgentVersionsAsync(
-                    agentName: _agentId,
+                    agentName: effectiveAgentId,
                     limit: 1,
                     order: AgentListOrder.Descending,
                     after: null,
@@ -258,20 +274,20 @@ public class AgentFrameworkService : IDisposable
                 if (loaded is null)
                 {
                     throw new InvalidOperationException(
-                        $"Agent '{_agentId}' has no versions. Create at least one version in AI Foundry.");
+                        $"Agent '{effectiveAgentId}' has no versions. Create at least one version in AI Foundry.");
                 }
             }
 
-            s_cachedAgentVersion = loaded;
+            s_cachedAgentVersions[cacheKey] = loaded;
 
-            var definition = s_cachedAgentVersion.Definition as DeclarativeAgentDefinition;
+            var definition = loaded.Definition as DeclarativeAgentDefinition;
 
             _logger.LogInformation(
                 "Loaded agent: name={AgentName}, model={Model}, version={Version} (pinned={Pinned})",
-                s_cachedAgentVersion.Name ?? _agentId,
+                loaded.Name ?? effectiveAgentId,
                 definition?.Model ?? "unknown",
-                s_cachedAgentVersion.Version ?? "<unknown>",
-                !string.IsNullOrWhiteSpace(_configuredAgentVersion));
+                loaded.Version ?? "<unknown>",
+                !string.IsNullOrWhiteSpace(effectiveVersion));
 
             // Log StructuredInputs at debug level for troubleshooting
             if (definition?.StructuredInputs != null && definition.StructuredInputs.Count > 0)
@@ -281,11 +297,11 @@ public class AgentFrameworkService : IDisposable
                     string.Join(", ", definition.StructuredInputs.Keys));
             }
 
-            return s_cachedAgentVersion;
+            return loaded;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load agent: {AgentId}", _agentId);
+            _logger.LogError(ex, "Failed to load agent: {AgentId}", effectiveAgentId);
             throw;
         }
         finally
@@ -294,11 +310,19 @@ public class AgentFrameworkService : IDisposable
         }
     }
 
+    /// <summary>Cache key for the per-(endpoint,agentId,version) agent/metadata caches.</summary>
+    private static string BuildAgentCacheKey(string projectEndpoint, string agentId, string? version)
+        => $"{projectEndpoint}|{agentId}|{version ?? "latest"}";
+
     /// <summary>
     /// Streams agent response for a message using ProjectResponsesClient (Responses API).
     /// Returns StreamChunk objects containing text deltas, annotations, or MCP approval requests.
     /// </summary>
     /// <remarks>
+    /// Stateless by design: SQL (see <see cref="WebApp.Api.Services.ConversationContextBuilder"/> and
+    /// <see cref="WebApp.Api.Program"/>) is the sole source of conversational memory. No
+    /// ProjectConversation is created or bound here — <paramref name="conversationId"/> is kept only
+    /// for log correlation with the SQL-side conversation, never passed to the Responses API.
     /// Uses direct ProjectResponsesClient instead of IChatClient because we need access to:
     /// - McpToolCallApprovalRequestItem for MCP approval flows
     /// - FileSearchCallResponseItem for file search quotes  
@@ -312,6 +336,7 @@ public class AgentFrameworkService : IDisposable
         List<FileAttachment>? fileDataUris = null,
         string? previousResponseId = null,
         McpApprovalResponse? mcpApproval = null,
+        ResolvedAssistantConfiguration? assistantConfig = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -325,21 +350,24 @@ public class AgentFrameworkService : IDisposable
 
         CreateResponseOptions options = new() { StreamingEnabled = true };
 
+        var effectiveAgentId = assistantConfig?.AgentId ?? _agentId;
+
         // Resolve the concrete agent version up front so streaming and metadata use the same version.
-        var resolvedAgent = await GetAgentAsync(cancellationToken);
-        var resolvedVersion = _configuredAgentVersion ?? resolvedAgent.Version;
+        var resolvedAgent = await GetAgentAsync(assistantConfig, cancellationToken);
+        var resolvedVersion = (assistantConfig?.AgentVersion ?? _configuredAgentVersion) ?? resolvedAgent.Version;
 
-        // Always bind to conversation — the conversation maintains MCP approval state
+        // Stateless call — no conversation binding. SQL is the memory; Foundry only sees what's in
+        // options.InputItems for this single call.
         ProjectResponsesClient responsesClient
-            = GetProjectClient().ProjectOpenAIClient.GetProjectResponsesClientForAgent(
-                new AgentReference(_agentId, resolvedVersion),
-                conversationId);
+            = GetProjectClient(assistantConfig?.ProjectEndpoint ?? _agentEndpoint).ProjectOpenAIClient.GetProjectResponsesClientForAgent(
+                new AgentReference(effectiveAgentId, resolvedVersion));
 
-        // If continuing from MCP approval, add approval response items
-        // Don't set PreviousResponseId — the API rejects it with conversation binding,
-        // and the conversation already tracks the pending MCP state
+        // If continuing from MCP approval, add approval response items.
+        // PreviousResponseId here is a short-lived pointer to the SAME tool/MCP exchange only —
+        // not a substitute for conversational memory, which lives entirely in SQL.
         if (!string.IsNullOrEmpty(previousResponseId) && mcpApproval != null)
         {
+            options.PreviousResponseId = previousResponseId;
             options.InputItems.Add(ResponseItem.CreateMcpApprovalResponseItem(
                 mcpApproval.ApprovalRequestId,
                 mcpApproval.Approved));
@@ -366,6 +394,13 @@ public class AgentFrameworkService : IDisposable
         var fileSearchQuotes = new Dictionary<string, string>();
         // Track the current response ID for MCP approval resume flow
         string? currentResponseId = null;
+        var visionDiagnostics = new VisionToolDiagnostics(_logger);
+        var definitionModel = (resolvedAgent.Definition as DeclarativeAgentDefinition)?.Model;
+        var pricingIdentity = _pricingIdentityResolver.Resolve(
+            assistantConfig?.ProjectEndpoint ?? _agentEndpoint, effectiveAgentId, resolvedVersion, definitionModel);
+        // Initial event makes interrupted streams explicitly unknown, while retaining agent identity.
+        yield return new StreamChunk { Usage = pricingIdentity.ApplyTo(new AiResponseUsage(AiUsageType.ChatResponse, null, false,
+            null, null, null, definitionModel, "agentDefinition", resolvedVersion, DateTimeOffset.UtcNow)) };
 
         await foreach (StreamingResponseUpdate update
             in responsesClient.CreateResponseStreamingAsync(
@@ -376,6 +411,8 @@ public class AgentFrameworkService : IDisposable
             if (update is StreamingResponseCreatedUpdate createdUpdate)
             {
                 currentResponseId = createdUpdate.Response.Id;
+                yield return new StreamChunk { Usage = pricingIdentity.ApplyTo(new AiResponseUsage(AiUsageType.ChatResponse, currentResponseId, false,
+                    null, null, null, definitionModel, "agentDefinition", resolvedVersion, DateTimeOffset.UtcNow)) };
                 _logger.LogDebug("Response created: {ResponseId}", currentResponseId);
                 continue;
             }
@@ -386,6 +423,8 @@ public class AgentFrameworkService : IDisposable
             }
             else if (update is StreamingResponseOutputItemDoneUpdate itemDoneUpdate)
             {
+                if (visionDiagnostics.Observe(itemDoneUpdate.Item, "done", currentResponseId) is { } visionDone)
+                    yield return new StreamChunk { VisionUsage = visionDone };
                 // Check for MCP tool approval request
                 if (itemDoneUpdate.Item is McpToolCallApprovalRequestItem mcpApprovalItem)
                 {
@@ -436,6 +475,9 @@ public class AgentFrameworkService : IDisposable
             }
             else if (update is StreamingResponseOutputItemAddedUpdate itemAddedUpdate)
             {
+                if (itemAddedUpdate.Item != null &&
+                    visionDiagnostics.Observe(itemAddedUpdate.Item, "added", currentResponseId) is { } visionAdded)
+                    yield return new StreamChunk { VisionUsage = visionAdded };
                 // Detect tool-use steps and signal the frontend for progress indicators
                 string? toolName = itemAddedUpdate.Item switch
                 {
@@ -453,7 +495,13 @@ public class AgentFrameworkService : IDisposable
             }
             else if (update is StreamingResponseCompletedUpdate completedUpdate)
             {
-                _lastUsage = completedUpdate.Response.Usage;
+                var response = completedUpdate.Response;
+                visionDiagnostics.Complete(response);
+                yield return new StreamChunk { Usage = pricingIdentity.ApplyTo(new AiResponseUsage(AiUsageType.ChatResponse, response.Id, true,
+                    response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, response.Usage?.TotalTokenCount,
+                    string.IsNullOrWhiteSpace(response.Model) ? definitionModel : response.Model,
+                    string.IsNullOrWhiteSpace(response.Model) ? "agentDefinition" : "response",
+                    resolvedVersion, DateTimeOffset.UtcNow)) };
             }
             else if (update is StreamingResponseErrorUpdate errorUpdate)
             {
@@ -804,7 +852,7 @@ public class AgentFrameworkService : IDisposable
     /// Create a new conversation for the agent.
     /// Uses ProjectConversation from Azure.AI.Projects for server-managed state.
     /// </summary>
-    public async Task<string> CreateConversationAsync(string? firstMessage = null, CancellationToken cancellationToken = default)
+    public async Task<string> CreateConversationAsync(string? firstMessage = null, string? projectEndpointOverride = null, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -824,7 +872,7 @@ public class AgentFrameworkService : IDisposable
             }
 
             ProjectConversation conversation
-                = await GetProjectClient().ProjectOpenAIClient.GetProjectConversationsClient().CreateProjectConversationAsync(
+                = await GetProjectClient(projectEndpointOverride ?? _agentEndpoint).ProjectOpenAIClient.GetProjectConversationsClient().CreateProjectConversationAsync(
                     conversationOptions,
                     cancellationToken);
 
@@ -953,7 +1001,130 @@ public class AgentFrameworkService : IDisposable
     }
 
     /// <summary>
+    /// Generates a condensed technical summary from older messages, merged with any existing summary.
+    /// Runs on a disposable, throwaway Foundry conversation created solely for this call — never stored,
+    /// never reused, and never affecting the user's live conversation.
+    /// </summary>
+    public async Task<AiSummaryResult> SummarizeConversationAsync(
+        string? existingSummary,
+        IReadOnlyList<ConversationMessage> oldMessages,
+        CancellationToken cancellationToken = default,
+        Action<AiResponseUsage>? onUsage = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var scratchConversationId = await CreateConversationAsync(firstMessage: null, projectEndpointOverride: null, cancellationToken: cancellationToken);
+
+        var resolvedAgent = await GetAgentAsync(assistantConfig: null, cancellationToken);
+        var resolvedVersion = _configuredAgentVersion ?? resolvedAgent.Version;
+        var pricingIdentity = _pricingIdentityResolver.Resolve(_agentEndpoint, _agentId, resolvedVersion,
+            (resolvedAgent.Definition as DeclarativeAgentDefinition)?.Model);
+
+        ProjectResponsesClient responsesClient
+            = GetProjectClient().ProjectOpenAIClient.GetProjectResponsesClientForAgent(
+                new AgentReference(_agentId, resolvedVersion),
+                scratchConversationId);
+
+        var prompt = BuildSummarizationPrompt(existingSummary, oldMessages);
+
+        CreateResponseOptions options = new() { StreamingEnabled = false };
+        options.InputItems.Add(ResponseItem.CreateUserMessageItem(prompt));
+
+        onUsage?.Invoke(pricingIdentity.ApplyTo(new AiResponseUsage(AiUsageType.ConversationSummary, null, false,
+            null, null, null, (resolvedAgent.Definition as DeclarativeAgentDefinition)?.Model,
+            "agentDefinition", resolvedVersion, DateTimeOffset.UtcNow)));
+        var result = await responsesClient.CreateResponseAsync(options, cancellationToken);
+        var response = result.Value;
+        var usage = pricingIdentity.ApplyTo(new AiResponseUsage(
+            AiUsageType.ConversationSummary, response.Id, true,
+            response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, response.Usage?.TotalTokenCount,
+            string.IsNullOrWhiteSpace(response.Model) ? (resolvedAgent.Definition as DeclarativeAgentDefinition)?.Model : response.Model,
+            string.IsNullOrWhiteSpace(response.Model) ? "agentDefinition" : "response",
+            resolvedVersion, DateTimeOffset.UtcNow));
+        onUsage?.Invoke(usage);
+        return new AiSummaryResult(ExtractOutputText(response), usage);
+    }
+
+    /// <summary>
+    /// Builds the strict, maintenance-focused summarization prompt merging the existing technical
+    /// summary with the older messages being folded into it.
+    /// </summary>
+    private static string BuildSummarizationPrompt(string? existingSummary, IReadOnlyList<ConversationMessage> oldMessages)
+    {
+        var messagesText = new StringBuilder();
+        foreach (var m in oldMessages)
+        {
+            messagesText.Append(m.Role).Append(": ").Append(m.Content).Append('\n');
+        }
+
+        return $$"""
+            Tu es un assistant de maintenance industrielle. Ta seule tâche ici est de produire un résumé technique
+            compact d'une conversation de diagnostic, destiné à servir de mémoire de contexte pour la suite de
+            l'intervention. Tu ne dois pas répondre à l'utilisateur, ni poursuivre le diagnostic : uniquement résumer.
+
+            CONSERVER UNIQUEMENT si présent dans le résumé existant ou les messages ci-dessous :
+            - problème initial signalé
+            - symptômes constatés
+            - codes défaut (conserver le code exact, sans le reformuler)
+            - machine ou document concerné (nom/référence exacte si mentionné)
+            - pages importantes (numéros exacts)
+            - composants et repères identifiés (références exactes)
+            - mesures effectuées avec leurs valeurs exactes
+            - contrôles déjà réalisés
+            - résultats obtenus
+            - hypothèses déjà éliminées (préciser qu'il s'agit d'hypothèses écartées, pas de faits)
+            - diagnostic actuel (en l'état, sans le présenter comme définitif s'il ne l'est pas)
+            - prochaines actions prévues
+            - informations importantes données explicitement par l'utilisateur
+
+            NE JAMAIS INCLURE :
+            - formules de politesse
+            - répétitions
+            - explications longues déjà comprises
+            - raisonnement interne ou étapes de réflexion
+            - sorties brutes d'outils
+            - contenu intégral de recherches de fichiers ou de résultats Vision
+            - métadonnées inutiles
+            - URLs signées (SAS) ou tout lien temporaire
+            - secrets, clés, tokens ou identifiants
+
+            RÈGLES STRICTES :
+            - N'invente aucune information absente des messages ou de l'ancien résumé.
+            - Ne transforme jamais une hypothèse ou une supposition en fait confirmé.
+            - Préserve les valeurs, références, repères, codes défaut et numéros de page exactement tels qu'exprimés
+              (ne pas arrondir, reformuler ou approximer).
+            - Si l'ancien résumé technique contient une information toujours utile, conserve-la ; sinon, ne la répète pas.
+            - Considère l'ancien résumé comme une mémoire persistante : ne supprime une information existante que si
+              les nouveaux échanges la corrigent explicitement, la rendent fausse ou montrent clairement qu'elle n'est
+              plus utile au diagnostic.
+            - En cas de contradiction entre l'ancien résumé et les nouveaux échanges, privilégie l'information la plus
+              récente et indique brièvement qu'elle remplace/corrige l'information précédente.
+            - Fusionne l'ancien résumé et les nouveaux échanges en un seul résumé cohérent, sans doublons.
+            - Reste sous 600 mots.
+            - Le résultat doit être directement exploitable comme contexte technique par un agent qui reprendra la
+              conversation sans avoir vu les échanges originaux.
+
+            FORMAT DE SORTIE :
+            Texte structuré par sections courtes, une section par rubrique ci-dessus UNIQUEMENT si elle contient une
+            information réelle (omettre les sections vides). Style télégraphique, phrases courtes, pas de prose.
+            Pas d'introduction ni de conclusion, uniquement le résumé.
+
+            --- RÉSUMÉ TECHNIQUE EXISTANT (peut être vide) ---
+            {{existingSummary ?? "(aucun résumé existant)"}}
+
+            --- NOUVEAUX ÉCHANGES À INTÉGRER AU RÉSUMÉ ---
+            {{messagesText}}
+            """;
+    }
+
+    /// <summary>
+    /// Extracts the concatenated output text from a non-streaming Responses API result.
+    /// </summary>
+    private static string ExtractOutputText(ResponseResult response) => response.GetOutputText() ?? string.Empty;
+
+    /// <summary>
     /// Download a file generated by code interpreter or other tools.
+
     /// Container files (with containerId) use the REST API: GET /openai/v1/containers/{containerId}/files/{fileId}/content.
     /// Standard files use the OpenAI FileClient.
     /// </summary>
@@ -1037,16 +1208,22 @@ public class AgentFrameworkService : IDisposable
 
     /// <summary>
     /// Get the agent metadata (name, description, etc.) for display in UI.
-    /// Reads directly from the cached ProjectsAgentVersion.
+    /// Reads directly from the cached ProjectsAgentVersion. When <paramref name="assistantConfig"/> is
+    /// supplied, returns metadata for that machine's agent; otherwise falls back to the legacy
+    /// globally-configured agent.
     /// </summary>
-    public async Task<AgentMetadataResponse> GetAgentMetadataAsync(CancellationToken cancellationToken = default)
+    public async Task<AgentMetadataResponse> GetAgentMetadataAsync(ResolvedAssistantConfiguration? assistantConfig = null, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var agentVersion = await GetAgentAsync(cancellationToken);
+        var effectiveAgentId = assistantConfig?.AgentId ?? _agentId;
+        var effectiveVersion = assistantConfig?.AgentVersion ?? _configuredAgentVersion;
+        var cacheKey = BuildAgentCacheKey(assistantConfig?.ProjectEndpoint ?? _agentEndpoint, effectiveAgentId, effectiveVersion);
 
-        if (s_cachedMetadata != null)
-            return s_cachedMetadata;
+        var agentVersion = await GetAgentAsync(assistantConfig, cancellationToken);
+
+        if (s_cachedMetadataByKey.TryGetValue(cacheKey, out var cachedMetadata))
+            return cachedMetadata;
 
         var definition = agentVersion.Definition as DeclarativeAgentDefinition;
         var metadata = agentVersion.Metadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
@@ -1060,12 +1237,12 @@ public class AgentFrameworkService : IDisposable
         // Parse starter prompts from metadata
         List<string>? starterPrompts = ParseStarterPrompts(metadata);
 
-        s_cachedMetadata = new AgentMetadataResponse
+        var result = new AgentMetadataResponse
         {
-            Id = _agentId,
+            Id = effectiveAgentId,
             Object = "agent",
             CreatedAt = agentVersion.CreatedAt.ToUnixTimeSeconds(),
-            Name = agentVersion.Name ?? "AI Assistant",
+            Name = effectiveAgentId,
             Description = agentVersion.Description,
             Model = definition?.Model ?? string.Empty,
             Instructions = definition?.Instructions ?? string.Empty,
@@ -1073,7 +1250,8 @@ public class AgentFrameworkService : IDisposable
             StarterPrompts = starterPrompts
         };
 
-        return s_cachedMetadata;
+        s_cachedMetadataByKey[cacheKey] = result;
+        return result;
     }
 
     /// <summary>
@@ -1116,15 +1294,9 @@ public class AgentFrameworkService : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var agentVersion = await GetAgentAsync(cancellationToken);
+        var agentVersion = await GetAgentAsync(assistantConfig: null, cancellationToken);
         return agentVersion.Name ?? _agentId;
     }
-
-    /// <summary>
-    /// Get token usage from the last streaming response.
-    /// </summary>
-    public (int InputTokens, int OutputTokens, int TotalTokens)? GetLastUsage() =>
-        _lastUsage is null ? null : (_lastUsage.InputTokenCount, _lastUsage.OutputTokenCount, _lastUsage.TotalTokenCount);
 
     /// <summary>
     /// Returns a count and total byte size of files uploaded by this web app (identified by
@@ -1205,8 +1377,7 @@ public class AgentFrameworkService : IDisposable
         {
             _disposed = true;
             // AIProjectClient does not implement IDisposable (verified via reflection on
-            // Azure.AI.Projects assembly). No cleanup needed for _projectClient.
-            _projectClient = null;
+            // Azure.AI.Projects assembly). No cleanup needed for the cached project clients.
             _logger.LogDebug("AgentFrameworkService disposed");
         }
     }

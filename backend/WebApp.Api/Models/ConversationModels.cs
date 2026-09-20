@@ -37,7 +37,12 @@ public record ConversationSummary
     public required string Id { get; init; }
     public string? Title { get; init; }
     public long CreatedAt { get; init; }
+    public string? MachineId { get; init; }
+    public string? MachineName { get; init; }
 }
+
+/// <summary>SQL-side conversation ownership + machine binding, used to authorize resumed conversations.</summary>
+public record ConversationOwnershipInfo(Guid Id, Guid? MachineId);
 
 public record ConversationMessageInfo
 {

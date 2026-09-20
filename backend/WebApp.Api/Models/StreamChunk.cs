@@ -6,6 +6,9 @@ namespace WebApp.Api.Models;
 /// </summary>
 public record StreamChunk
 {
+    public VisionUsageCapture? VisionUsage { get; init; }
+    public AiResponseUsage? Usage { get; init; }
+
     /// <summary>
     /// Text content chunk (delta). Null if this chunk contains annotations or approval request.
     /// </summary>

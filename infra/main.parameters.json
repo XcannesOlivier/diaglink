@@ -25,6 +25,12 @@
     },
     "enableObo": {
       "value": "${ENABLE_OBO=false}"
+    },
+    "authOtpPepper": {
+      "value": "${AUTH_OTP_PEPPER}"
+    },
+    "azureStorageConnectionString": {
+      "value": "${AZURE_STORAGE_CONNECTION_STRING}"
     }
   }
 }

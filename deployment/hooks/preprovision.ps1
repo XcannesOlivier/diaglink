@@ -42,6 +42,18 @@ Write-Host "[OK] Tenant: $tenantId" -ForegroundColor Green
 
 Write-Host "[OK] Environment: $envName" -ForegroundColor Green
 
+# Required by /api/auth/request-code in Production. Keep the value local/non-versioned:
+# azd env set AUTH_OTP_PEPPER <strong-random-value> --environment <env>
+$authOtpPepper = (azd env get-value AUTH_OTP_PEPPER 2>&1) | Where-Object { $_ -notmatch 'ERROR|WARNING' } | Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($authOtpPepper)) { $authOtpPepper = $env:AUTH_OTP_PEPPER }
+if ([string]::IsNullOrWhiteSpace($authOtpPepper)) {
+    Write-Host "[ERROR] AUTH_OTP_PEPPER is not set. Generate a strong random value and run:" -ForegroundColor Red
+    Write-Host "        azd env set AUTH_OTP_PEPPER <value> --environment $envName" -ForegroundColor Yellow
+    Write-Host "        or set the AUTH_OTP_PEPPER environment variable before azd up." -ForegroundColor Yellow
+    exit 1
+}
+Write-Host "[OK] AUTH_OTP_PEPPER configured" -ForegroundColor Green
+
 # Map portal variables (AZURE_EXISTING_*) to app variables if present
 # The AI Foundry portal's "View sample app code" emits these when linking to this repo.
 # Users may paste them into azd env (.azure/<env>/.env) or a root .env file.

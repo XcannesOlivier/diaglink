@@ -24,7 +24,7 @@ export const BuiltWithBadge: React.FC<BuiltWithBadgeProps> = ({ className }) => 
       <span className={styles.logo}>
         <AIFoundryLogo />
       </span>
-      <Caption1Strong className={styles.text}>
+      <Caption1Strong className={`${styles.text} ${styles.poweredByText}`}>
         Propulsé par
       </Caption1Strong>
       <Caption1Strong className={styles.brand}>
