@@ -203,7 +203,7 @@ This forces anyone adding state fields to also add test coverage — the test fi
 
 ## When Unit Tests Aren't Enough
 
-Use the `validating-ui-features` skill and Playwright when:
+Use Playwright when:
 - Testing requires browser interaction (clicking, navigation)
 - Testing authentication flows with MSAL
 - Testing SSE streaming with real backend

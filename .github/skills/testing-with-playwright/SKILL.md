@@ -140,6 +140,5 @@ Use console logs for state verification. Use snapshots for element presence. Avo
 
 ## Related Skills
 
-- **validating-ui-features** - Detailed test procedures for specific features
 - **writing-typescript-code** - Frontend patterns and state management
 - **implementing-chat-streaming** - SSE flow verification

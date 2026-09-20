@@ -249,7 +249,7 @@ Multiple layers catch incomplete setup before cryptic errors appear:
 | Layer | What It Checks | When It Runs |
 |-------|---------------|--------------|
 | **Vite env check plugin** | `VITE_ENTRA_SPA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID` | Dev server startup (`npm run dev`) — serves a styled error page instead of the app |
-| **preToolUse hook** | Context-aware: frontend commands check frontend env, backend commands check backend env (including `AI_AGENT_ENDPOINT`, `AI_AGENT_ID`) | AI agents running dev commands — advisory message, non-blocking |
+| **PreToolUse hook** | Context-aware: frontend commands check frontend env, backend commands check backend env (including `AI_AGENT_ENDPOINT`, `AI_AGENT_ID`) | AI agents running dev commands — advisory message, non-blocking |
 | **Validate Configuration task** | Both `.env` files with auth variables | On-demand via VS Code (`Tasks: Run Task` → `Validate Configuration`) |
 | **`validating-local-setup` skill** | Full diagnostic checklist with error patterns and step-by-step fixes | Loaded by AI agents when setup issues are detected |
 
@@ -307,17 +307,12 @@ This repository uses VS Code's Agent Skills feature for on-demand context loadin
   - `troubleshooting-authentication` - MSAL/JWT debugging
   - `researching-azure-ai-sdk` - SDK research workflow
   - `testing-with-playwright` - Browser testing workflow
-  - `syncing-mcp-servers` - MCP server config synchronization
-  - `testing-cli-compatibility` - CLI compatibility validation
   - `writing-unit-tests-csharp` - C#/MSTest unit test patterns
   - `writing-unit-tests-typescript` - TypeScript/Vitest unit test patterns
-  - `validating-ui-features` - UI feature validation procedures
-  - `committing-code` - Commit message format and conventional commit workflow
   - `validating-local-setup` - Setup diagnostics: missing env vars, `azd up` guidance
   - `reviewing-documentation` - Documentation audit checklists and quality standards
-  - `triaging-issues` - Issue triage workflow, priority definitions, and report format
   - `planning-features` - Structured plan template for feature implementation
-- `.github/hooks/` — Agent hook system (commit gate, setup detection) for enforcing workflows
+- `.github/hooks/` — Agent hook system (setup detection, documentation sync) for development assistance
 
 ## Azure Resources Provisioned
 

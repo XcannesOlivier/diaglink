@@ -94,7 +94,7 @@ dotnet test --collect:"XPlat Code Coverage"
 
 | Class | Testing Approach |
 |-------|------------------|
-| `AgentFrameworkService` | Use `validating-ui-features` skill with Playwright for integration tests |
+| `AgentFrameworkService` | Use Playwright for integration tests |
 
 ## Test Naming Convention
 
@@ -138,7 +138,7 @@ Assert.ThrowsException<InvalidOperationException>(() => MethodThatThrows());
 
 ## When Unit Tests Aren't Enough
 
-Use the `validating-ui-features` skill and Playwright when:
+Use Playwright when:
 - Testing requires a running backend server
 - Testing SSE streaming behavior
 - Testing authentication flows

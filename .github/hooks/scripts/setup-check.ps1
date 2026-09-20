@@ -4,19 +4,16 @@
 # Full-stack commands (start-local-dev) → check both.
 # Returns an advisory message when config is incomplete — does NOT block the command.
 #
-# Input: { "toolName": "powershell", "toolArgs": "{\"command\":\"npm run dev\"}" }
-# Output: { "message": "⚠️ ..." } or nothing (allow silently)
+# Input: { "tool_name": "powershell", "tool_input": { "command": "npm run dev" } }
+# Output: { "systemMessage": "⚠️ ..." } or nothing (allow silently)
 
 $ErrorActionPreference = 'SilentlyContinue'
 $rawInput = [Console]::In.ReadToEnd()
 
 try {
     $hookData = $rawInput | ConvertFrom-Json
-    $toolName = $hookData.toolName
-    $toolArgs = $null
-    if ($hookData.toolArgs) {
-        $toolArgs = $hookData.toolArgs | ConvertFrom-Json
-    }
+    $toolName = $hookData.tool_name
+    $toolArgs = $hookData.tool_input
 
     # Extract command string from whichever field the agent uses
     $command = $null
@@ -107,7 +104,7 @@ try {
              else { "backend" }
 
     $response = @{
-        message = @"
+        systemMessage = @"
 ⚠️ Incomplete $layer setup:
 $issueList
 

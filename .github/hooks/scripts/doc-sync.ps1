@@ -1,8 +1,8 @@
 # Doc Sync Hook - PostToolUse
 # After an agent edits an architecture-sensitive file, reminds to update ARCHITECTURE-FLOW.md.
 #
-# Input format: { "toolName": "edit", "toolArgs": "{\"path\":\"backend/.../Program.cs\"}" }
-# Output format: { "message": "⚠️ Architecture-sensitive file edited: ..." }
+# Input format: { "tool_name": "edit", "tool_input": { "path": "backend/.../Program.cs" } }
+# Output format: { "systemMessage": "⚠️ Architecture-sensitive file edited: ..." }
 
 $ErrorActionPreference = 'SilentlyContinue'
 
@@ -12,11 +12,8 @@ $rawInput = [Console]::In.ReadToEnd()
 try {
     $hookData = $rawInput | ConvertFrom-Json
 
-    $toolName = $hookData.toolName
-    $toolArgs = $null
-    if ($hookData.toolArgs) {
-        $toolArgs = $hookData.toolArgs | ConvertFrom-Json
-    }
+    $toolName = $hookData.tool_name
+    $toolArgs = $hookData.tool_input
 
     # Only trigger on file edit/create tools
     $editTools = @('edit', 'create', 'write', 'write_to_file', 'insert', 'replace', 'str_replace_editor')
@@ -53,7 +50,7 @@ try {
 
     if ($isSensitive) {
         $response = @{
-            message = "⚠️ Architecture-sensitive file edited: $fileName. If you changed endpoints, state actions, SSE events, or component contracts, also update ARCHITECTURE-FLOW.md (sections 1.1, 1.5, 2.7, 2.8)."
+            systemMessage = "⚠️ Architecture-sensitive file edited: $fileName. If you changed endpoints, state actions, SSE events, or component contracts, also update ARCHITECTURE-FLOW.md (sections 1.1, 1.5, 2.7, 2.8)."
         }
         $response | ConvertTo-Json -Compress
         exit 0

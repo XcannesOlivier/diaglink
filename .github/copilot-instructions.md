@@ -1,11 +1,11 @@
-Azure AI Foundry Agent Service sample app — Entra ID auth, SSE streaming, Container Apps deployment.
+DiagLink — assistant technique pour la maintenance industrielle — Entra ID auth, SSE streaming, Container Apps deployment.
 
 ## Architecture
 
 | Layer | Tech | Port | Entry Point |
 |-------|------|------|-------------|
 | **Frontend** | React 19 + Vite | 5173 | `frontend/src/App.tsx` |
-| **Backend** | ASP.NET Core 9 | 8080 | `backend/WebApp.Api/Program.cs` |
+| **Backend** | ASP.NET Core 10 | 8080 | `backend/WebApp.Api/Program.cs` |
 | **Auth** | MSAL.js → JWT Bearer | — | `frontend/src/config/authConfig.ts` |
 | **AI SDK** | Azure.AI.Projects (GA) + Azure.AI.Extensions.OpenAI | — | `backend/.../AgentFrameworkService.cs` |
 | **Deploy** | Azure Container Apps | — | `infra/main.bicep` |
@@ -55,6 +55,5 @@ Azure AI Foundry Agent Service sample app — Entra ID auth, SSE streaming, Cont
 
 | Hook | Event | What It Does |
 |------|-------|-------------|
-| **Commit Gate** | `preToolUse` | Blocks direct `git commit`. Follow `committing-code` skill → commit via `-F COMMIT_MESSAGE.md`. |
-| **Test Reminder** | `preToolUse` | Advisory: reminds to run tests if test files exist for staged changes. |
-| **Doc Sync** | `postToolUse` | Reminds to update `ARCHITECTURE-FLOW.md` when architecture-sensitive files are edited. |
+| **Setup Check** | `PreToolUse` | Checks local frontend/backend configuration before development commands. |
+| **Doc Sync** | `PostToolUse` | Reminds to update `ARCHITECTURE-FLOW.md` when architecture-sensitive files are edited. |

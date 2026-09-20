@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "windows": "powershell -NoProfile -File ./scripts/setup-check.ps1",
+        "cwd": ".github/hooks",
+        "timeout": 10
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "windows": "powershell -NoProfile -File ./scripts/doc-sync.ps1",
+        "cwd": ".github/hooks",
+        "timeout": 10
+      }
+    ]
+  }
+}
