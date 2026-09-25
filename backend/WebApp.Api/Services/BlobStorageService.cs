@@ -45,7 +45,6 @@ public class BlobStorageService
 
             var safeName = SanitizeFileName(f.FileName);
             var blobName = $"{companySlug}/{machineSlug}/{safeName}";
-
             var blob = container.GetBlobClient(blobName);
             using var stream = f.OpenReadStream();
             var headers = new BlobHttpHeaders { ContentType = f.ContentType ?? "application/pdf" };

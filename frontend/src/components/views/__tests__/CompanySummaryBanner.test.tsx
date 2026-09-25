@@ -40,3 +40,14 @@ it.each([
  else expect(cell.textContent).not.toContain('€');
  }finally{await act(async()=>root.unmount());}
 });
+
+it.each([
+ [true,'Abonnement actif'],
+ [false,'Abonnement en cours d’activation']
+])('derives a trialing subscription label from completed provisioning: %s',async(machineRequestProvisioningCompleted,label)=>{
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({walletBalance:0}))));
+ const host=document.createElement('div'),root=createRoot(host);
+ try{await act(async()=>root.render(<CompanySummaryBanner companyId="a" account={{subscriptionStatus:'trialing',machineRequestProvisioningCompleted} as StripeCompanySummary} token={async()=>null} revision={0}/>));
+ expect(host.querySelectorAll('dd')[2].textContent).toContain(label);
+ }finally{await act(async()=>root.unmount());}
+});

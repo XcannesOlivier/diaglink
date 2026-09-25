@@ -14,10 +14,11 @@ export function MachineCreditStatus({ machineId, getAccessToken }: { machineId: 
         const data = await response.json();
         if (!controller.signal.aborted) setMessage(data.message);
       } catch {
-        if (!controller.signal.aborted) setMessage('État du crédit indisponible.');
+        if (!controller.signal.aborted) setMessage('');
       }
     })();
     return () => controller.abort();
   }, [machineId, getAccessToken]);
+  if (!message) return null;
   return <div><p role="status">{message}</p></div>;
 }

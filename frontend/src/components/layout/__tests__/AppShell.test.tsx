@@ -7,6 +7,7 @@ import type { AppState } from '../../../types/appState';
 import type { CurrentUser } from '../../../types/currentUser';
 
 let mockState: AppState;
+const listMachineRequestsMock = vi.hoisted(() => vi.fn());
 const mounted: { root: Root; container: HTMLDivElement }[] = [];
 afterEach(async () => {
   for (const { root, container } of mounted.splice(0)) { await act(async () => root.unmount()); container.remove(); }
@@ -14,9 +15,12 @@ afterEach(async () => {
 const mockDispatch = vi.fn();
 
 // AgentChat -> useAuth -> useMsal needs an MSAL context; stub it so mounting doesn't require MsalProvider.
-vi.mock('@azure/msal-react', () => ({
-  useMsal: () => ({ instance: {}, accounts: [] }),
-}));
+const msal = vi.hoisted(() => ({ instance: {}, accounts: [] as never[] }));
+vi.mock('@azure/msal-react', () => ({ useMsal: () => msal }));
+vi.mock('../../../services/machineRequestAdminApi', async importOriginal => {
+  const original = await importOriginal<typeof import('../../../services/machineRequestAdminApi')>();
+  return { ...original, listMachineRequests: listMachineRequestsMock };
+});
 
 // AppShell/AgentChat read global state via useAppContext (used directly and via useAppState) — stub it
 // with a controllable state instead of wiring up the real AppProvider (which also depends on MSAL).
@@ -46,34 +50,36 @@ function renderAppShell(): HTMLDivElement {
 describe('AppShell navigation', () => {
   beforeEach(() => {
     mockDispatch.mockClear();
-    window.history.replaceState(null, '', '/');
+    listMachineRequestsMock.mockReset();
+    listMachineRequestsMock.mockResolvedValue({ kind: 'success', data: [] });
+    window.history.replaceState(null, '', '/app');
   });
 
   it('opens the administration URL for a Super Admin', () => {
-    window.history.replaceState(null, '', '/administration');
+    window.history.replaceState(null, '', '/app/administration');
     mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' });
     renderAppShell();
     expect(mockDispatch).toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'diaglink-admin' });
-    expect(window.location.pathname).toBe('/administration');
+    expect(window.location.pathname).toBe('/app/administration');
   });
 
   it('preserves the URL until login and role loading complete', () => {
-    window.history.replaceState(null, '', '/administration');
+    window.history.replaceState(null, '', '/app/administration');
     mockState = buildState(null);
     renderAppShell();
     expect(mockDispatch).not.toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'diaglink-admin' });
-    expect(window.location.pathname).toBe('/administration');
+    expect(window.location.pathname).toBe('/app/administration');
     mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' });
     act(() => mounted[0].root.render(<AppShell agentId="agent-1" agentName="Assistant Technique" />));
     expect(mockDispatch).toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'diaglink-admin' });
   });
 
   it.each(['technician', 'company_admin'] as const)('rejects direct administration access for %s', role => {
-    window.history.replaceState(null, '', '/administration');
+    window.history.replaceState(null, '', '/app/administration');
     mockState = buildState({ userId: 'u1', companyId: 'c1', role });
     renderAppShell();
     expect(mockDispatch).toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'chat' });
-    expect(window.location.pathname).toBe('/');
+    expect(window.location.pathname).toBe('/app');
   });
 
   it('updates the URL from navigation and handles browser history', () => {
@@ -82,10 +88,10 @@ describe('AppShell navigation', () => {
     const tab = Array.from(container.querySelectorAll('button')).find(el => el.textContent?.includes('Administration DiagLink'));
     expect(tab).toBeDefined();
     act(() => (tab as HTMLElement).click());
-    expect(window.location.pathname).toBe('/administration');
+    expect(window.location.pathname).toBe('/app/administration');
     expect(mockDispatch).toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'diaglink-admin' });
     act(() => {
-      window.history.replaceState({ diaglinkView: 'machines' }, '', '/');
+      window.history.replaceState({ diaglinkView: 'machines' }, '', '/app');
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
     expect(mockDispatch).toHaveBeenLastCalledWith({ type: 'UI_SET_VIEW', view: 'machines' });
@@ -101,6 +107,7 @@ describe('AppShell navigation', () => {
     expect(text).not.toContain('Utilisateurs');
     expect(text).not.toContain('Entreprise');
     expect(text).not.toContain('Administration DiagLink');
+    expect(text).not.toContain('Nouvelles demandes');
   });
 
   it('company_admin sees Utilisateurs + Entreprise but not Administration DiagLink', () => {
@@ -113,9 +120,10 @@ describe('AppShell navigation', () => {
     expect(text).not.toContain('Historique');
     expect(text).not.toContain('Entreprises');
     expect(text).not.toContain('Administration DiagLink');
+    expect(text).not.toContain('Nouvelles demandes');
   });
 
-  it('diaglink_super_admin sees Entreprises + Utilisateurs + Machines + Administration DiagLink', () => {
+  it('diaglink_super_admin sees requests and the existing administration entries', () => {
     mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' });
     const container = renderAppShell();
     const text = container.textContent ?? '';
@@ -124,6 +132,7 @@ describe('AppShell navigation', () => {
     expect(text).toContain('Utilisateurs');
     expect(text).toContain('Machines');
     expect(text).toContain('Administration DiagLink');
+    expect(text).toContain('Nouvelles demandes');
   });
 
   it('renders the existing chat surface for the chat view', () => {

@@ -28,6 +28,7 @@ export interface StripeCompanySummary {
   currentPeriodStartUtc: string | null;
   currentPeriodEndUtc: string | null;
   activeMachineCount: number;
+  machineRequestProvisioningCompleted: boolean;
   testActionsEnabled: boolean;
   activeMachines: { id: string; name: string; hasBillingPeriod: boolean }[];
 }

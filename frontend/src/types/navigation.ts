@@ -6,4 +6,5 @@ export type AppView =
   | 'users'
   | 'company'
   | 'companies'
+  | 'machine-requests'
   | 'diaglink-admin';

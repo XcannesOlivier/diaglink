@@ -61,6 +61,13 @@ public static class AdminConsumptionReader
         var periods = await db.MachineBillingPeriods.AsNoTracking().Where(p => db.Machines.Any(m => m.CompanyId == companyId && m.Id == p.MachineId)
             && (p.Status == "Active" || p.Status == "Closed")).ToArrayAsync(ct);
         var users = await db.Users.AsNoTracking().Where(u => u.CompanyId == companyId).ToDictionaryAsync(u => u.Id, ct);
+        var machineIds = machines.Select(m => m.Id).ToArray();
+        var assignedUsers = await (from access in db.UserMachineAccess.AsNoTracking()
+            join user in db.Users.AsNoTracking() on access.UserId equals user.Id
+            where machineIds.Contains(access.MachineId) && user.CompanyId == companyId && user.Status == "active"
+            select new { access.MachineId, User = user }).ToArrayAsync(ct);
+        var activeCompanyAdminIds = users.Values.Where(user => user.Status == "active" && user.Role == DiagLinkRoles.CompanyAdmin)
+            .Select(user => (Guid?)user.Id).ToArray();
         var now = DateTime.UtcNow;
         static DateTime? Utc(DateTime? date) => date == null ? null : DateTime.SpecifyKind(date.Value, DateTimeKind.Utc);
         var ids = machines.Select(m => (Guid?)m.Id).Concat(usages.Select(u => u.MachineId)).Distinct();
@@ -71,14 +78,19 @@ public static class AdminConsumptionReader
             var current = history.Where(p => p.PeriodStartUtc <= now && now < p.PeriodEndUtc).ToArray();
             var period = current.Length == 1 && current[0].Status == "Active" ? current[0] : null;
             var rows = usages.Where(u => u.MachineId == id).ToArray();
+            var usageByUser = rows.GroupBy(u => u.UserId).ToArray();
+            var userIds = assignedUsers.Where(assignment => assignment.MachineId == id)
+                .Select(assignment => (Guid?)assignment.User.Id).Concat(activeCompanyAdminIds)
+                .Concat(usageByUser.Select(group => group.Key)).Distinct();
             return new MachineRow(id, machine?.Name ?? "Machine non attribuée / supprimée", machine?.Status == "active",
                 period?.IncludedAiBudgetRealCost ?? 0, period?.IncludedAiUsedRealCost ?? 0,
                 period == null ? 0 : Math.Max(0, period.IncludedAiBudgetRealCost - period.IncludedAiUsedRealCost),
                 Utc(period?.PeriodEndUtc), Utc(history.Select(p => (DateTime?)p.PeriodEndUtc).Max()), current.Length > 0,
-                Aggregate(rows), rows.GroupBy(u => u.UserId).Select(g => new UserRow(g.Key,
-                    g.Key != null && users.TryGetValue(g.Key.Value, out var user)
+                Aggregate(rows), userIds.Select(userId => new UserRow(userId,
+                    userId != null && users.TryGetValue(userId.Value, out var user)
                         ? string.Join(" ", new[] { user.FirstName, user.LastName }.Where(s => !string.IsNullOrWhiteSpace(s))) is { Length: > 0 } name ? name : user.Email
-                        : "Utilisateur non attribué / supprimé", Aggregate(g.ToArray()))).ToArray());
+                        : "Utilisateur non attribué / supprimé",
+                    Aggregate(usageByUser.SingleOrDefault(group => group.Key == userId)?.ToArray() ?? []))).ToArray());
         }).ToArray();
         var wallet = await db.CompanyWallets.AsNoTracking().SingleOrDefaultAsync(w => w.CompanyId == companyId, ct);
         return Results.Ok(new Report(company.Name, wallet?.Balance ?? 0, Aggregate(usages), result));

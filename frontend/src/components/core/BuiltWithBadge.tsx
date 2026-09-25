@@ -1,6 +1,5 @@
 import React from 'react';
 import { Caption1Strong } from '@fluentui/react-components';
-import { AIFoundryLogo } from '../icons/AIFoundryLogo';
 import styles from './BuiltWithBadge.module.css';
 
 interface BuiltWithBadgeProps {
@@ -21,9 +20,6 @@ export const BuiltWithBadge: React.FC<BuiltWithBadgeProps> = ({ className }) => 
       type="button"
       aria-label="Créé avec Microsoft Foundry"
     >
-      <span className={styles.logo}>
-        <AIFoundryLogo />
-      </span>
       <Caption1Strong className={`${styles.text} ${styles.poweredByText}`}>
         Propulsé par
       </Caption1Strong>

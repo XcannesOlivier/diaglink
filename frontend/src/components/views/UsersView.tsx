@@ -53,7 +53,7 @@ const useStyles = makeStyles({
   },
   row: {
     display: 'grid',
-    gridTemplateColumns: '2fr 1.5fr 1fr 80px',
+    gridTemplateColumns: '1.4fr 2fr 1.2fr 1.5fr 0.8fr 80px',
     gap: tokens.spacingHorizontalM,
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
     borderRadius: tokens.borderRadiusMedium,
@@ -781,7 +781,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                     }}
                   >
                     <Text>{company.name}</Text>
-                    <Text className={styles.companyUserCount}>{userCount} {userCount === 1 ? 'utilisateur' : 'utilisateurs'}</Text>
+                    <Text className={styles.companyUserCount}>{userCount}</Text>
                     <Text className={styles.companyStatus}>{company.status}</Text>
                   </div>
                 );
@@ -1091,7 +1091,9 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
       {state.kind === 'success' && state.data.length > 0 && (
         <div className={styles.table}>
           <div className={`${styles.row} ${styles.headerRow} ${styles.userTableHeader}`}>
+            <Text>Nom</Text>
             <Text>Email</Text>
+            <Text>Téléphone</Text>
             <Text>Rôle</Text>
             <Text>Statut</Text>
             <Text>Actions</Text>
@@ -1108,9 +1110,11 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                   if (event.key === 'Enter') toggleExpandedUser(user);
                 }}
               >
-                <Text>{user.email}</Text>
-                <Text>{ROLE_LABELS[user.role as DiagLinkRole] ?? user.role}</Text>
-                <Text>{user.status}</Text>
+                <Text>{[user.firstName, user.lastName].filter(Boolean).join(' ') || '—'}</Text>
+                <Text>{user.email ?? '—'}</Text>
+                <Text>{user.phoneNumber ?? '—'}</Text>
+                <Text>{ROLE_LABELS[user.role as DiagLinkRole] ?? user.role ?? '—'}</Text>
+                <Text>{user.status ?? '—'}</Text>
                 <div className={styles.actionsCell}>
                   <Button
                     appearance="subtle"

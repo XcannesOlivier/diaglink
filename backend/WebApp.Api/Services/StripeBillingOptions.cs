@@ -9,6 +9,9 @@ public sealed class StripeBillingOptions
     public string WebhookSecret { get; init; } = "";
     public string TopUpWebhookSecret { get; init; } = "";
     public string TopUpReturnUrl { get; init; } = "";
+    public string MachineRequestWebhookSecret { get; init; } = "";
+    public string MachineRequestReturnUrl { get; init; } = "";
+    public string MachineRequestAppReturnUrl { get; init; } = "";
 
     public static StripeBillingOptions FromConfiguration(IConfiguration configuration) => new()
     {
@@ -18,7 +21,10 @@ public sealed class StripeBillingOptions
         PriceId = configuration["STRIPE_PRICE_ID"] ?? "",
         WebhookSecret = configuration["STRIPE_WEBHOOK_SECRET"] ?? "",
         TopUpWebhookSecret = configuration["STRIPE_TOPUP_WEBHOOK_SECRET"] ?? "",
-        TopUpReturnUrl = configuration["STRIPE_TOPUP_RETURN_URL"] ?? ""
+        TopUpReturnUrl = configuration["STRIPE_TOPUP_RETURN_URL"] ?? "",
+        MachineRequestWebhookSecret = configuration["STRIPE_MACHINE_REQUEST_WEBHOOK_SECRET"] ?? "",
+        MachineRequestReturnUrl = configuration["STRIPE_MACHINE_REQUEST_RETURN_URL"] ?? "",
+        MachineRequestAppReturnUrl = configuration["STRIPE_MACHINE_REQUEST_APP_RETURN_URL"] ?? ""
     };
 
     public void Validate()

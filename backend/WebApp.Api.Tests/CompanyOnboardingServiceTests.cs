@@ -1,7 +1,9 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using WebApp.Api.Data;
+using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
 using WebApp.Api.Services;
 
@@ -151,6 +153,30 @@ public class CompanyOnboardingServiceTests
 
         var storedAdmin = await context.Users.FirstAsync(u => u.Email == "admin@globex.test");
         Assert.AreEqual(Guid.Parse(outcome.Result.Company.Id), storedAdmin.CompanyId);
+    }
+
+    [TestMethod]
+    public async Task OnboardedCompanyAdminImplicitlyAccessesFirstMachineWithoutExplicitAssignment()
+    {
+        await using var context = CreateContext(Guid.NewGuid().ToString());
+        var outcome = await CreateService(context).OnboardCompanyAsync(
+            "Globex", "admin@globex.test", "John", "Doe", "0123456789", CancellationToken.None);
+        Assert.IsTrue(outcome.Success);
+        var companyId = Guid.Parse(outcome.Result!.Company.Id);
+        var adminId = Guid.Parse(outcome.Result.Admin.Id);
+        var machine = new Machine { Id = Guid.NewGuid(), CompanyId = companyId, Name = "First machine",
+            Status = "active", CreatedAtUtc = DateTime.UtcNow, UpdatedAtUtc = DateTime.UtcNow };
+        context.Machines.Add(machine);
+        await context.SaveChangesAsync();
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.Role, DiagLinkRoles.CompanyAdmin),
+            new Claim(DiagLinkClaimTypes.CompanyId, companyId.ToString()),
+            new Claim(DiagLinkClaimTypes.UserId, adminId.ToString())], "Test"));
+        var access = new MachineAccessService(context);
+
+        Assert.IsTrue(await access.CanAccessMachineAsync(principal, machine.Id, CancellationToken.None));
+        Assert.IsTrue(await access.CanAccessMachineAsync(principal, machine.Id, CancellationToken.None));
+        Assert.AreEqual(0, await context.UserMachineAccess.CountAsync());
     }
 
     [TestMethod]

@@ -216,8 +216,24 @@ builder.Services.AddScoped<StripeMachineAdditionWebhook>();
 builder.Services.AddScoped<IStripeWalletTopUpGateway, StripeWalletTopUpGateway>();
 builder.Services.AddScoped<CompanyWalletTopUpService>();
 builder.Services.AddScoped<StripeWalletTopUpWebhook>();
+builder.Services.AddScoped<MachineRequestPaymentStore>();
+builder.Services.AddScoped<IMachineRequestPaymentGateway, StripeMachineRequestPaymentGateway>();
+builder.Services.AddScoped<MachineRequestPaymentService>();
+builder.Services.AddScoped<AdditionalMachineRequestDecisionService>();
+builder.Services.AddScoped<AdditionalDocumentsRequestDecisionService>();
+builder.Services.AddScoped<AdditionalMachinePaymentContextResolver>();
+builder.Services.AddScoped<AdditionalDocumentsContextResolver>();
+builder.Services.AddScoped<IMachineRequestCustomerLinkGateway, StripeMachineRequestCustomerLinkGateway>();
+builder.Services.AddScoped<MachineRequestCustomerLinkService>();
+builder.Services.AddScoped<IMachineRequestSubscriptionGateway, StripeMachineRequestSubscriptionGateway>();
+builder.Services.AddScoped<MachineRequestSubscriptionService>();
+builder.Services.AddScoped<MachineRequestActivationService>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<StripeMachineRequestPaymentWebhook>();
 builder.Services.AddScoped<ConversationSummaryService>();
 builder.Services.AddSingleton<EmailService>();
+builder.Services.AddSingleton<ITransactionalEmailSender>(services => services.GetRequiredService<EmailService>());
+builder.Services.AddScoped<EmailOutboxStore>();
 builder.Services.AddScoped<DiagLinkSessionService>();
 builder.Services.AddScoped<DiagLinkUserLookupService>();
 builder.Services.AddScoped<UserIdentityService>();
@@ -227,6 +243,7 @@ builder.Services.AddScoped<CompanyDirectoryService>();
 builder.Services.AddScoped<CompanyOnboardingService>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MachineAssignmentService>();
+builder.Services.AddSingleton<IPdfPageCounter, PdfPigPageCounter>();
 builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ChatAccessAuthorizationHandler>();
 
     // Register BlobServiceClient if AZURE_STORAGE_CONNECTION_STRING is present
@@ -235,6 +252,11 @@ builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationH
     {
         builder.Services.AddSingleton(new Azure.Storage.Blobs.BlobServiceClient(storageConn));
         builder.Services.AddScoped<WebApp.Api.Services.BlobStorageService>();
+        builder.Services.AddScoped<WebApp.Api.Services.IMachineRequestBlobClient, WebApp.Api.Services.AzureMachineRequestBlobClient>();
+        builder.Services.AddScoped<WebApp.Api.Services.MachineRequestStorageService>();
+        builder.Services.AddScoped<WebApp.Api.Services.RequestReceivedNotificationService>();
+        builder.Services.AddScoped<WebApp.Api.Services.EmailOutboxProcessor>();
+        builder.Services.AddHostedService<WebApp.Api.Services.EmailOutboxWorker>();
     }
 
     var app = builder.Build();
@@ -265,7 +287,12 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapStripeAdminEndpoints();
 app.MapStripeWalletTopUps();
+app.MapMachineRequestPayments();
 app.MapCompanyFinance();
+app.MapPublicMachineRequests();
+app.MapAdditionalMachineRequests();
+app.MapAdditionalDocumentsRequests();
+app.MapAdminMachineRequests();
 app.MapPost("/api/stripe/webhooks/machine-additions", StripeSubscriptionWebhook.HandleHttpAsync)
     .AllowAnonymous();
 
@@ -614,13 +641,28 @@ app.MapPost("/api/auth/validate-session", async (
 // Returns the caller's own identity — Role/CompanyId/Email come exclusively from claims resolved
 // server-side (dbo.Users), never from anything the client supplies. Protected by TechnicianOrAbove:
 // any authenticated principal without a resolvable dbo.Users role/company gets 403, not 200 with nulls.
-app.MapGet("/api/auth/me", (HttpContext httpContext) =>
+app.MapGet("/api/auth/me", async (
+    HttpContext httpContext,
+    DiagLinkUserLookupService userLookupService,
+    CancellationToken cancellationToken) =>
 {
     var userId = httpContext.User.FindFirst(DiagLinkClaimTypes.UserId)?.Value;
     var companyId = httpContext.User.FindFirst(DiagLinkClaimTypes.CompanyId)?.Value;
     var role = httpContext.User.FindFirst(ClaimTypes.Role)?.Value;
 
-    if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(companyId) || string.IsNullOrEmpty(role))
+    if (string.IsNullOrEmpty(userId) ||
+        string.IsNullOrEmpty(companyId) ||
+        string.IsNullOrEmpty(role) ||
+        !Guid.TryParse(userId, out var parsedUserId))
+    {
+        return Results.Forbid();
+    }
+
+    var user = await userLookupService.FindActiveUserByIdAsync(
+        parsedUserId,
+        cancellationToken);
+
+    if (user is null)
     {
         return Results.Forbid();
     }
@@ -630,7 +672,9 @@ app.MapGet("/api/auth/me", (HttpContext httpContext) =>
         UserId = userId,
         CompanyId = companyId,
         Role = role,
-        Email = httpContext.User.FindFirst(ClaimTypes.Email)?.Value,
+        Email = user.Email,
+        FirstName = user.FirstName,
+        LastName = user.LastName
     });
 })
 .RequireAuthorization("TechnicianOrAbove")

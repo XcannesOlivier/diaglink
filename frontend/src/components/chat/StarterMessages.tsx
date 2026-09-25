@@ -42,9 +42,17 @@ export const StarterMessages = ({
   return (
     <div className={styles.zeroprompt}>
       <div className={styles.content}>
-        <Subtitle1 className={`${styles.welcome} ${styles.desktopAgentTitle}`}>
-          {displayAgentName ?? 'Assistant Technique'}
-        </Subtitle1>
+        <div className={`${styles.welcome} ${styles.desktopAgentTitle}`}>
+          <Subtitle1 className={styles.mobileAgentTitleMain}>
+            {mobileTitlePrefix}
+          </Subtitle1>
+
+          {mobileMachineName && mobileMachineName !== mobileTitlePrefix && (
+            <Subtitle1 className={styles.mobileAgentMachineName}>
+              {mobileMachineName}
+          </Subtitle1>
+        )}
+      </div>
         <div className={styles.mobileAgentTitle}>
           <Subtitle1 className={styles.mobileAgentTitleMain}>{mobileTitlePrefix}</Subtitle1>
           {mobileMachineName && mobileMachineName !== mobileTitlePrefix && (

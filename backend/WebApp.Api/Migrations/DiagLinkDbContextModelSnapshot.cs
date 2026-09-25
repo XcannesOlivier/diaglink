@@ -461,6 +461,98 @@ namespace WebApp.Api.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("WebApp.Api.Models.Entities.EmailOutbox", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastAttemptAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("LockedUntilUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("MachineRequestId")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<DateTime>("NextAttemptAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("NotificationType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("PaymentRequestId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProviderOperationId")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("RecipientEmail")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<string>("RecipientName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime?>("SentAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PaymentRequestId")
+                        .HasFilter("[PaymentRequestId] IS NOT NULL");
+
+                    b.HasIndex("MachineRequestId", "NotificationType")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "NextAttemptAtUtc", "LockedUntilUtc");
+
+                    b.ToTable("EmailOutbox", "dbo", t =>
+                        {
+                            t.HasCheckConstraint("CK_EmailOutbox_AttemptCount", "[AttemptCount] >= 0");
+
+                            t.HasCheckConstraint("CK_EmailOutbox_Lease", "([LeaseId] IS NULL AND [LockedUntilUtc] IS NULL) OR ([LeaseId] IS NOT NULL AND [LockedUntilUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_EmailOutbox_NotificationType", "[NotificationType] >= 0 AND [NotificationType] <= 4");
+
+                            t.HasCheckConstraint("CK_EmailOutbox_Sent", "([Status] = 0 AND [SentAtUtc] IS NULL) OR ([Status] = 1 AND [SentAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_EmailOutbox_Status", "[Status] >= 0 AND [Status] <= 1");
+                        });
+                });
+
             modelBuilder.Entity("WebApp.Api.Models.Entities.ExchangeRate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -654,6 +746,179 @@ namespace WebApp.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("MachineBillingPeriods", "dbo");
+                });
+
+            modelBuilder.Entity("WebApp.Api.Models.Entities.MachineRequestPayment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ActivatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("AmountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("AuthorizationEventId")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("AuthorizedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("CapturedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(3)");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(320)
+                        .HasColumnType("nvarchar(320)");
+
+                    b.Property<int>("EstimatedTotalPages")
+                        .HasColumnType("int");
+
+                    b.Property<long?>("FinalCaptureAmountCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("FirstPeriodEndUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("MachineId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MachineRequestId")
+                        .HasMaxLength(32)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<int>("PreparationStatus")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime?>("ProvisioningCompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ProvisioningStage")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ReadyAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReadyByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RequestKind")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime?>("RequestLinkedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int?>("ServiceAmountCents")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("StripePaymentIntentId")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("StripeSessionId")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("TargetMachineId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorizationEventId")
+                        .IsUnique()
+                        .HasFilter("[AuthorizationEventId] IS NOT NULL");
+
+                    b.HasIndex("CompanyId")
+                        .HasFilter("[CompanyId] IS NOT NULL");
+
+                    b.HasIndex("MachineId")
+                        .IsUnique()
+                        .HasFilter("[MachineId] IS NOT NULL");
+
+                    b.HasIndex("MachineRequestId")
+                        .IsUnique()
+                        .HasFilter("[MachineRequestId] IS NOT NULL");
+
+                    b.HasIndex("StripePaymentIntentId")
+                        .IsUnique()
+                        .HasFilter("[StripePaymentIntentId] IS NOT NULL");
+
+                    b.HasIndex("StripeSessionId")
+                        .IsUnique()
+                        .HasFilter("[StripeSessionId] IS NOT NULL");
+
+                    b.HasIndex("TargetMachineId")
+                        .HasFilter("[TargetMachineId] IS NOT NULL");
+
+                    b.ToTable("MachineRequestPayments", "dbo", t =>
+                        {
+                            t.HasCheckConstraint("CK_MachineRequestPayments_Amount", "[AmountCents] > 0");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_Currency", "[Currency] = 'EUR'");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_FinalCaptureAmount", "[FinalCaptureAmountCents] IS NULL OR ([FinalCaptureAmountCents] > 0 AND [FinalCaptureAmountCents] <= [AmountCents])");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_FirstPeriod", "([ActivatedAtUtc] IS NULL AND [FirstPeriodEndUtc] IS NULL) OR ([ActivatedAtUtc] IS NOT NULL AND [FirstPeriodEndUtc] IS NOT NULL AND [ActivatedAtUtc] < [FirstPeriodEndUtc])");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_Link", "([MachineRequestId] IS NULL AND [RequestLinkedAtUtc] IS NULL) OR ([MachineRequestId] IS NOT NULL AND [RequestLinkedAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_Pages", "[EstimatedTotalPages] > 0");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_PreparationStatus", "[PreparationStatus] >= 0 AND [PreparationStatus] <= 1");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_ProvisioningCompleted", "([ProvisioningStage] < 6 AND [ProvisioningCompletedAtUtc] IS NULL) OR ([ProvisioningStage] = 6 AND [ProvisioningCompletedAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_ProvisioningStage", "[ProvisioningStage] >= 0 AND [ProvisioningStage] <= 6");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_Ready", "([PreparationStatus] = 0 AND [ReadyAtUtc] IS NULL AND [ReadyByUserId] IS NULL) OR ([PreparationStatus] = 1 AND [ReadyAtUtc] IS NOT NULL AND [ReadyByUserId] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_RequestKind", "[RequestKind] >= 0 AND [RequestKind] <= 2");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_ServiceAmount", "[ServiceAmountCents] IS NULL OR ([ServiceAmountCents] >= 0 AND [ServiceAmountCents] <= 1990)");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_State", "([Status] = 0 AND [StripePaymentIntentId] IS NULL AND [AuthorizationEventId] IS NULL AND [AuthorizedAtUtc] IS NULL AND [CapturedAtUtc] IS NULL AND [CancelledAtUtc] IS NULL) OR ([Status] = 1 AND [StripePaymentIntentId] IS NOT NULL AND [AuthorizationEventId] IS NOT NULL AND [AuthorizedAtUtc] IS NOT NULL AND [CapturedAtUtc] IS NULL AND [CancelledAtUtc] IS NULL) OR ([Status] = 2 AND [StripePaymentIntentId] IS NOT NULL AND [AuthorizationEventId] IS NOT NULL AND [AuthorizedAtUtc] IS NOT NULL AND [CapturedAtUtc] IS NOT NULL AND [CancelledAtUtc] IS NULL) OR ([Status] = 3 AND [StripePaymentIntentId] IS NOT NULL AND [AuthorizationEventId] IS NOT NULL AND [AuthorizedAtUtc] IS NOT NULL AND [CapturedAtUtc] IS NULL AND [CancelledAtUtc] IS NOT NULL) OR ([Status] = 4 AND [StripePaymentIntentId] IS NULL AND [AuthorizationEventId] IS NULL AND [AuthorizedAtUtc] IS NULL AND [CapturedAtUtc] IS NULL AND [CancelledAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_Status", "[Status] >= 0 AND [Status] <= 4");
+
+                            t.HasCheckConstraint("CK_MachineRequestPayments_Timestamps", "[UpdatedAtUtc] >= [CreatedAtUtc]");
+                        });
                 });
 
             modelBuilder.Entity("WebApp.Api.Models.Entities.StripeLifecycleEvent", b =>
@@ -1179,6 +1444,24 @@ namespace WebApp.Api.Migrations
                         .HasForeignKey("MachineId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("WebApp.Api.Models.Entities.MachineRequestPayment", b =>
+                {
+                    b.HasOne("WebApp.Api.Models.Entities.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("WebApp.Api.Models.Entities.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("MachineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("WebApp.Api.Models.Entities.Machine", null)
+                        .WithMany()
+                        .HasForeignKey("TargetMachineId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("WebApp.Api.Models.Entities.StripeLifecycleEvent", b =>

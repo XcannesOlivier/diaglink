@@ -31,7 +31,9 @@ export const UserBadge: React.FC<UserBadgeProps> = ({ currentUser }) => {
 
   return (
     <div className={styles.root}>
-      {currentUser.email && <Text className={styles.email}>{currentUser.email}</Text>}
+      <Text className={styles.email}>
+        {[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ') || currentUser.email}
+      </Text>
       <Badge appearance="tint" color="informative">
         {ROLE_LABELS[currentUser.role]}
       </Badge>

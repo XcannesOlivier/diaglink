@@ -38,3 +38,17 @@ it('discards late responses after switching company',async()=>{
  await act(async()=>finish(new Response(JSON.stringify(report))));expect(host.textContent).not.toContain('Machine A');expect(fetch.mock.calls.some(call=>String(call[0]).includes('/companies/new/'))).toBe(true);
  }finally{await act(async()=>root.unmount());}
 });
+it('renders assigned users with zero consumption alongside usage and historical rows',async()=>{
+ const zero={responses:0,vision:0,summaries:0,input:0,output:0,tokens:0,unknown:0,unvalued:0,realCost:0,commercialCredit:0,walletRealCost:0,providers:[]};
+ const users=[{id:'used',name:'Robert Petit',metrics},{id:'zero',name:'Technicien sans usage',metrics:zero},{id:'deleted',name:'Utilisateur non attribué / supprimé',metrics:{...zero,vision:1}}];
+ const value={...report,machines:[{...machine('a','Machine A',16),users}]};
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify(value))));
+ const host=document.createElement('div'),root=createRoot(host);
+ try{await act(async()=>root.render(<CompanyConsumptionPanel companyId="c" token={async()=>null}/>));
+ await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent==='Machine A')!.click());
+ const rows=[...host.querySelectorAll('table tbody tr')].map(row=>row.textContent);
+ expect(rows).toHaveLength(3);expect(rows[0]).toContain('Robert Petit');
+ expect(rows[1]).toContain('Technicien sans usage');expect(rows[1]).toContain('0,00 €');
+ expect(rows[2]).toContain('Utilisateur non attribué / supprimé');expect(rows[2]).toContain('1');
+ }finally{await act(async()=>root.unmount());}
+});

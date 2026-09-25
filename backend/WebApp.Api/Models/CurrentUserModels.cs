@@ -7,4 +7,6 @@ public record CurrentUserResponse
     public required string CompanyId { get; init; }
     public required string Role { get; init; }
     public string? Email { get; init; }
+    public string? FirstName { get; init; }
+    public string? LastName { get; init; }
 }

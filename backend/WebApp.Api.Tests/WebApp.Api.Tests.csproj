@@ -17,6 +17,7 @@
     <!-- In-memory EF Core provider for ConversationHistoryRepository isolation tests (no real SQL dependency) -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>
 
 </Project>

@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using WebApp.Api.Data;
+using WebApp.Api.Models.Entities;
 using WebApp.Api.Services;
 using Fixture = WebApp.Api.Tests.AiCreditConsumptionServiceTests.Fixture;
 
@@ -23,6 +24,40 @@ public partial class StripeBillingTests
         Assert.IsNull(summary.CurrentPeriodStartUtc); Assert.IsTrue(summary.TestActionsEnabled);
         Assert.AreEqual(0, await db.BillingAccounts.CountAsync());
         Assert.AreEqual(404, ((IStatusCodeHttpResult)await StripeAdminEndpoints.ReadAsync(Guid.NewGuid(), db, Options, default)).StatusCode);
+    }
+
+    [TestMethod]
+    [DataRow(MachineRequestProvisioningStage.SubscriptionCreated, false)]
+    [DataRow(MachineRequestProvisioningStage.Completed, true)]
+    public async Task AdminReadReportsActualMachineRequestProvisioningCompletion(
+        MachineRequestProvisioningStage stage, bool expected)
+    {
+        await using var f = new Fixture(); await Prepare(f); await using var db = f.Db();
+        var now = new DateTime(2026, 9, 23, 12, 0, 0, DateTimeKind.Utc);
+        var payment = new WebApp.Api.Models.Entities.MachineRequestPayment
+        {
+            Id = Guid.NewGuid(), Status = MachineRequestPaymentStatus.Captured, EstimatedTotalPages = 416,
+            AmountCents = 13412, Currency = "EUR", StripePaymentIntentId = "pi_summary",
+            AuthorizationEventId = "evt_summary", AuthorizedAtUtc = now, CapturedAtUtc = now,
+            CompanyId = f.CompanyId, MachineId = f.MachineId, CreatedAtUtc = now, UpdatedAtUtc = now,
+            ActivatedAtUtc = now, FirstPeriodEndUtc = now.AddDays(7), ServiceAmountCents = 1495,
+            FinalCaptureAmountCents = 11917, ProvisioningStage = stage,
+            ProvisioningCompletedAtUtc = stage == MachineRequestProvisioningStage.Completed ? now : null,
+            RowVersion = [1]
+        };
+        await db.Database.ExecuteSqlInterpolatedAsync($@"INSERT INTO MachineRequestPayments
+          (Id,Status,EstimatedTotalPages,AmountCents,Currency,StripePaymentIntentId,AuthorizationEventId,
+           CreatedAtUtc,UpdatedAtUtc,AuthorizedAtUtc,CapturedAtUtc,ActivatedAtUtc,FirstPeriodEndUtc,
+           ServiceAmountCents,FinalCaptureAmountCents,CompanyId,MachineId,ProvisioningStage,ProvisioningCompletedAtUtc,RowVersion)
+          VALUES ({payment.Id},{(int)payment.Status},{payment.EstimatedTotalPages},{payment.AmountCents},{payment.Currency},
+           {payment.StripePaymentIntentId},{payment.AuthorizationEventId},{payment.CreatedAtUtc},{payment.UpdatedAtUtc},
+           {payment.AuthorizedAtUtc},{payment.CapturedAtUtc},{payment.ActivatedAtUtc},{payment.FirstPeriodEndUtc},
+           {payment.ServiceAmountCents},{payment.FinalCaptureAmountCents},{payment.CompanyId},{payment.MachineId},
+           {(int)payment.ProvisioningStage},{payment.ProvisioningCompletedAtUtc},{payment.RowVersion})");
+
+        var result = await StripeAdminEndpoints.ReadAsync(f.CompanyId, db, Options, default);
+        var summary = (StripeCompanySummary)((IValueHttpResult)result).Value!;
+        Assert.AreEqual(expected, summary.MachineRequestProvisioningCompleted);
     }
 
     [TestMethod]

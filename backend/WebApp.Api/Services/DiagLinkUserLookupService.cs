@@ -9,7 +9,15 @@ namespace WebApp.Api.Services;
 /// The trusted, active dbo.Users fields needed to authorize a request: never populate these from
 /// anything the browser sends — only from a fresh dbo.Users row.
 /// </summary>
-public record DiagLinkUserRecord(Guid Id, string Email, Guid CompanyId, string Role, string? EntraObjectId);
+public record DiagLinkUserRecord(
+    Guid Id,
+    string Email,
+    Guid CompanyId,
+    string Role,
+    string? EntraObjectId,
+    string? FirstName,
+    string? LastName,
+    string? PhoneNumber);
 
 /// <summary>
 /// Single source of truth for resolving an active, role/company-eligible dbo.Users row, shared by
@@ -50,6 +58,14 @@ public class DiagLinkUserLookupService
             return null;
         }
 
-        return new DiagLinkUserRecord(user.Id, user.Email, user.CompanyId, user.Role, user.EntraObjectId);
+        return new DiagLinkUserRecord(
+            user.Id,
+            user.Email,
+            user.CompanyId,
+            user.Role,
+            user.EntraObjectId,
+            user.FirstName,
+            user.LastName,
+            user.PhoneNumber);
     }
 }

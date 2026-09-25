@@ -1,0 +1,21 @@
+.main { padding:100px 0 120px; background:linear-gradient(180deg,#f7fbfd 0,#fff 280px); color:#0b2742; font-family:'Segoe UI','Segoe UI Variable',sans-serif; }
+.intro { max-width:760px; margin-bottom:56px; }
+.intro h1 { margin:0; font-size:clamp(2.5rem,5vw,4rem); line-height:1.06; letter-spacing:-.045em; }
+.intro>p:last-child { margin:24px 0 0; color:#52677a; font-size:1.1rem; line-height:1.7; }
+.grid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr); gap:72px; align-items:start; }
+.form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; padding:34px; border:1px solid #dce8ee; border-radius:14px; background:#fff; box-shadow:0 16px 42px rgba(30,72,96,.07); }
+.form label { display:flex; flex-direction:column; gap:8px; color:#263f52; font-size:.9rem; font-weight:650; }
+.form label span { color:#748693; font-size:.78rem; font-weight:400; }
+.form input,.form textarea { width:100%; border:1px solid #cddce4; border-radius:8px; background:#fff; color:#18364b; font:inherit; font-weight:400; outline:none; transition:border-color .15s ease,box-shadow .15s ease; }
+.form input { height:46px; padding:0 13px; }
+.form textarea { min-height:150px; padding:12px 13px; resize:vertical; }
+.form input:focus,.form textarea:focus { border-color:#007bb4; box-shadow:0 0 0 3px rgba(0,123,180,.12); }
+.messageField { grid-column:1 / -1; }
+.form button { grid-column:1 / -1; width:fit-content; min-height:46px; border:1px solid #007bb4; border-radius:8px; padding:0 22px; background:#007bb4; color:#fff; font:inherit; font-weight:700; cursor:pointer; box-shadow:0 7px 18px rgba(0,123,180,.17); }
+.form button:hover { background:#00658f; }
+.info { padding:34px; border:1px solid #dce8ee; border-radius:14px; background:#eef7fb; }
+.infoIcon { width:52px; height:52px; display:grid; place-items:center; margin-bottom:24px; border-radius:10px; background:#fff; color:#007bb4; }
+.info h2 { margin:0; font-size:1.6rem; line-height:1.2; letter-spacing:-.025em; }
+.info p { margin:18px 0 0; color:#52677a; line-height:1.7; }
+@media (max-width:800px) { .main { padding:72px 0 88px; }.grid { grid-template-columns:1fr; gap:32px; }.form { padding:24px; }.intro { margin-bottom:40px; } }
+@media (max-width:560px) { .main { padding:56px 0 72px; }.form { grid-template-columns:1fr; padding:20px; gap:20px; }.messageField,.form button { grid-column:auto; }.form button { width:100%; }.info { padding:24px; } }

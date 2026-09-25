@@ -10,4 +10,6 @@ export interface CurrentUser {
   companyId: string;
   role: DiagLinkRole;
   email?: string;
+  firstName?: string;
+  lastName?: string;
 }

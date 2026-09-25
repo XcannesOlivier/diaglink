@@ -14,6 +14,7 @@ public record StripeCompanySummary(string? StripeCustomerId, string? StripeSubsc
     public string? LatestInvoiceId { get; init; }
     public string? LatestInvoiceStatus { get; init; }
     public long? AmountRemainingCents { get; init; }
+    public bool MachineRequestProvisioningCompleted { get; init; }
 }
 
 public record StripeMachineBillingState(Guid Id, string Name, bool Billable, DateTime? RightsEndUtc);
@@ -94,12 +95,17 @@ public static class StripeAdminEndpoints
         var machineStates = await db.Machines.AsNoTracking().Where(m => m.CompanyId == companyId).OrderBy(m=>m.Name)
             .Select(m=>new StripeMachineBillingState(m.Id,m.Name,m.Status=="active",
                 db.MachineBillingPeriods.Where(p=>p.MachineId==m.Id).Max(p=>(DateTime?)p.PeriodEndUtc))).ToListAsync(ct);
+        var machineRequestProvisioningCompleted = await db.MachineRequestPayments.AsNoTracking().AnyAsync(payment =>
+            payment.CompanyId == companyId
+            && payment.ProvisioningStage == Models.Entities.MachineRequestProvisioningStage.Completed
+            && payment.ProvisioningCompletedAtUtc != null, ct);
         static DateTime? Utc(DateTime? value) => value.HasValue ? DateTime.SpecifyKind(value.Value, DateTimeKind.Utc) : null;
         return Results.Ok(new StripeCompanySummary(account?.StripeCustomerId, account?.StripeSubscriptionId,
             account?.SubscriptionStatus, Utc(account?.CurrentPeriodStartUtc), Utc(account?.CurrentPeriodEndUtc), machines.Count,
             TestActionsEnabled(settings)) { BillingAccountId = account?.Id, ActiveMachines = machines, Machines=machineStates,
                 CancelAtPeriodEnd=account?.CancelAtPeriodEnd ?? false,LatestInvoiceId=account?.LatestInvoiceId,
-                LatestInvoiceStatus=account?.LatestInvoiceStatus,AmountRemainingCents=account?.AmountRemainingCents });
+                LatestInvoiceStatus=account?.LatestInvoiceStatus,AmountRemainingCents=account?.AmountRemainingCents,
+                MachineRequestProvisioningCompleted=machineRequestProvisioningCompleted });
     }
 
     public static async Task<IResult> ReadAdditionsAsync(Guid companyId, DiagLinkDbContext db, CancellationToken ct)

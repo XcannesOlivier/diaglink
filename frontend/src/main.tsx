@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { PublicClientApplication, EventType, type AuthenticationResult } from "@azure/msal-browser";
 import { MsalProvider } from "@azure/msal-react";
+import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { msalConfig } from "./config/authConfig";
 import "./index.css";
@@ -40,11 +41,13 @@ msalInstance.initialize().then(() => {
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
       <MsalProvider instance={msalInstance}>
-        <AppProvider>
-          <ThemeProvider>
-            <App />
-          </ThemeProvider>
-        </AppProvider>
+        <BrowserRouter>
+          <AppProvider>
+            <ThemeProvider>
+              <App />
+            </ThemeProvider>
+          </AppProvider>
+        </BrowserRouter>
       </MsalProvider>
     </React.StrictMode>
   );

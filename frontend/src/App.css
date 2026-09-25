@@ -19,3 +19,17 @@
 .fui-Input input::placeholder {
   color: #777777 !important;
 }
+
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 1rem;
+  text-align: center;
+}
+
+.app-loading h2,
+.app-loading p {
+  margin: 0;
+}

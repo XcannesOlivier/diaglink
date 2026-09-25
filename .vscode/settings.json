@@ -51,7 +51,7 @@
 
   // Agent status indicator in command center for session visibility
   // See: https://code.visualstudio.com/updates/v1_109#_agent-status-indicator
-  "chat.agentsControl.enabled": true,
+  "chat.agentsControl.enabled": "compact",
 
   // Show chat title for easy session identification
   "chat.viewTitle.enabled": true,
@@ -77,7 +77,7 @@
 
   // Inline chat affordance - show gutter icon to trigger inline chat (Preview)
   // See: https://code.visualstudio.com/updates/v1_109#_inline-chat-ux-revamp-preview
-  "inlineChat.affordance": "gutter",
+  "inlineChat.affordance": "editor",
 
   // ============================================
   // Terminal Tool Auto-Approval (Security)

@@ -11,6 +11,39 @@ public sealed class StripeBillingService(DbContextOptions<DiagLinkDbContext> opt
 {
     private const string Pending = "creation_pending";
 
+    /// <summary>Links the Customer created by the initial machine-request Checkout; never creates a Stripe object.</summary>
+    public Task<string> LinkExistingCustomerAsync(Guid companyId, string customerId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(customerId)) throw new InvalidOperationException("Customer Stripe absent.");
+        return WithAccount(companyId, (db, account) =>
+        {
+            if (account.StripeCustomerId is { } existing && existing != customerId)
+                throw new InvalidOperationException("Cette entreprise possède déjà un autre Customer Stripe ; une décision manuelle est requise.");
+            if (account.StripeCustomerId is null)
+            {
+                account.StripeCustomerId = customerId;
+                account.UpdatedAtUtc = DateTime.UtcNow;
+            }
+            return Task.FromResult(customerId);
+        }, ct);
+    }
+
+    public Task<StripeSubscriptionSnapshot> LinkExistingSubscriptionAsync(Guid companyId,
+        StripeSubscriptionSnapshot subscription, CancellationToken ct = default) =>
+        WithAccount(companyId, (db, account) =>
+        {
+            if (account.StripeCustomerId != subscription.CustomerId)
+                throw new InvalidOperationException("Le Customer du BillingAccount ne correspond pas à la Subscription.");
+            if (account.StripeSubscriptionId is { } existing && existing != subscription.Id)
+                throw new InvalidOperationException("Une autre Subscription est déjà liée à cette entreprise.");
+            account.StripeSubscriptionId = subscription.Id;
+            account.SubscriptionStatus = subscription.Status;
+            account.CurrentPeriodStartUtc = subscription.PeriodStartUtc;
+            account.CurrentPeriodEndUtc = subscription.PeriodEndUtc;
+            account.UpdatedAtUtc = DateTime.UtcNow;
+            return Task.FromResult(subscription);
+        }, ct);
+
     /// <summary>Read existing Stripe state only; never creates a customer or subscription.</summary>
     public async Task<StripeSubscriptionSnapshot> GetExistingSubscriptionAsync(Guid companyId, CancellationToken ct = default)
     {

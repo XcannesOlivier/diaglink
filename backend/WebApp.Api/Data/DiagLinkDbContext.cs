@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
 
 namespace WebApp.Api.Data;
@@ -33,6 +35,8 @@ public class DiagLinkDbContext : DbContext
     public DbSet<StripeWalletTopUp> StripeWalletTopUps => Set<StripeWalletTopUp>();
     public DbSet<StripeSubscriptionPayment> StripeSubscriptionPayments => Set<StripeSubscriptionPayment>();
     public DbSet<StripeLifecycleEvent> StripeLifecycleEvents => Set<StripeLifecycleEvent>();
+    public DbSet<MachineRequestPayment> MachineRequestPayments => Set<MachineRequestPayment>();
+    public DbSet<EmailOutbox> EmailOutbox => Set<EmailOutbox>();
 
     private void GuardTopUpLedger()
     {
@@ -48,6 +52,78 @@ public class DiagLinkDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<EmailOutbox>(entity =>
+        {
+            entity.ToTable("EmailOutbox", "dbo", table =>
+            {
+                table.HasCheckConstraint("CK_EmailOutbox_NotificationType", "[NotificationType] >= 0 AND [NotificationType] <= 4");
+                table.HasCheckConstraint("CK_EmailOutbox_Status", "[Status] >= 0 AND [Status] <= 1");
+                table.HasCheckConstraint("CK_EmailOutbox_AttemptCount", "[AttemptCount] >= 0");
+                table.HasCheckConstraint("CK_EmailOutbox_Lease", "([LeaseId] IS NULL AND [LockedUntilUtc] IS NULL) OR ([LeaseId] IS NOT NULL AND [LockedUntilUtc] IS NOT NULL)");
+                table.HasCheckConstraint("CK_EmailOutbox_Sent", "([Status] = 0 AND [SentAtUtc] IS NULL) OR ([Status] = 1 AND [SentAtUtc] IS NOT NULL)");
+            });
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.Id).ValueGeneratedNever();
+            entity.Property(item => item.MachineRequestId).IsRequired().HasMaxLength(32).IsUnicode(false);
+            entity.Property(item => item.RecipientEmail).IsRequired().HasMaxLength(320);
+            entity.Property(item => item.RecipientName).HasMaxLength(200);
+            entity.Property(item => item.PayloadJson).IsRequired();
+            entity.Property(item => item.ProviderOperationId).HasMaxLength(200);
+            entity.Property(item => item.LastError).HasMaxLength(1000);
+            entity.Property(item => item.RowVersion).IsRowVersion();
+            entity.HasIndex(item => new { item.MachineRequestId, item.NotificationType }).IsUnique();
+            entity.HasIndex(item => new { item.Status, item.NextAttemptAtUtc, item.LockedUntilUtc });
+            entity.HasIndex(item => item.PaymentRequestId).HasFilter("[PaymentRequestId] IS NOT NULL");
+        });
+        modelBuilder.Entity<MachineRequestPayment>(entity =>
+        {
+            entity.ToTable("MachineRequestPayments", "dbo", table =>
+            {
+                table.HasCheckConstraint("CK_MachineRequestPayments_Pages", "[EstimatedTotalPages] > 0");
+                table.HasCheckConstraint("CK_MachineRequestPayments_Amount", "[AmountCents] > 0");
+                table.HasCheckConstraint("CK_MachineRequestPayments_Currency", "[Currency] = 'EUR'");
+                table.HasCheckConstraint("CK_MachineRequestPayments_Status", "[Status] >= 0 AND [Status] <= 4");
+                table.HasCheckConstraint("CK_MachineRequestPayments_RequestKind", "[RequestKind] >= 0 AND [RequestKind] <= 2");
+                table.HasCheckConstraint("CK_MachineRequestPayments_Timestamps", "[UpdatedAtUtc] >= [CreatedAtUtc]");
+                table.HasCheckConstraint("CK_MachineRequestPayments_Link", "([MachineRequestId] IS NULL AND [RequestLinkedAtUtc] IS NULL) OR ([MachineRequestId] IS NOT NULL AND [RequestLinkedAtUtc] IS NOT NULL)");
+                table.HasCheckConstraint("CK_MachineRequestPayments_State", "([Status] = 0 AND [StripePaymentIntentId] IS NULL AND [AuthorizationEventId] IS NULL AND [AuthorizedAtUtc] IS NULL AND [CapturedAtUtc] IS NULL AND [CancelledAtUtc] IS NULL) OR ([Status] = 1 AND [StripePaymentIntentId] IS NOT NULL AND [AuthorizationEventId] IS NOT NULL AND [AuthorizedAtUtc] IS NOT NULL AND [CapturedAtUtc] IS NULL AND [CancelledAtUtc] IS NULL) OR ([Status] = 2 AND [StripePaymentIntentId] IS NOT NULL AND [AuthorizationEventId] IS NOT NULL AND [AuthorizedAtUtc] IS NOT NULL AND [CapturedAtUtc] IS NOT NULL AND [CancelledAtUtc] IS NULL) OR ([Status] = 3 AND [StripePaymentIntentId] IS NOT NULL AND [AuthorizationEventId] IS NOT NULL AND [AuthorizedAtUtc] IS NOT NULL AND [CapturedAtUtc] IS NULL AND [CancelledAtUtc] IS NOT NULL) OR ([Status] = 4 AND [StripePaymentIntentId] IS NULL AND [AuthorizationEventId] IS NULL AND [AuthorizedAtUtc] IS NULL AND [CapturedAtUtc] IS NULL AND [CancelledAtUtc] IS NOT NULL)");
+                table.HasCheckConstraint("CK_MachineRequestPayments_ServiceAmount", "[ServiceAmountCents] IS NULL OR ([ServiceAmountCents] >= 0 AND [ServiceAmountCents] <= 1990)");
+                table.HasCheckConstraint("CK_MachineRequestPayments_FinalCaptureAmount", "[FinalCaptureAmountCents] IS NULL OR ([FinalCaptureAmountCents] > 0 AND [FinalCaptureAmountCents] <= [AmountCents])");
+                table.HasCheckConstraint("CK_MachineRequestPayments_FirstPeriod", "([ActivatedAtUtc] IS NULL AND [FirstPeriodEndUtc] IS NULL) OR ([ActivatedAtUtc] IS NOT NULL AND [FirstPeriodEndUtc] IS NOT NULL AND [ActivatedAtUtc] < [FirstPeriodEndUtc])");
+                table.HasCheckConstraint("CK_MachineRequestPayments_ProvisioningStage", "[ProvisioningStage] >= 0 AND [ProvisioningStage] <= 6");
+                table.HasCheckConstraint("CK_MachineRequestPayments_ProvisioningCompleted", "([ProvisioningStage] < 6 AND [ProvisioningCompletedAtUtc] IS NULL) OR ([ProvisioningStage] = 6 AND [ProvisioningCompletedAtUtc] IS NOT NULL)");
+                table.HasCheckConstraint("CK_MachineRequestPayments_PreparationStatus", "[PreparationStatus] >= 0 AND [PreparationStatus] <= 1");
+                table.HasCheckConstraint("CK_MachineRequestPayments_Ready", "([PreparationStatus] = 0 AND [ReadyAtUtc] IS NULL AND [ReadyByUserId] IS NULL) OR ([PreparationStatus] = 1 AND [ReadyAtUtc] IS NOT NULL AND [ReadyByUserId] IS NOT NULL)");
+            });
+            entity.HasKey(payment => payment.Id);
+            entity.Property(payment => payment.Id).ValueGeneratedNever();
+            entity.Property(payment => payment.PreparationStatus)
+                .HasDefaultValue(MachineRequestPreparationStatus.Pending);
+            var requestKind = entity.Property(payment => payment.RequestKind)
+                .HasDefaultValue(MachineRequestKind.InitialMachine);
+            requestKind.Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+            var requestedByUserId = entity.Property(payment => payment.RequestedByUserId);
+            requestedByUserId.Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+            var targetMachineId = entity.Property(payment => payment.TargetMachineId);
+            targetMachineId.Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
+            entity.Property(payment => payment.Currency).IsRequired().HasMaxLength(3).IsUnicode(false);
+            entity.Property(payment => payment.Email).HasMaxLength(320);
+            entity.Property(payment => payment.StripeSessionId).HasMaxLength(200);
+            entity.Property(payment => payment.StripePaymentIntentId).HasMaxLength(200);
+            entity.Property(payment => payment.AuthorizationEventId).HasMaxLength(200);
+            entity.Property(payment => payment.MachineRequestId).HasMaxLength(32).IsUnicode(false);
+            entity.Property(payment => payment.RowVersion).IsRowVersion();
+            entity.HasIndex(payment => payment.StripeSessionId).IsUnique().HasFilter("[StripeSessionId] IS NOT NULL");
+            entity.HasIndex(payment => payment.StripePaymentIntentId).IsUnique().HasFilter("[StripePaymentIntentId] IS NOT NULL");
+            entity.HasIndex(payment => payment.AuthorizationEventId).IsUnique().HasFilter("[AuthorizationEventId] IS NOT NULL");
+            entity.HasIndex(payment => payment.MachineRequestId).IsUnique().HasFilter("[MachineRequestId] IS NOT NULL");
+            entity.HasOne<Company>().WithMany().HasForeignKey(payment => payment.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Machine>().WithMany().HasForeignKey(payment => payment.MachineId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Machine>().WithMany().HasForeignKey(payment => payment.TargetMachineId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(payment => payment.CompanyId).HasFilter("[CompanyId] IS NOT NULL");
+            entity.HasIndex(payment => payment.MachineId).IsUnique().HasFilter("[MachineId] IS NOT NULL");
+            entity.HasIndex(payment => payment.TargetMachineId).HasFilter("[TargetMachineId] IS NOT NULL");
+        });
         modelBuilder.Entity<StripeLifecycleEvent>(e =>
         {
             e.ToTable("StripeLifecycleEvents", "dbo"); e.HasKey(x => x.Id);

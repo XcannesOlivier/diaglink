@@ -125,16 +125,7 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
   },
   detailPanel: {
-    marginTop: tokens.spacingVerticalM,
-    padding: tokens.spacingVerticalM,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    '@media (min-width: 1024px)': {
-      display: 'none',
-    },
+    display: 'none',
   },
   adminDetails: {
     display: 'flex',

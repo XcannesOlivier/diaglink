@@ -9,7 +9,7 @@ namespace WebApp.Api.Services;
 /// Sends transactional email via Azure Communication Services Email, authenticated with
 /// Entra ID (Managed Identity / Azure CLI) — no connection string or access key is ever used.
 /// </summary>
-public class EmailService
+public class EmailService : ITransactionalEmailSender
 {
     private readonly EmailClient? _emailClient;
     private readonly string _senderAddress;
@@ -126,6 +126,24 @@ public class EmailService
             _logger.LogError(ex, "Failed to send login code email");
             throw;
         }
+    }
+
+    public async Task<string?> SendAsync(string recipientEmail, string subject, string textBody,
+        string? htmlBody, CancellationToken cancellationToken)
+    {
+        var content = new EmailContent(subject) { PlainText = textBody };
+        if (!string.IsNullOrWhiteSpace(htmlBody)) content.Html = htmlBody;
+        var message = new EmailMessage(_senderAddress, recipientEmail, content);
+
+        if (_devNoAcs)
+        {
+            _logger.LogInformation("[DEV] Transactional email suppressed. Recipient={MaskedRecipient} Subject={Subject}",
+                MaskEmail(recipientEmail), subject);
+            return null;
+        }
+
+        var operation = await _emailClient!.SendAsync(WaitUntil.Completed, message, cancellationToken);
+        return operation.Id;
     }
 
     private static string MaskEmail(string email)

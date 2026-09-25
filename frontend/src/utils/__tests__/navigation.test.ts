@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getAllowedViews, resolveView, ROLE_LABELS } from '../navigation';
+import { getAllowedViews, getNavItemsForRole, resolveView, ROLE_LABELS } from '../navigation';
 
 describe('navigation role gating', () => {
   it('technician does not have access to users/company/diaglink-admin views', () => {
@@ -23,6 +23,7 @@ describe('navigation role gating', () => {
     expect(allowed).toContain('companies');
     expect(allowed).toContain('users');
     expect(allowed).toContain('machines');
+    expect(allowed).toContain('machine-requests');
     expect(allowed).toContain('diaglink-admin');
   });
 
@@ -30,11 +31,13 @@ describe('navigation role gating', () => {
     expect(resolveView('users', 'technician')).toBe('chat');
     expect(resolveView('diaglink-admin', 'company_admin')).toBe('chat');
     expect(resolveView('companies', 'company_admin')).toBe('chat');
+    expect(resolveView('machine-requests', 'company_admin')).toBe('chat');
   });
 
   it('resolveView keeps the requested view when it is allowed for the role', () => {
     expect(resolveView('users', 'company_admin')).toBe('users');
     expect(resolveView('diaglink-admin', 'diaglink_super_admin')).toBe('diaglink-admin');
+    expect(resolveView('machine-requests', 'diaglink_super_admin')).toBe('machine-requests');
   });
 
   it('resolveView falls back to chat when there is no role yet', () => {
@@ -45,5 +48,11 @@ describe('navigation role gating', () => {
     expect(ROLE_LABELS.technician).toBe('Technicien');
     expect(ROLE_LABELS.company_admin).toBe('Administrateur entreprise');
     expect(ROLE_LABELS.diaglink_super_admin).toBe('Super administrateur DiagLink');
+  });
+
+  it('shows the real pending request count only when it is positive', () => {
+    expect(getNavItemsForRole('diaglink_super_admin', 3).find(item => item.view === 'machine-requests')?.badgeCount).toBe(3);
+    expect(getNavItemsForRole('diaglink_super_admin', 0).find(item => item.view === 'machine-requests')?.badgeCount).toBeUndefined();
+    expect(getNavItemsForRole('company_admin', 3).some(item => item.view === 'machine-requests')).toBe(false);
   });
 });

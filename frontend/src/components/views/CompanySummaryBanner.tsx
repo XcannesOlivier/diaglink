@@ -18,6 +18,7 @@ export function CompanySummaryBanner({companyId,account,token,revision}:{company
  const unpaid=account?.latestInvoiceStatus==='open'&&(account.amountRemainingCents??0)>0;
  const subscriptionLabel=!account?'Chargement…':account.subscriptionStatus==='past_due'||account.subscriptionStatus==='unpaid'?'Paiement en retard':
   account.subscriptionStatus==='active'?(unpaid?'Abonnement actif':'Abonnement payé'):
+  account.subscriptionStatus==='trialing'&&account.machineRequestProvisioningCompleted?'Abonnement actif':
   ({trialing:'Abonnement en cours d’activation',canceled:'Résilié',incomplete:'Paiement initial en attente',incomplete_expired:'Paiement initial expiré',paused:'Suspendu'} as Record<string,string>)[account.subscriptionStatus??'']??(account.subscriptionStatus?'À vérifier':'Aucun abonnement');
  return <dl className={styles.companyBanner} aria-label="Résumé de l’entreprise">
   <div><dt>Machines facturables</dt><dd>{account?.activeMachineCount??'…'}</dd></div>

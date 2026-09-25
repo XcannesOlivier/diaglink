@@ -15,6 +15,7 @@ describe('Stripe MVP administration', () => {
   let root: Root; let container: HTMLDivElement;
   const token = vi.fn();
   const empty: StripeCompanySummary = { billingAccountId: null, stripeCustomerId: null, stripeSubscriptionId: null,
+    machineRequestProvisioningCompleted: false,
     subscriptionStatus: null, currentPeriodStartUtc: null, currentPeriodEndUtc: null, activeMachineCount: 1,
     activeMachines: [{ id: 'm1', name: 'Machine test', hasBillingPeriod: false }], testActionsEnabled: true };
   const op: StripeAdditionSummary = { id: 'op1', machineId: 'm1', machineName: 'Machine test', stage: 'AwaitingPayment',

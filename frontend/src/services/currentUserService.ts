@@ -34,6 +34,8 @@ export async function fetchCurrentUser(
       companyId: data.companyId,
       role: data.role,
       email: data.email,
+      firstName: data.firstName,
+      lastName: data.lastName,
     },
     diagLinkSessionExpired: false,
   };

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { makeStyles, tokens, Text, Badge, Button, Dialog, DialogSurface, DialogTitle, DialogBody, DialogContent, DialogActions, Field, Input, Spinner } from '@fluentui/react-components';
 import { ArrowLeftRegular } from '@fluentui/react-icons';
 import { ViewRoot, ViewMessage } from './ViewLayout';
@@ -11,6 +11,8 @@ import type { CompanyDto } from '../../types/company';
 import type { CurrentUser } from '../../types/currentUser';
 import type { MachineDto } from '../../types/machine';
 import { MachineCreditStatus } from './MachineCreditStatus';
+import { AdditionalMachineRequestDialog } from './AdditionalMachineRequestDialog';
+import { AdditionalDocumentsRequestDialog } from './AdditionalDocumentsRequestDialog';
 
 const useStyles = makeStyles({
   layout: {
@@ -41,7 +43,8 @@ const useStyles = makeStyles({
     alignItems: 'center',
     cursor: 'pointer',
     '@media (max-width: 768px)': {
-      minWidth: '640px',
+      gridTemplateColumns: 'minmax(0, 1fr) auto',
+      minWidth: 0,
     },
   },
   rowSelected: {
@@ -73,7 +76,10 @@ const useStyles = makeStyles({
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
     '@media (max-width: 768px)': {
-      minWidth: '480px',
+      gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+      minWidth: 0,
+      gap: tokens.spacingHorizontalS,
+      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
     },
   },
   companyStatus: {
@@ -113,7 +119,10 @@ const useStyles = makeStyles({
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
     '@media (max-width: 768px)': {
-      minWidth: '460px',
+      gridTemplateColumns: 'minmax(0, 1fr) auto',
+      minWidth: 0,
+      gap: tokens.spacingHorizontalS,
+      padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
     },
   },
   machineStatus: {
@@ -181,6 +190,7 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
   const styles = useStyles();
   const { dispatch } = useAppContext();
   const [selectedMachine, setSelectedMachine] = useState<MachineDto | null>(null);
+  const machineDetailRef = useRef<HTMLDivElement | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<CompanyDto | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -194,11 +204,35 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
   const [submittingDocuments, setSubmittingDocuments] = useState(false);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [documentsConfirmation, setDocumentsConfirmation] = useState<string | null>(null);
+  const [requestDialogOpen, setRequestDialogOpen] = useState(false);
+  const [documentsRequestDialogOpen, setDocumentsRequestDialogOpen] = useState(false);
   const superAdmin = isSuperAdmin(currentUser);
+  const companyAdmin = isCompanyAdmin(currentUser);
   const fetchMachines = useCallback(() => getMachines(getAccessToken), [getAccessToken, refreshKey]);
   const state = useApiResource(fetchMachines, onDiagLinkSessionExpired);
   const fetchCompanies = useCallback(() => getCompanies(getAccessToken), [getAccessToken]);
   const companiesState = useApiResource(fetchCompanies, onDiagLinkSessionExpired, superAdmin);
+
+  useEffect(() => {
+    if (!selectedMachine || documentsRequestDialogOpen) return;
+
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      if (
+        machineDetailRef.current &&
+        !machineDetailRef.current.contains(event.target as Node)
+      ) {
+        setSelectedMachine(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [selectedMachine, documentsRequestDialogOpen]);
 
   const handleUseMachine = useCallback((machine: MachineDto) => {
     dispatch({
@@ -353,7 +387,7 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
                   }}
                 >
                   <Text>{company.name}</Text>
-                  <Text className={styles.companyMachineCount}>{machineCount} {machineCount === 1 ? 'machine' : 'machines'}</Text>
+                  <Text className={styles.companyMachineCount}>{machineCount}</Text>
                   <Badge appearance="tint" className={styles.companyStatus}>{company.status}</Badge>
                 </div>
               );
@@ -368,6 +402,9 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
       {!isCompanyListView && state.kind === 'error' && <ViewMessage message="Impossible de charger les données." />}
       {!isCompanyListView && state.kind === 'success' && (
         <div className={selectedCompany ? styles.machineListContainer : undefined}>
+          {companyAdmin && <div className={styles.companyActions}>
+            <Button appearance="primary" onClick={() => setRequestDialogOpen(true)}>Demander l’ajout d’une machine</Button>
+          </div>}
           {selectedCompany && (
             <>
               <div className={styles.companyActions}>
@@ -415,7 +452,7 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
               </div>
 
               {selectedMachine && (
-                <div className={styles.detail}>
+                <div ref={machineDetailRef} className={styles.detail}>
                   <Text weight="semibold">{selectedMachine.name}</Text>
                   <MachineCreditStatus machineId={selectedMachine.id} getAccessToken={getAccessToken} />
                   <div className={styles.detailRow}>
@@ -434,6 +471,11 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
                   {superAdmin && selectedCompany && (
                     <Button appearance="secondary" onClick={openDocumentsDialog}>
                       Ajouter des PDF
+                    </Button>
+                  )}
+                  {companyAdmin && (
+                    <Button appearance="secondary" onClick={() => setDocumentsRequestDialogOpen(true)}>
+                      Demander l’ajout de documents
                     </Button>
                   )}
                   {documentsConfirmation && <Text>{documentsConfirmation}</Text>}
@@ -482,6 +524,9 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
           </DialogBody>
         </DialogSurface>
       </Dialog>
+      {companyAdmin && <AdditionalMachineRequestDialog open={requestDialogOpen} onOpenChange={setRequestDialogOpen} getAccessToken={getAccessToken} />}
+      {companyAdmin && selectedMachine && <AdditionalDocumentsRequestDialog open={documentsRequestDialogOpen}
+        onOpenChange={setDocumentsRequestDialogOpen} machine={selectedMachine} getAccessToken={getAccessToken} />}
       <Dialog open={documentsDialogOpen} onOpenChange={(_event, data) => !submittingDocuments && setDocumentsDialogOpen(data.open)}>
         <DialogSurface>
           <DialogTitle>Ajouter des PDF à {selectedMachine?.name}</DialogTitle>

@@ -4,6 +4,7 @@ import type { DiagLinkRole } from '../types/currentUser';
 export interface NavItem {
   view: AppView;
   label: string;
+  badgeCount?: number;
 }
 
 /** Nav entries per role, in display order — mirrors the structure requested for DiagLink navigation. */
@@ -22,6 +23,7 @@ const NAV_ITEMS_BY_ROLE: Record<DiagLinkRole, NavItem[]> = {
   ],
   diaglink_super_admin: [
     { view: 'chat', label: 'Chat / Assistance' },
+    { view: 'machine-requests', label: 'Nouvelles demandes' },
     { view: 'companies', label: 'Entreprises' },
     { view: 'users', label: 'Utilisateurs' },
     { view: 'machines', label: 'Machines' },
@@ -36,9 +38,14 @@ export const ROLE_LABELS: Record<DiagLinkRole, string> = {
   diaglink_super_admin: 'Super administrateur DiagLink',
 };
 
-export function getNavItemsForRole(role: DiagLinkRole | undefined): NavItem[] {
+export function getNavItemsForRole(role: DiagLinkRole | undefined, pendingMachineRequestCount = 0): NavItem[] {
   if (!role) return [];
   const items = NAV_ITEMS_BY_ROLE[role];
+  if (role === 'diaglink_super_admin') {
+    return items.map(item => item.view === 'machine-requests' && pendingMachineRequestCount > 0
+      ? { ...item, badgeCount: pendingMachineRequestCount }
+      : item);
+  }
   return role === 'technician' || role === 'company_admin'
     ? items.filter(item => item.view !== 'history')
     : items;

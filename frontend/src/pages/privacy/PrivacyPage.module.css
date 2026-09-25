@@ -1,0 +1,18 @@
+.main { padding:100px 24px 120px; background:linear-gradient(180deg,#f7fbfd 0,#fff 340px); color:#0b2742; font-family:'Segoe UI','Segoe UI Variable',sans-serif; }
+.article { width:min(100%,860px); margin:0 auto; }
+.intro { margin-bottom:70px; }
+.intro h1 { margin:0; font-size:clamp(2.5rem,5vw,4rem); line-height:1.06; letter-spacing:-.045em; }
+.intro>p:last-child { margin:26px 0 0; color:#52677a; font-size:1.1rem; line-height:1.75; }
+.article section { padding:0 0 42px; margin:0 0 42px; border-bottom:1px solid #e1eaee; }
+.article section h2 { margin:0 0 18px; font-size:1.55rem; line-height:1.25; letter-spacing:-.02em; }
+.article section p { margin:0; color:#52677a; line-height:1.75; }
+.article section p+p { margin-top:15px; }
+.article strong { color:#183b53; }
+.article ul { margin:18px 0 0; padding-left:22px; display:grid; gap:10px; color:#52677a; line-height:1.55; }
+.article a { color:#007bb4; font-weight:650; }
+.documentSection { display:grid; grid-template-columns:auto 1fr; gap:22px; padding:30px !important; border:1px solid #cfe3ec !important; border-radius:14px; background:#eef7fb; }
+.documentIcon { width:54px; height:54px; display:grid; place-items:center; border-radius:10px; background:#fff; color:#007bb4; }
+.sectionLabel { margin-bottom:8px !important; color:#00719f !important; font-size:.76rem; font-weight:750; letter-spacing:.12em; text-transform:uppercase; }
+.documentSection h2 { font-size:1.75rem !important; }
+.updated { margin:8px 0 0; color:#6e818e; font-size:.88rem; font-weight:600; }
+@media (max-width:600px) { .main { padding:64px 16px 80px; }.intro { margin-bottom:50px; }.article section { padding-bottom:32px; margin-bottom:32px; }.documentSection { grid-template-columns:1fr; padding:22px !important; }.documentSection h2 { font-size:1.45rem !important; } }
