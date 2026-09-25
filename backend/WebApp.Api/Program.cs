@@ -392,7 +392,9 @@ app.MapPost("/api/files/upload", async (HttpContext httpContext, DiagLinkDbConte
     {
         return Results.Problem(ex.Message);
     }
-}).Accepts<IFormFileCollection>("multipart/form-data");
+})
+.RequireAuthorization("SuperAdminOnly")
+.Accepts<IFormFileCollection>("multipart/form-data");
 
 // Public pre-auth endpoint: checks whether an email belongs to an active dbo.Users record.
 // Intentionally has no .RequireAuthorization() — must be callable before any Microsoft sign-in.
