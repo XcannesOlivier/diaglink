@@ -19,6 +19,8 @@ param senderAddress string = ''
 param authOtpPepper string
 @secure()
 param azureStorageConnectionString string
+@secure()
+param contactRecipientAddress string
 
 var abbrs = loadJsonContent('./abbreviations.json')
 
@@ -109,6 +111,13 @@ var storageEnv = [
   }
 ]
 
+var contactEnv = [
+  {
+    name: 'Contact__RecipientAddress'
+    secretRef: 'contact-recipient-address'
+  }
+]
+
 var containerSecrets = [
   {
     name: 'auth-otp-pepper'
@@ -117,6 +126,10 @@ var containerSecrets = [
   {
     name: 'azure-storage-connection-string'
     value: azureStorageConnectionString
+  }
+  {
+    name: 'contact-recipient-address'
+    value: contactRecipientAddress
   }
 ]
 
@@ -138,7 +151,7 @@ var pricingIdentityEnvGroups = [for (identity, index) in pricingIdentities: [
 ]]
 var pricingIdentityEnv = flatten(pricingIdentityEnvGroups)
 
-var containerEnv = concat(baseEnv, miEnv, oboEnv, diagLinkEnv, emailEnv, authEnv, storageEnv, pricingIdentityEnv)
+var containerEnv = concat(baseEnv, miEnv, oboEnv, diagLinkEnv, emailEnv, authEnv, storageEnv, contactEnv, pricingIdentityEnv)
 
 // Single Container App - serves both frontend and backend
 module webApp './core/host/container-app.bicep' = {

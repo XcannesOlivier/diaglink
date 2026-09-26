@@ -129,11 +129,14 @@ public class EmailService : ITransactionalEmailSender
     }
 
     public async Task<string?> SendAsync(string recipientEmail, string subject, string textBody,
-        string? htmlBody, CancellationToken cancellationToken)
+        string? htmlBody, CancellationToken cancellationToken,
+        string? replyToEmail = null, string? replyToName = null)
     {
         var content = new EmailContent(subject) { PlainText = textBody };
         if (!string.IsNullOrWhiteSpace(htmlBody)) content.Html = htmlBody;
         var message = new EmailMessage(_senderAddress, recipientEmail, content);
+        if (!string.IsNullOrWhiteSpace(replyToEmail))
+            message.ReplyTo.Add(new EmailAddress(replyToEmail, replyToName));
 
         if (_devNoAcs)
         {

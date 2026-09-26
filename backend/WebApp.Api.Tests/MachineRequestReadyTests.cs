@@ -228,13 +228,15 @@ public sealed class MachineRequestReadyTests
     private sealed class FailingSender : ITransactionalEmailSender
     {
         public Task<string?> SendAsync(string recipientEmail, string subject, string textBody,
-            string? htmlBody, CancellationToken cancellationToken) =>
+            string? htmlBody, CancellationToken cancellationToken,
+            string? replyToEmail = null, string? replyToName = null) =>
             Task.FromException<string?>(new IOException("ACS unavailable"));
     }
 
     private sealed class SuccessfulSender : ITransactionalEmailSender
     {
         public Task<string?> SendAsync(string recipientEmail, string subject, string textBody,
-            string? htmlBody, CancellationToken cancellationToken) => Task.FromResult<string?>("acs-ready");
+            string? htmlBody, CancellationToken cancellationToken,
+            string? replyToEmail = null, string? replyToName = null) => Task.FromResult<string?>("acs-ready");
     }
 }

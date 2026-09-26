@@ -42,6 +42,10 @@ param authOtpPepper string
 @description('Azure Storage connection string used by BlobStorageService for PDF uploads.')
 param azureStorageConnectionString string
 
+@secure()
+@description('Email address that receives submissions from the public contact form.')
+param contactRecipientAddress string
+
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var appTags = {
@@ -104,6 +108,7 @@ module app 'main-app.bicep' = {
     senderAddress: senderAddress
     authOtpPepper: authOtpPepper
     azureStorageConnectionString: azureStorageConnectionString
+    contactRecipientAddress: contactRecipientAddress
   }
 }
 

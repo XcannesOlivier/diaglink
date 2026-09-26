@@ -278,7 +278,8 @@ public sealed class MachineRequestDecisionNotificationTests
     {
         public int Calls { get; private set; }
         public Task<string?> SendAsync(string recipientEmail, string subject, string textBody,
-            string? htmlBody, CancellationToken cancellationToken)
+            string? htmlBody, CancellationToken cancellationToken,
+            string? replyToEmail = null, string? replyToName = null)
         {
             Calls++;
             return Task.FromResult<string?>("acs-decision");

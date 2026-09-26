@@ -13,6 +13,10 @@
 .messageField { grid-column:1 / -1; }
 .form button { grid-column:1 / -1; width:fit-content; min-height:46px; border:1px solid #007bb4; border-radius:8px; padding:0 22px; background:#007bb4; color:#fff; font:inherit; font-weight:700; cursor:pointer; box-shadow:0 7px 18px rgba(0,123,180,.17); }
 .form button:hover { background:#00658f; }
+.form button:disabled { cursor:wait; opacity:.7; }
+.feedback { grid-column:1 / -1; margin:0; padding:12px 14px; border-radius:8px; line-height:1.5; }
+.success { background:#e9f7ef; color:#196b3a; }
+.error { background:#fff0f0; color:#9b1c1c; }
 .info { padding:34px; border:1px solid #dce8ee; border-radius:14px; background:#eef7fb; }
 .infoIcon { width:52px; height:52px; display:grid; place-items:center; margin-bottom:24px; border-radius:10px; background:#fff; color:#007bb4; }
 .info h2 { margin:0; font-size:1.6rem; line-height:1.2; letter-spacing:-.025em; }

@@ -110,6 +110,7 @@ az deployment sub create \
 | `aiAgentEndpoint` | (from azd) | AI Agent endpoint URL |
 | `aiAgentId` | (from azd) | Agent name |
 | `enableObo` | `false` | Enable OBO backend app + FIC + admin consent (backend app in Bicep; FIC + admin consent in postprovision.ps1) |
+| `contactRecipientAddress` | (required) | Contact form recipient, supplied with `azd env set CONTACT_RECIPIENT_ADDRESS <address>` and injected as the `Contact__RecipientAddress` Container App secret. |
 
 ## Outputs
 

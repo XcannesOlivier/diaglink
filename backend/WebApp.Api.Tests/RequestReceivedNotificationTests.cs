@@ -132,7 +132,8 @@ public sealed class RequestReceivedNotificationTests
     {
         public int CallCount { get; private set; }
         public Task<string?> SendAsync(string recipientEmail, string subject, string textBody,
-            string? htmlBody, CancellationToken cancellationToken)
+            string? htmlBody, CancellationToken cancellationToken,
+            string? replyToEmail = null, string? replyToName = null)
         {
             CallCount++;
             return exception is null ? Task.FromResult(operationId) : Task.FromException<string?>(exception);

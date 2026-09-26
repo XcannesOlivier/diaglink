@@ -42,6 +42,7 @@ flowchart TB
     L -->|/api/conversations/*/messages| S[GetConversationMessages]
     L -->|DELETE /api/conversations/*| T[DeleteConversation ⚠️ 501]
     L -->|/api/files/*| U[DownloadFile]
+    L -->|POST /api/public/contact| V[Validate + rate limit + send via ACS]
     L -->|/*| P[Fallback: index.html]
 ```
 
