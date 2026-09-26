@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "9381685263034338199"
+      "templateHash": "13647891604769760895"
     }
   },
   "parameters": {
@@ -96,6 +96,18 @@
       "type": "securestring",
       "metadata": {
         "description": "Email address that receives submissions from the public contact form."
+      }
+    },
+    "customDomainName": {
+      "type": "string",
+      "metadata": {
+        "description": "Custom domain bound to the Container App ingress."
+      }
+    },
+    "customDomainCertificateName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the existing Container Apps managed certificate."
       }
     }
   },
@@ -1214,6 +1226,12 @@
           },
           "contactRecipientAddress": {
             "value": "[parameters('contactRecipientAddress')]"
+          },
+          "customDomainName": {
+            "value": "[parameters('customDomainName')]"
+          },
+          "customDomainCertificateName": {
+            "value": "[parameters('customDomainCertificateName')]"
           }
         },
         "template": {
@@ -1223,7 +1241,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "9507454490409693914"
+              "templateHash": "10913548432414877882"
             }
           },
           "parameters": {
@@ -1293,6 +1311,18 @@
             },
             "contactRecipientAddress": {
               "type": "securestring"
+            },
+            "customDomainName": {
+              "type": "string",
+              "metadata": {
+                "description": "Custom domain bound to the Container App ingress."
+              }
+            },
+            "customDomainCertificateName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the existing Container Apps managed certificate."
+              }
             }
           },
           "variables": {
@@ -1509,6 +1539,15 @@
                   },
                   "secrets": {
                     "value": "[variables('containerSecrets')]"
+                  },
+                  "customDomains": {
+                    "value": [
+                      {
+                        "name": "[parameters('customDomainName')]",
+                        "bindingType": "SniEnabled",
+                        "certificateId": "[resourceId('Microsoft.App/managedEnvironments/managedCertificates', last(split(parameters('containerAppsEnvironmentId'), '/')), parameters('customDomainCertificateName'))]"
+                      }
+                    ]
                   }
                 },
                 "template": {
@@ -1518,7 +1557,7 @@
                     "_generator": {
                       "name": "bicep",
                       "version": "0.46.1.21595",
-                      "templateHash": "15568314858386488239"
+                      "templateHash": "11275091616841573357"
                     }
                   },
                   "parameters": {
@@ -1581,6 +1620,10 @@
                     "secrets": {
                       "type": "array",
                       "defaultValue": []
+                    },
+                    "customDomains": {
+                      "type": "array",
+                      "defaultValue": []
                     }
                   },
                   "resources": [
@@ -1600,7 +1643,7 @@
                         "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
                         "configuration": {
                           "activeRevisionsMode": "Single",
-                          "ingress": "[if(parameters('enableIngress'), createObject('external', parameters('external'), 'targetPort', parameters('targetPort'), 'transport', 'auto', 'allowInsecure', false()), null())]",
+                          "ingress": "[if(parameters('enableIngress'), createObject('external', parameters('external'), 'targetPort', parameters('targetPort'), 'transport', 'auto', 'allowInsecure', false(), 'customDomains', parameters('customDomains')), null())]",
                           "registries": [
                             {
                               "server": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), '2023-07-01').loginServer]",

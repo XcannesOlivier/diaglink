@@ -21,8 +21,21 @@ param authOtpPepper string
 param azureStorageConnectionString string
 @secure()
 param contactRecipientAddress string
+@description('Custom domain bound to the Container App ingress.')
+param customDomainName string
+@description('Name of the existing Container Apps managed certificate.')
+param customDomainCertificateName string
 
 var abbrs = loadJsonContent('./abbreviations.json')
+
+resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
+  name: last(split(containerAppsEnvironmentId, '/'))
+}
+
+resource customDomainCertificate 'Microsoft.App/managedEnvironments/managedCertificates@2024-03-01' existing = {
+  parent: containerAppsEnvironment
+  name: customDomainCertificateName
+}
 
 // Base env vars always present
 var baseEnv = [
@@ -170,6 +183,13 @@ module webApp './core/host/container-app.bicep' = {
     healthProbePath: '/api/health'
     userAssignedIdentityId: userAssignedIdentityId
     secrets: containerSecrets
+    customDomains: [
+      {
+        name: customDomainName
+        bindingType: 'SniEnabled'
+        certificateId: customDomainCertificate.id
+      }
+    ]
   }
 }
 

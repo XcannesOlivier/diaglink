@@ -46,6 +46,12 @@ param azureStorageConnectionString string
 @description('Email address that receives submissions from the public contact form.')
 param contactRecipientAddress string
 
+@description('Custom domain bound to the Container App ingress.')
+param customDomainName string
+
+@description('Name of the existing Container Apps managed certificate.')
+param customDomainCertificateName string
+
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var appTags = {
@@ -109,6 +115,8 @@ module app 'main-app.bicep' = {
     authOtpPepper: authOtpPepper
     azureStorageConnectionString: azureStorageConnectionString
     contactRecipientAddress: contactRecipientAddress
+    customDomainName: customDomainName
+    customDomainCertificateName: customDomainCertificateName
   }
 }
 

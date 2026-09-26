@@ -15,6 +15,7 @@ param minReplicas int = 0
 param maxReplicas int = 3
 param userAssignedIdentityId string
 param secrets array = []
+param customDomains array = []
 
 resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: containerRegistryName
@@ -39,6 +40,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         targetPort: targetPort
         transport: 'auto'
         allowInsecure: false
+        customDomains: customDomains
       } : null
       registries: [
         {
