@@ -37,7 +37,7 @@ export function PublicHeader({ loginTarget, isAuthenticated, landingPath = '' }:
           {links.map(([label, href]) => <a key={href} href={landingHref(href)}>{label}</a>)}
         </nav>
         <div className={styles.headerActions}>
-          <Link className={styles.primaryButton} to="/demonstration">Voir une démonstration</Link>
+          <Link className={styles.primaryButton} to="/commencer">Configurer ma première machine</Link>
           <button className={styles.secondaryButton} type="button" onClick={install}>Installer DiagLink</button>
           <Link className={styles.secondaryButton} to={loginTarget}>Se connecter</Link>
         </div>
@@ -48,7 +48,7 @@ export function PublicHeader({ loginTarget, isAuthenticated, landingPath = '' }:
       {menuOpen && (
         <nav className={styles.mobileNav} aria-label="Navigation mobile">
           {links.map(([label, href]) => <a key={href} href={landingHref(href)} onClick={() => setMenuOpen(false)}>{label}</a>)}
-          <Link className={styles.primaryButton} to="/demonstration" onClick={() => setMenuOpen(false)}>Voir une démonstration</Link>
+          <Link className={styles.primaryButton} to="/commencer" onClick={() => setMenuOpen(false)}>Configurer ma première machine</Link>
           <button className={styles.secondaryButton} type="button" onClick={install}>Installer DiagLink</button>
           <Link className={styles.secondaryButton} to={loginTarget} onClick={() => setMenuOpen(false)}>Se connecter</Link>
         </nav>

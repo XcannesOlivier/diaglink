@@ -63,6 +63,22 @@ describe('PublicHeader install shortcut', () => {
     expect(sessionStorage.getItem('diaglink.pendingInstallPlatform')).toBe('windows');
   });
 
+  it('routes desktop and mobile primary actions to the existing machine setup flow', async () => {
+    await render(false);
+    const setupLinks = () => [...container.querySelectorAll('a')]
+      .filter(link => link.textContent === 'Configurer ma première machine');
+    expect(setupLinks()).toHaveLength(1);
+    expect(setupLinks()[0].getAttribute('href')).toBe('/commencer');
+    expect(container.textContent).not.toContain('Voir une démonstration');
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Ouvrir le menu"]')!.click());
+    expect(setupLinks()).toHaveLength(2);
+    expect(setupLinks().every(link => link.getAttribute('href') === '/commencer')).toBe(true);
+    await act(async () => setupLinks()[1].click());
+    expect(container.querySelector('[data-location]')?.textContent).toBe('/commencer');
+    expect(container.querySelector('[aria-label="Navigation mobile"]')).toBeNull();
+  });
+
   it.each([
     ['windows', 'windows'],
     ['ios', 'ios'],
