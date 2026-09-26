@@ -6,12 +6,14 @@ import { StripeMachineAdditionsPanel } from './StripeMachineAdditionsPanel';
 import { WalletTopUpPanel } from './WalletTopUpPanel';
 import { StripeMachineStatusPanel } from './StripeMachineStatusPanel';
 import { AdminFinanceOverview } from './AdminFinanceOverview';
+import { getAdminAccordionProps, type AdminAccordionControl } from './adminAccordion';
 import styles from './CompanyFinancePanel.module.css';
 
 interface Props {
   companyId: string;
   getAccessToken: () => Promise<string | null>;
   onDiagLinkSessionExpired?: () => void;
+  accordion?: AdminAccordionControl;
 }
 const euro = (cents: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(cents / 100);
 const subscriptionLabel = (status: string | null, cancelAtPeriodEnd?: boolean) => {
@@ -23,7 +25,7 @@ const subscriptionLabel = (status: string | null, cancelAtPeriodEnd?: boolean) =
   return cancelAtPeriodEnd ? `${value} · Résiliation prévue à échéance` : value;
 };
 
-export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessionExpired }: Props) {
+export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessionExpired, accordion }: Props) {
   const [technicalTarget, setTechnicalTarget] = useState<HTMLDivElement | null>(null);
   const [repairTarget, setRepairTarget] = useState<HTMLDivElement | null>(null);
   const [walletInterventions, setWalletInterventions] = useState<string[]>([]);
@@ -56,9 +58,9 @@ export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessio
   return <section aria-label="Finances et consommation">
     <CompanySummaryBanner key={companyId} companyId={companyId} account={data} token={getAccessToken} revision={revision}/>
     {data && <>
-      <AdminFinanceOverview companyId={companyId} account={data} token={getAccessToken} revision={revision} machineContent={<WalletTopUpPanel key={companyId} companyId={companyId} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+      <AdminFinanceOverview companyId={companyId} account={data} token={getAccessToken} revision={revision} accordion={accordion} machineContent={<WalletTopUpPanel key={companyId} companyId={companyId} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired}
         technicalTarget={technicalTarget} repairTarget={repairTarget} onInterventionsChange={updateWalletInterventions} />}>
-      <details className={`${styles.technical} ${styles.billingState}`}>
+      <details className={`${styles.technical} ${styles.billingState}`} {...getAdminAccordionProps(accordion, 'billing')}>
       <summary><span className={styles.billingTitle}>État de facturation</span>
         <span className={styles.billingInlineState}>{subscriptionLabel(data.subscriptionStatus, data.cancelAtPeriodEnd)} · {data.activeMachineCount}/{billableMachines} machines · {amountRemaining > 0 ? `${euro(amountRemaining)} impayés` : 'Aucun impayé'} · <span className={interventions.length > 0 ? styles.interventionState : undefined}>{interventions.length > 0 ? `⚠ ${interventions.length} intervention${interventions.length > 1 ? 's' : ''}` : 'Aucune intervention'}</span></span>
       </summary>
@@ -73,7 +75,11 @@ export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessio
       </dl>
       {interventions.length > 0 && <div className={styles.billingAlert} role="alert"><strong>Intervention requise</strong>
         <ul>{interventions.map(value => <li key={value}>{value}</li>)}</ul>
-        <Button onClick={() => { if (repairDetails.current) repairDetails.current.open = true; repairTarget?.focus(); }}>Examiner / reprendre</Button>
+        <Button onClick={() => {
+          if (accordion) accordion.onSectionToggle('repairs', true);
+          else if (repairDetails.current) repairDetails.current.open = true;
+          requestAnimationFrame(() => repairTarget?.focus());
+        }}>Examiner / reprendre</Button>
       </div>}
       <details className={`${styles.technical} ${styles.billingManagement}`}>
         <summary>Machines facturables ({billableMachines})</summary>
@@ -84,7 +90,7 @@ export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessio
         onInterventionsChange={updateMachineInterventions} />
       </div>
       </details>
-      <details className={styles.technical}><summary>Détails techniques</summary>
+      <details className={styles.technical} {...getAdminAccordionProps(accordion, 'technical')}><summary>Détails techniques</summary>
       <section className={styles.diagnosticSubsection} aria-label="Données Stripe et abonnement enregistrées"><h4>Données Stripe et abonnement enregistrées</h4><dl className={styles.diagnosticSummary}>
         <dt>BillingAccount</dt><dd>{data.billingAccountId ?? '—'}</dd>
         <dt>StripeCustomerId</dt><dd>{data.stripeCustomerId ?? '—'}</dd>
@@ -101,7 +107,7 @@ export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessio
       </section>
       <div ref={setTechnicalTarget}/>
       </details>
-      <details ref={repairDetails} className={`${styles.technical}${interventions.length > 0 ? ` ${styles.repairTools}` : ''}`}><summary>Outils de réparation{interventions.length > 0 ? ` (${interventions.length})` : ''}</summary>
+      <details ref={repairDetails} className={`${styles.technical}${interventions.length > 0 ? ` ${styles.repairTools}` : ''}`} {...getAdminAccordionProps(accordion, 'repairs')}><summary>Outils de réparation{interventions.length > 0 ? ` (${interventions.length})` : ''}</summary>
         {interventions.length === 0 && <p>Aucune opération ne nécessite d’intervention.</p>}
         <div ref={setRepairTarget} tabIndex={-1}/>
       </details>

@@ -1,8 +1,9 @@
 import {createPortal} from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { StripeCompanyPanel } from '../StripeCompanyPanel';
+import type { AdminSection } from '../adminAccordion';
 import styles from '../CompanyFinancePanel.module.css';
 const { request } = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock('../../../services/stripeAdminService', () => ({ stripeCompanyRequest: request }));
@@ -19,6 +20,16 @@ describe('StripeCompanyPanel', () => {
   beforeEach(() => { request.mockReset(); container = document.createElement('div'); document.body.append(container); root = createRoot(container); });
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
   async function render() { await act(async () => root.render(<StripeCompanyPanel companyId="c1" getAccessToken={token} />)); }
+  async function renderControlled() {
+    function ControlledPanel() {
+      const [openSection, setOpenSection] = useState<AdminSection | null>(null);
+      return <StripeCompanyPanel companyId="c1" getAccessToken={token} accordion={{
+        openSection,
+        onSectionToggle: (section, isOpen) => setOpenSection(current => isOpen ? section : current === section ? null : current),
+      }} />;
+    }
+    await act(async () => root.render(<ControlledPanel />));
+  }
 
   it('loads without mutations and refreshes only the recorded data', async () => {
     request.mockResolvedValueOnce({ kind: 'success', data }); await render();
@@ -77,6 +88,38 @@ describe('StripeCompanyPanel', () => {
     expect(machines.open).toBe(true);
     const action = [...machines.querySelectorAll('button')].find(button => button.textContent === 'Désactiver Machine A');
     expect(action?.disabled).toBe(false);
+  });
+
+  it('keeps the five finance accordions exclusive without reacting to the nested machine section', async () => {
+    request.mockResolvedValue({ kind: 'success', data: { ...data, subscriptionStatus: 'active' } });
+    await renderControlled();
+    const bySummary = (label: string) => [...container.querySelectorAll<HTMLDetailsElement>('details')]
+      .find(details => details.querySelector(':scope > summary')?.textContent?.startsWith(label))!;
+    const primary = ['Consommation Agent', 'Crédits et paiements', 'État de facturation', 'Détails techniques', 'Outils de réparation']
+      .map(bySummary);
+    const openPrimary = () => primary.filter(details => details.open);
+    const click = async (element: HTMLElement) => {
+      await act(async () => {
+        element.click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+    };
+
+    expect(openPrimary()).toHaveLength(0);
+    for (const label of ['Consommation Agent', 'Crédits et paiements', 'État de facturation', 'Détails techniques', 'Outils de réparation']) {
+      const details = bySummary(label);
+      await click(details.querySelector(':scope > summary')!);
+      expect(openPrimary()).toEqual([details]);
+    }
+
+    await click(bySummary('Outils de réparation').querySelector(':scope > summary')!);
+    expect(openPrimary()).toHaveLength(0);
+
+    await click(bySummary('État de facturation').querySelector(':scope > summary')!);
+    const machines = bySummary('Machines facturables');
+    await click(machines.querySelector(':scope > summary')!);
+    expect(machines.open).toBe(true);
+    expect(openPrimary()).toEqual([bySummary('État de facturation')]);
   });
 
   it('shows authorization errors without actions', async () => {

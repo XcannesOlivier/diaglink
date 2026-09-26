@@ -3,9 +3,10 @@ import { useCallback, useState } from 'react';
 import { useApiResource } from '../../hooks/useApiResource';
 import { getCompanies } from '../../services/companyService';
 import { StripeCompanyPanel } from './StripeCompanyPanel';
+import type { AdminAccordionControl } from './adminAccordion';
 
-export function StripeAdminPanel({ getAccessToken, onDiagLinkSessionExpired }: {
-  getAccessToken: () => Promise<string | null>; onDiagLinkSessionExpired?: () => void;
+export function StripeAdminPanel({ getAccessToken, onDiagLinkSessionExpired, accordion }: {
+  getAccessToken: () => Promise<string | null>; onDiagLinkSessionExpired?: () => void; accordion?: AdminAccordionControl;
 }) {
   const fetcher = useCallback(() => getCompanies(getAccessToken), [getAccessToken]);
   const state = useApiResource(fetcher, onDiagLinkSessionExpired);
@@ -20,7 +21,7 @@ export function StripeAdminPanel({ getAccessToken, onDiagLinkSessionExpired }: {
         {state.data.map(c => <option key={c.id} value={c.id}>{c.name} ({c.status})</option>)}
       </select></label>
       {selected && state.data.some(c => c.id === selected) && <StripeCompanyPanel key={selected} companyId={selected}
-        getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} />}
+        getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} accordion={accordion} />}
     </>}
   </section>;
 }

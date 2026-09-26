@@ -1,9 +1,10 @@
 import {GlobalFinancePeriod} from './GlobalFinancePeriod';
-import React, { useId, useState } from 'react';
+import React, { useCallback, useId, useState } from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
 import { ChevronDown20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
 import { PlaceholderView } from './PlaceholderView';
 import { StripeAdminPanel } from './StripeAdminPanel';
+import type { AdminSection } from './adminAccordion';
 import { useAuth } from '../../hooks/useAuth';
 
 const useStyles = makeStyles({
@@ -69,8 +70,12 @@ const FUTURE_SECTIONS = [
 export const DiagLinkAdminView: React.FC<{ onDiagLinkSessionExpired?: () => void }> = ({ onDiagLinkSessionExpired }) => {
   const styles = useStyles();
   const { getAccessToken } = useAuth();
-  const [statisticsOpen, setStatisticsOpen] = useState(false);
+  const [openSection, setOpenSection] = useState<AdminSection | null>(null);
   const statisticsContentId = useId();
+  const onSectionToggle = useCallback((section: AdminSection, isOpen: boolean) => {
+    setOpenSection(current => isOpen ? section : current === section ? null : current);
+  }, []);
+  const statisticsOpen = openSection === 'statistics';
 
   return (
     <PlaceholderView title="Administration DiagLink" subtitle="Espace réservé au super administrateur DiagLink.">
@@ -81,7 +86,7 @@ export const DiagLinkAdminView: React.FC<{ onDiagLinkSessionExpired?: () => void
               <h2 className={styles.heading}>
                 <button type="button" className={styles.header}
                   aria-expanded={statisticsOpen} aria-controls={statisticsContentId}
-                  onClick={() => setStatisticsOpen(open => !open)}>
+                  onClick={() => onSectionToggle('statistics', !statisticsOpen)}>
                   <span className={styles.headerText}>
                     <Text size={500} weight="semibold">Statistiques globales</Text>
                   </span>
@@ -96,7 +101,8 @@ export const DiagLinkAdminView: React.FC<{ onDiagLinkSessionExpired?: () => void
             </section>
           ) : null
         ))}
-        <StripeAdminPanel getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} />
+        <StripeAdminPanel getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+          accordion={{ openSection, onSectionToggle }} />
       </div>
     </PlaceholderView>
   );
