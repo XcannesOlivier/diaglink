@@ -426,10 +426,14 @@ public sealed class MachineRequestPaymentService
         return Result(payment);
     }
 
-    public async Task<MachineRequestPaymentVerification> VerifyForMachineRequestAsync(Guid id, CancellationToken ct)
+    public async Task<MachineRequestPaymentVerification> VerifyForMachineRequestAsync(Guid id, string? email,
+        CancellationToken ct)
     {
         var payment = await store.GetAsync(id, ct);
         if (payment is null) return new("not_found", null);
+        var normalizedEmail = NormalizeEmail(email);
+        if (!string.Equals(payment.Email, normalizedEmail, StringComparison.OrdinalIgnoreCase))
+            return new("identity_mismatch", payment);
         _ = MachineRequestPreparationPricing.IncludesMaximumFirstSubscription(payment.TotalPages, payment.AmountCents);
         if (payment.Status != "authorized" || string.IsNullOrEmpty(payment.StripeSessionId)
             || string.IsNullOrEmpty(payment.StripePaymentIntentId))

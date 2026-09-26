@@ -60,7 +60,8 @@ public static partial class MachineRequestPublicEndpoints
         }
         if (values["serialNumber"]?.Length > MachineRequestUploadLimits.MaxShortTextLength) return ValidationError("serialNumber", "Ce champ est trop long.");
         if (values["description"]?.Length > MachineRequestUploadLimits.MaxDescriptionLength) return ValidationError("description", "Ce champ est trop long.");
-        if (!MailAddress.TryCreate(values["email"], out _)) return ValidationError("email", "L’adresse e-mail est invalide.");
+        if (!MailAddress.TryCreate(values["email"], out var parsedEmail) || parsedEmail.Address != values["email"])
+            return ValidationError("email", "L’adresse e-mail est invalide.");
         if (!IsReasonablePhone(values["phone"]!)) return ValidationError("phone", "Le numéro de téléphone est invalide.");
 
         var files = form.Files.GetFiles("documents");
@@ -71,7 +72,8 @@ public static partial class MachineRequestPublicEndpoints
         MachineRequestPayment payment;
         try
         {
-            var verification = await paymentService.VerifyForMachineRequestAsync(paymentRequestId, cancellationToken);
+            var verification = await paymentService.VerifyForMachineRequestAsync(
+                paymentRequestId, values["email"], cancellationToken);
             if (verification.Status == "not_found") return Results.NotFound(new { error = "La référence de paiement est introuvable." });
             if (verification.Status != "authorized" || verification.Payment is null)
                 return Results.Conflict(new { error = "Le paiement n'est pas autorisé ou n'est plus intégralement capturable." });
