@@ -591,9 +591,6 @@ app.MapPost("/api/auth/verify-code", async (
         return Results.Ok(new VerifyCodeResponse { Success = false });
     }
 
-    // Code valide : consommation immédiate, donc impossible à réutiliser.
-    loginCode.UsedAtUtc = now;
-
     // Session DiagLink 24h : token opaque aléatoire, seul son hash est persisté.
     var sessionTokenBytes = RandomNumberGenerator.GetBytes(32);
     var sessionToken = Convert.ToBase64String(sessionTokenBytes)
@@ -617,7 +614,31 @@ app.MapPost("/api/auth/verify-code", async (
         RevokedAtUtc = null,
     });
 
-    await db.SaveChangesAsync(cancellationToken);
+    var executionStrategy = db.Database.CreateExecutionStrategy();
+    var consumed = await executionStrategy.ExecuteAsync(async () =>
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var affectedRows = await db.LoginCodes
+            .Where(c =>
+                c.Id == loginCode.Id &&
+                c.UsedAtUtc == null &&
+                c.ExpiresAtUtc > now)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(c => c.UsedAtUtc, now), cancellationToken);
+
+        if (affectedRows == 0) return false;
+
+        await db.SaveChangesAsync(acceptAllChangesOnSuccess: false, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        db.ChangeTracker.AcceptAllChanges();
+        return true;
+    });
+
+    if (!consumed)
+    {
+        return Results.Ok(new VerifyCodeResponse { Success = false });
+    }
 
     return Results.Ok(new VerifyCodeResponse
     {
