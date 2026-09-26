@@ -1101,7 +1101,7 @@ app.MapGet("/api/machines/{machineId:guid}/ai-credit", async (Guid machineId, Ht
 {
     if (!await access.CanAccessMachineAsync(context.User, machineId, ct)) return Results.NotFound();
     return Results.Ok(await credits.CheckAsync(machineId, ct));
-}).RequireAuthorization();
+}).RequireAuthorization("TechnicianOrAbove");
 app.MapPost("/api/chat/stream", async (
     ChatRequest request,
     AiUsagePersistenceBillingService usagePersistenceBilling,
