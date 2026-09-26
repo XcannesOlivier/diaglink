@@ -1,5 +1,6 @@
 using MachineRequestProvisioningStage = WebApp.Api.Models.Entities.MachineRequestProvisioningStage;
 using MachineRequestPreparationStatus = WebApp.Api.Models.Entities.MachineRequestPreparationStatus;
+using Microsoft.EntityFrameworkCore;
 using WebApp.Api.Models;
 
 namespace WebApp.Api.Services;
@@ -49,26 +50,32 @@ public sealed class MachineRequestPaymentService
         this.requestReceivedNotifications = requestReceivedNotifications;
     }
 
-    public async Task<MachineRequestPaymentResult> CreateAsync(int totalPages, string? email, CancellationToken ct)
+    public async Task<MachineRequestPaymentResult> CreateAsync(Guid paymentRequestId, int totalPages, string? email,
+        CancellationToken ct)
     {
         var amountCents = MachineRequestPreparationPricing.CalculateMaximumAuthorizationCents(totalPages);
+        var normalizedEmail = NormalizeEmail(email);
         var now = DateTime.UtcNow;
-        var payment = new MachineRequestPayment(Guid.NewGuid(), totalPages,
-            amountCents, "EUR", NormalizeEmail(email), null, null, "pending", now, now,
+        var expected = new MachineRequestPayment(paymentRequestId, totalPages,
+            amountCents, "EUR", normalizedEmail, null, null, "pending", now, now,
             RequestKind: MachineRequestKind.InitialMachine,
             RequestedByUserId: null);
-        payment = await store.AddAsync(payment, ct);
-        try
+        var payment = await store.AddOrGetAsync(expected, ct);
+        EnsureInitialPaymentMatches(payment, totalPages, amountCents, normalizedEmail);
+
+        var checkout = await gateway.CreateAsync(payment, ct);
+        if (payment.StripeSessionId is null)
         {
-            var checkout = await gateway.CreateAsync(payment, ct);
-            payment = await store.SetCheckoutSessionAsync(payment, checkout.SessionId, ct);
-            return Result(payment, checkout.CheckoutUrl);
+            try { payment = await store.SetCheckoutSessionAsync(payment, checkout.SessionId, ct); }
+            catch (Exception exception) when (exception is InvalidOperationException or DbUpdateConcurrencyException)
+            {
+                payment = await store.GetAsync(payment.PaymentRequestId, ct)
+                    ?? throw new InvalidOperationException("Le paiement est devenu indisponible.");
+            }
         }
-        catch
-        {
-            await store.RemovePendingAsync(payment, CancellationToken.None);
-            throw;
-        }
+        if (payment.StripeSessionId != checkout.SessionId)
+            throw new InvalidOperationException("La Session Checkout ne correspond pas au paiement existant.");
+        return Result(payment, checkout.CheckoutUrl);
     }
 
     public async Task<MachineRequestPaymentResult?> ReadAsync(Guid id, CancellationToken ct)
@@ -513,6 +520,19 @@ public sealed class MachineRequestPaymentService
         if (!System.Net.Mail.MailAddress.TryCreate(value, out var parsed) || parsed.Address != value)
             throw new ArgumentException("Adresse e-mail invalide.", nameof(email));
         return value;
+    }
+
+    private static void EnsureInitialPaymentMatches(MachineRequestPayment payment, int totalPages,
+        long amountCents, string? email)
+    {
+        if (payment.RequestKind != MachineRequestKind.InitialMachine
+            || payment.RequestedByUserId is not null
+            || payment.TotalPages != totalPages
+            || payment.AmountCents != amountCents
+            || payment.Currency != "EUR"
+            || !string.Equals(payment.Email, email, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "Cette clé d'idempotence est déjà associée à une autre tentative de paiement.");
     }
 
     private static void EnsureAdditionalDocumentsOwnership(MachineRequestPayment payment,

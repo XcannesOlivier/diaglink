@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MachineRequestSubmissionError } from '../../services/machineRequestApi';
+import { MachineRequestPaymentTerminalError } from '../../services/machineRequestPaymentApi';
 import { StartPage } from './StartPage';
 
 const mocks = vi.hoisted(() => ({
@@ -17,10 +18,14 @@ vi.mock('../../services/machineRequestApi', async importOriginal => {
   const original = await importOriginal<typeof import('../../services/machineRequestApi')>();
   return { ...original, submitMachineRequest: mocks.submitMachineRequest };
 });
-vi.mock('../../services/machineRequestPaymentApi', () => ({
-  createMachineRequestPayment: mocks.createPayment,
-  waitForMachineRequestAuthorization: mocks.waitForAuthorization,
-}));
+vi.mock('../../services/machineRequestPaymentApi', async importOriginal => {
+  const original = await importOriginal<typeof import('../../services/machineRequestPaymentApi')>();
+  return {
+    ...original,
+    createMachineRequestPayment: mocks.createPayment,
+    waitForMachineRequestAuthorization: mocks.waitForAuthorization,
+  };
+});
 vi.mock('../../components/marketing/PublicHeader', () => ({ PublicHeader: () => <header>DiagLink</header> }));
 vi.mock('../../components/marketing/ClosingSections', () => ({ PublicFooter: () => <footer>Footer</footer> }));
 
@@ -71,6 +76,7 @@ async function submitTwice() {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   originalWindowName = window.name;
   originalOpener = window.opener;
   window.name = '';
@@ -84,12 +90,14 @@ beforeEach(() => {
   checkoutPopup = { location: { href: '' }, close: vi.fn(), postMessage: vi.fn() };
   vi.spyOn(window, 'open').mockReturnValue(checkoutPopup as unknown as Window);
   vi.spyOn(window, 'focus').mockImplementation(() => undefined);
+  vi.spyOn(crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111');
 });
 
 afterEach(async () => {
   if (root) await act(async () => root.unmount());
   host?.remove();
   vi.restoreAllMocks();
+  localStorage.clear();
   window.name = originalWindowName;
   Object.defineProperty(window, 'opener', { configurable: true, value: originalOpener });
 });
@@ -206,7 +214,8 @@ describe('/commencer submission', () => {
     await submitTwice();
     expect(mocks.submitMachineRequest).toHaveBeenCalledTimes(1);
     expect(host.textContent).toContain('Transmission de vos documents');
-    expect(mocks.createPayment).toHaveBeenCalledWith(12, 'claire@example.com');
+    expect(mocks.createPayment).toHaveBeenCalledWith(
+      12, 'claire@example.com', '11111111-1111-4111-8111-111111111111');
     expect(mocks.waitForAuthorization).toHaveBeenCalledWith('payment-42');
     expect(mocks.submitMachineRequest.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.waitForAuthorization.mock.invocationCallOrder[0]);
     expect((host.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
@@ -246,6 +255,51 @@ describe('/commencer submission', () => {
     expect(checkoutPopup.postMessage).toHaveBeenCalledWith(
       { type: 'diaglink:machine-request-submitted' }, window.location.origin);
     expect(checkoutPopup.close).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem('diaglink:initial-machine-payment-attempt')).toBeNull();
+  });
+
+  it('reuses the persisted idempotency key after a reload and a lost response', async () => {
+    mocks.createPayment
+      .mockRejectedValueOnce(new Error('Réponse perdue.'))
+      .mockResolvedValueOnce({
+        paymentRequestId: '11111111-1111-4111-8111-111111111111', status: 'pending', amount: 99.9,
+        currency: 'EUR', checkoutUrl: 'https://checkout.stripe.test/session',
+      });
+    await renderPage();
+    await completeForm();
+    await submitTwice();
+
+    expect(JSON.parse(localStorage.getItem('diaglink:initial-machine-payment-attempt')!)).toMatchObject({
+      idempotencyKey: '11111111-1111-4111-8111-111111111111',
+      totalPages: 12,
+      email: 'claire@example.com',
+    });
+
+    await act(async () => root.unmount());
+    host.remove();
+    await renderPage();
+    await completeForm();
+    await submitTwice();
+
+    expect(mocks.createPayment).toHaveBeenNthCalledWith(
+      1, 12, 'claire@example.com', '11111111-1111-4111-8111-111111111111');
+    expect(mocks.createPayment).toHaveBeenNthCalledWith(
+      2, 12, 'claire@example.com', '11111111-1111-4111-8111-111111111111');
+  });
+
+  it('replaces a persisted attempt when immutable parameters change', async () => {
+    localStorage.setItem('diaglink:initial-machine-payment-attempt', JSON.stringify({
+      idempotencyKey: '22222222-2222-4222-8222-222222222222',
+      totalPages: 400,
+      email: 'other@example.com',
+      authorized: false,
+    }));
+    await renderPage();
+    await completeForm();
+    await submitTwice();
+
+    expect(mocks.createPayment).toHaveBeenCalledWith(
+      12, 'claire@example.com', '11111111-1111-4111-8111-111111111111');
   });
 
   it('keeps the completed form and displays a safe server error', async () => {
@@ -279,5 +333,16 @@ describe('/commencer submission', () => {
     expect(mocks.submitMachineRequest).not.toHaveBeenCalled();
     expect(host.textContent).toContain('Autorisation expirée.');
     expect(host.textContent).toContain('manual.pdf');
+  });
+
+  it('clears a persisted attempt when the payment is terminal and unusable', async () => {
+    mocks.waitForAuthorization.mockRejectedValue(
+      new MachineRequestPaymentTerminalError('Cette autorisation de paiement ne peut plus être utilisée.'));
+    await renderPage();
+    await completeForm();
+    await submitTwice();
+
+    expect(localStorage.getItem('diaglink:initial-machine-payment-attempt')).toBeNull();
+    expect(host.textContent).toContain('Cette autorisation de paiement ne peut plus être utilisée.');
   });
 });

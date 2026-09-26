@@ -7,7 +7,7 @@ import styles from './StartPage.module.css';
 import { calculateMaximumAuthorizationPrice, calculatePreparationPrice } from './documentPricing';
 import { trimStartFormValues, validateStartForm, type RequiredStartField, type StartFormValues } from './startFormValidation';
 import { MachineRequestSubmissionError, submitMachineRequest, type MachineRequestResponse } from '../../services/machineRequestApi';
-import { createMachineRequestPayment, waitForMachineRequestAuthorization } from '../../services/machineRequestPaymentApi';
+import { createMachineRequestPayment, MachineRequestPaymentTerminalError, waitForMachineRequestAuthorization } from '../../services/machineRequestPaymentApi';
 import { authorizationConfirmedMessage, checkoutReturnedMessage, checkoutWindowName, isCheckoutReturnWindow, isTrustedCheckoutMessage, requestSubmittedMessage } from './checkoutPopup';
 import { formatFileSize, inspectPdfFiles, type SelectedPdf } from './pdfSelection';
 
@@ -20,6 +20,37 @@ const initialFormValues: StartFormValues = {
 
 type SubmissionPhase = 'idle' | 'preparing' | 'waiting' | 'uploading';
 
+type PaymentAttempt = {
+  idempotencyKey: string;
+  totalPages: number;
+  email: string;
+  paymentRequestId?: string;
+  checkoutUrl?: string;
+  authorized: boolean;
+};
+
+const paymentAttemptStorageKey = 'diaglink:initial-machine-payment-attempt';
+
+function readPaymentAttempt(): PaymentAttempt | null {
+  try {
+    const value = localStorage.getItem(paymentAttemptStorageKey);
+    if (!value) return null;
+    const attempt = JSON.parse(value) as Partial<PaymentAttempt>;
+    return typeof attempt.idempotencyKey === 'string'
+      && typeof attempt.totalPages === 'number'
+      && typeof attempt.email === 'string'
+      && typeof attempt.authorized === 'boolean'
+      ? attempt as PaymentAttempt
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePaymentAttempt(attempt: PaymentAttempt) {
+  localStorage.setItem(paymentAttemptStorageKey, JSON.stringify(attempt));
+}
+
 function formatCents(cents: number) {
   return euroFormatter.format(cents / 100);
 }
@@ -29,7 +60,7 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const nextFileId = useRef(0);
   const submissionLock = useRef(false);
-  const paymentAttempt = useRef<{ paymentRequestId: string; authorized: boolean } | null>(null);
+  const paymentAttempt = useRef<PaymentAttempt | null>(null);
   const checkoutWindow = useRef<Window | null>(null);
   const isCheckoutReturn = useMemo(isCheckoutReturnWindow, []);
   const [returnAuthorizationConfirmed, setReturnAuthorizationConfirmed] = useState(false);
@@ -153,28 +184,58 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
     setIsSubmitting(true);
     setSubmissionError(null);
     try {
-      if (!paymentAttempt.current) {
+      const storedAttempt = readPaymentAttempt();
+      paymentAttempt.current = storedAttempt?.totalPages === totalPages
+        && storedAttempt.email.toLocaleLowerCase() === trimmedValues.email.toLocaleLowerCase()
+        ? storedAttempt
+        : {
+            idempotencyKey: crypto.randomUUID(),
+            totalPages,
+            email: trimmedValues.email,
+            authorized: false,
+          };
+      writePaymentAttempt(paymentAttempt.current);
+
+      if (!paymentAttempt.current.paymentRequestId) {
         checkoutWindow.current = window.open('', checkoutWindowName);
         if (!checkoutWindow.current) throw new Error('Autorisez l’ouverture de la fenêtre Stripe pour poursuivre.');
         setSubmissionPhase('preparing');
-        const payment = await createMachineRequestPayment(totalPages, trimmedValues.email);
-        paymentAttempt.current = { paymentRequestId: payment.paymentRequestId, authorized: false };
+        const payment = await createMachineRequestPayment(
+          totalPages, trimmedValues.email, paymentAttempt.current.idempotencyKey);
+        paymentAttempt.current = {
+          ...paymentAttempt.current,
+          paymentRequestId: payment.paymentRequestId,
+          checkoutUrl: payment.checkoutUrl,
+        };
+        writePaymentAttempt(paymentAttempt.current);
         checkoutWindow.current.location.href = payment.checkoutUrl!;
+      } else if (!paymentAttempt.current.authorized && paymentAttempt.current.checkoutUrl) {
+        checkoutWindow.current = window.open(paymentAttempt.current.checkoutUrl, checkoutWindowName);
+        if (!checkoutWindow.current) throw new Error('Autorisez l’ouverture de la fenêtre Stripe pour poursuivre.');
       }
+      const paymentRequestId = paymentAttempt.current.paymentRequestId;
+      if (!paymentRequestId) throw new Error('Le paiement n’a pas pu être préparé.');
       if (!paymentAttempt.current.authorized) {
         setSubmissionPhase('waiting');
-        await waitForMachineRequestAuthorization(paymentAttempt.current.paymentRequestId);
+        await waitForMachineRequestAuthorization(paymentRequestId);
         paymentAttempt.current.authorized = true;
+        writePaymentAttempt(paymentAttempt.current);
         checkoutWindow.current?.postMessage({ type: authorizationConfirmedMessage }, window.location.origin);
       }
       setSubmissionPhase('uploading');
-      const completedRequest = await submitMachineRequest(trimmedValues, selectedPdfs.map(pdf => pdf.file), paymentAttempt.current.paymentRequestId);
+      const completedRequest = await submitMachineRequest(trimmedValues, selectedPdfs.map(pdf => pdf.file), paymentRequestId);
       setConfirmation(completedRequest);
+      localStorage.removeItem(paymentAttemptStorageKey);
+      paymentAttempt.current = null;
       window.focus();
       checkoutWindow.current?.postMessage({ type: requestSubmittedMessage }, window.location.origin);
       checkoutWindow.current?.close();
     } catch (error) {
-      if (!paymentAttempt.current) checkoutWindow.current?.close();
+      if (!paymentAttempt.current?.paymentRequestId) checkoutWindow.current?.close();
+      if (error instanceof MachineRequestPaymentTerminalError) {
+        localStorage.removeItem(paymentAttemptStorageKey);
+        paymentAttempt.current = null;
+      }
       setSubmissionError(error instanceof MachineRequestSubmissionError
         ? error.message
         : error instanceof Error ? error.message

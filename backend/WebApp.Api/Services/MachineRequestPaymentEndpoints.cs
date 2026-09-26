@@ -98,10 +98,12 @@ public static class MachineRequestPaymentEndpoints
             ? Results.Forbid()
             : Results.Conflict(new { error = resolution.ErrorMessage });
 
-    public static async Task<IResult> CreateAsync(CreateMachineRequestPayment request, MachineRequestPaymentService service,
-        CancellationToken ct)
+    public static async Task<IResult> CreateAsync(CreateMachineRequestPayment request, HttpContext httpContext,
+        MachineRequestPaymentService service, CancellationToken ct)
     {
-        try { return Results.Ok(await service.CreateAsync(request.TotalPages, request.Email, ct)); }
+        if (!Guid.TryParse(httpContext.Request.Headers["Idempotency-Key"].FirstOrDefault(), out var paymentRequestId))
+            return Results.BadRequest(new { error = "Un Idempotency-Key UUID stable est requis." });
+        try { return Results.Ok(await service.CreateAsync(paymentRequestId, request.TotalPages, request.Email, ct)); }
         catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
         catch (Stripe.StripeException) { return Results.Json(new { error = "Stripe indisponible." }, statusCode: 502); }

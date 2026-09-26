@@ -6,6 +6,8 @@ export type MachineRequestPaymentResponse = {
   checkoutUrl?: string;
 };
 
+export class MachineRequestPaymentTerminalError extends Error {}
+
 const apiBase = import.meta.env.VITE_API_URL || '/api';
 
 async function readResponse(response: Response): Promise<MachineRequestPaymentResponse> {
@@ -13,10 +15,10 @@ async function readResponse(response: Response): Promise<MachineRequestPaymentRe
   return await response.json() as MachineRequestPaymentResponse;
 }
 
-export async function createMachineRequestPayment(totalPages: number, email: string) {
+export async function createMachineRequestPayment(totalPages: number, email: string, idempotencyKey: string) {
   const response = await fetch(`${apiBase}/public/machine-request-payments`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify({ totalPages, email }),
   });
   const payment = await readResponse(response);
@@ -37,7 +39,7 @@ export async function waitForMachineRequestAuthorization(
     const payment = await getMachineRequestPayment(paymentRequestId);
     if (payment.status === 'authorized') return payment;
     if (payment.status === 'captured' || payment.status === 'cancelled')
-      throw new Error('Cette autorisation de paiement ne peut plus être utilisée.');
+      throw new MachineRequestPaymentTerminalError('Cette autorisation de paiement ne peut plus être utilisée.');
     await new Promise(resolve => window.setTimeout(resolve, pollIntervalMs));
   }
   throw new Error('L’autorisation du paiement prend trop de temps. Vous pouvez réessayer sans sélectionner à nouveau vos documents.');

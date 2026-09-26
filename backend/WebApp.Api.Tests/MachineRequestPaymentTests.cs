@@ -42,7 +42,8 @@ public class MachineRequestPaymentTests
     public async Task InvalidPageCountIsRejected(int pages)
     {
         var service = Service(new FakeGateway());
-        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => service.CreateAsync(pages, null, default));
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() =>
+            service.CreateAsync(Guid.NewGuid(), pages, null, default));
     }
 
     [TestMethod]
@@ -53,7 +54,7 @@ public class MachineRequestPaymentTests
         Assert.IsNull(typeof(CreateMachineRequestPayment).GetProperty("UnitAmount"));
         var gateway = new FakeGateway();
         var service = Service(gateway);
-        var result = await service.CreateAsync(550, "test@example.com", default);
+        var result = await service.CreateAsync(Guid.NewGuid(), 550, "test@example.com", default);
         Assert.AreEqual(170.30m, result.Amount);
         Assert.AreEqual(17030, gateway.Created!.AmountCents);
         Assert.AreEqual("pending", result.Status);
@@ -138,7 +139,7 @@ public class MachineRequestPaymentTests
     {
         var gateway = new FakeGateway { ReadStatus = "authorized" };
         var service = Service(gateway);
-        var created = await service.CreateAsync(550, null, default);
+        var created = await service.CreateAsync(Guid.NewGuid(), 550, null, default);
         var webhook = new StripeMachineRequestPaymentWebhook(Settings(), service,
             NullLogger<StripeMachineRequestPaymentWebhook>.Instance);
         var body = Event(created.PaymentRequestId).ToJsonString();
@@ -158,7 +159,7 @@ public class MachineRequestPaymentTests
         await using (var firstDb = new DiagLinkDbContext(options))
         {
             var firstService = new MachineRequestPaymentService(new MachineRequestPaymentStore(firstDb), gateway);
-            var created = await firstService.CreateAsync(550, "test@example.com", default);
+            var created = await firstService.CreateAsync(Guid.NewGuid(), 550, "test@example.com", default);
             id = created.PaymentRequestId;
             Assert.AreEqual("pending", created.Status);
             Assert.AreEqual("authorized",
@@ -179,7 +180,7 @@ public class MachineRequestPaymentTests
     {
         var gateway = new FakeGateway { ReadStatus = "authorized" };
         var service = Service(gateway);
-        var created = await service.CreateAsync(550, null, default);
+        var created = await service.CreateAsync(Guid.NewGuid(), 550, null, default);
 
         Assert.AreEqual("authorized",
             await service.ConfirmAuthorizationAsync(created.PaymentRequestId, "cs_test_local", "evt_same", default));
@@ -192,7 +193,7 @@ public class MachineRequestPaymentTests
     public async Task UnpaidProofStaysPendingAndStatusResponseHasNoSensitiveData()
     {
         var service = Service(new FakeGateway { ReadStatus = "pending" });
-        var created = await service.CreateAsync(400, null, default);
+        var created = await service.CreateAsync(Guid.NewGuid(), 400, null, default);
         Assert.AreEqual("pending", await service.ConfirmAuthorizationAsync(created.PaymentRequestId, "cs_test_local", "evt_pending", default));
         var result = (IValueHttpResult)await MachineRequestPaymentEndpoints.ReadAsync(created.PaymentRequestId, service, default);
         var json = JsonSerializer.Serialize(result.Value);
@@ -208,7 +209,7 @@ public class MachineRequestPaymentTests
     {
         var gateway = new FakeGateway { ReadStatus = "authorized" };
         var service = Service(gateway);
-        var created = await service.CreateAsync(550, null, default);
+        var created = await service.CreateAsync(Guid.NewGuid(), 550, null, default);
         Assert.AreEqual("authorized", await service.ConfirmAuthorizationAsync(created.PaymentRequestId, "cs_test_local", "evt_capture", default));
         Assert.AreEqual("captured", (await service.CaptureAsync(created.PaymentRequestId, 14040, default))!.Status);
         Assert.AreEqual("captured", (await service.CaptureAsync(created.PaymentRequestId, 14040, default))!.Status);
@@ -221,11 +222,11 @@ public class MachineRequestPaymentTests
     {
         var gateway = new FakeGateway { ReadStatus = "authorized" };
         var service = Service(gateway);
-        var authorized = await service.CreateAsync(550, null, default);
+        var authorized = await service.CreateAsync(Guid.NewGuid(), 550, null, default);
         await service.ConfirmAuthorizationAsync(authorized.PaymentRequestId, "cs_test_local", "evt_cancel", default);
         Assert.AreEqual("cancelled", (await service.CancelAsync(authorized.PaymentRequestId, default))!.Status);
         Assert.AreEqual(1, gateway.CancelCalls);
-        var pending = await service.CreateAsync(400, null, default);
+        var pending = await service.CreateAsync(Guid.NewGuid(), 400, null, default);
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => service.CaptureAsync(pending.PaymentRequestId, default));
     }
 

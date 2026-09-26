@@ -9,7 +9,12 @@ describe('machine request payment API', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(payment), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createMachineRequestPayment(400, 'client@example.com')).resolves.toEqual(payment);
+    await expect(createMachineRequestPayment(400, 'client@example.com', '11111111-1111-4111-8111-111111111111'))
+      .resolves.toEqual(payment);
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({
+      'Content-Type': 'application/json',
+      'Idempotency-Key': '11111111-1111-4111-8111-111111111111',
+    });
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body).toEqual({ totalPages: 400, email: 'client@example.com' });
     expect(body).not.toHaveProperty('amount');
