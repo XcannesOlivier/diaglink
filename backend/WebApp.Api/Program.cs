@@ -236,6 +236,7 @@ builder.Services.AddSingleton<ITransactionalEmailSender>(services => services.Ge
 builder.Services.AddScoped<EmailOutboxStore>();
 builder.Services.AddScoped<DiagLinkSessionService>();
 builder.Services.AddScoped<DiagLinkUserLookupService>();
+builder.Services.AddSingleton<OtpRateLimiter>();
 builder.Services.AddScoped<UserIdentityService>();
 builder.Services.AddScoped<MachineAccessService>();
 builder.Services.AddScoped<MachineAssistantResolutionService>();
@@ -401,13 +402,10 @@ app.MapPost("/api/files/upload", async (HttpContext httpContext, DiagLinkDbConte
     MultipartBodyLengthLimit = MachineRequestUploadLimits.MaxRequestBodyBytes
 });
 
-// Public pre-auth endpoint: checks whether an email belongs to an active dbo.Users record.
-// Intentionally has no .RequireAuthorization() — must be callable before any Microsoft sign-in.
-// Never returns Id/CompanyId/Role/EntraObjectId — only the boolean the client needs.
-app.MapPost("/api/auth/check-email", async (
-    CheckEmailRequest request,
-    DiagLinkDbContext db,
-    CancellationToken cancellationToken) =>
+// Public pre-auth compatibility endpoint. Its response is deliberately identical for every
+// non-empty email so callers cannot enumerate active dbo.Users records.
+app.MapPost("/api/auth/check-email", (
+    CheckEmailRequest request) =>
 {
     var normalizedEmail = request.Email?.Trim();
     if (string.IsNullOrEmpty(normalizedEmail))
@@ -415,22 +413,20 @@ app.MapPost("/api/auth/check-email", async (
         return Results.BadRequest();
     }
 
-    var isKnownActiveUser = await db.Users
-        .AnyAsync(u => u.Email.ToLower() == normalizedEmail.ToLower() && u.Status.ToLower() == "active", cancellationToken);
-
-    return Results.Ok(new CheckEmailResponse { Known = isKnownActiveUser });
+    return Results.Ok(new CheckEmailResponse { Known = true });
 })
 .WithName("CheckEmail");
 
 // Public pre-auth endpoint: issues a one-time login code for an active dbo.Users record.
 // Intentionally has no .RequireAuthorization() — must be callable before any Microsoft sign-in.
-// Response is always the same generic shape whether the email is unknown, inactive, or valid —
-// never reveals which case occurred. Email sending and code verification are not implemented yet.
+// Response is always the same generic shape whether the email is unknown, inactive, or valid.
 app.MapPost("/api/auth/request-code", async (
     RequestCodeRequest request,
+    HttpContext httpContext,
     DiagLinkDbContext db,
     IConfiguration configuration,
     EmailService emailService,
+    OtpRateLimiter rateLimiter,
     IHostEnvironment environment,
     ILogger<Program> logger,
     CancellationToken cancellationToken) =>
@@ -442,6 +438,9 @@ app.MapPost("/api/auth/request-code", async (
         {
             return Results.BadRequest();
         }
+
+        var rateLimit = rateLimiter.AttemptRequestCode(httpContext.Connection.RemoteIpAddress, normalizedEmail);
+        if (!rateLimit.IsAllowed) return OtpRateLimitExceeded(httpContext, rateLimit);
 
         var user = await db.Users
             .Where(u => u.Email.ToLower() == normalizedEmail.ToLower() && u.Status.ToLower() == "active")
@@ -496,13 +495,13 @@ app.MapPost("/api/auth/request-code", async (
         {
             await emailService.SendLoginCodeAsync(normalizedEmail, code, cancellationToken);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Sending failed — the stored code would be unusable (never delivered), so invalidate it
             // rather than leaving an active code the user can never receive.
             db.LoginCodes.Remove(newLoginCode);
             await db.SaveChangesAsync(cancellationToken);
-            throw;
+            logger.LogWarning(ex, "OTP email delivery failed; returning the generic public response.");
         }
 
         return Results.Ok(new RequestCodeResponse { Success = true });
@@ -526,8 +525,10 @@ app.MapPost("/api/auth/request-code", async (
 
 app.MapPost("/api/auth/verify-code", async (
     VerifyCodeRequest request,
+    HttpContext httpContext,
     DiagLinkDbContext db,
     IConfiguration configuration,
+    OtpRateLimiter rateLimiter,
     CancellationToken cancellationToken) =>
 {
     var normalizedEmail = request.Email?.Trim();
@@ -540,6 +541,9 @@ app.MapPost("/api/auth/verify-code", async (
     {
         return Results.Ok(new VerifyCodeResponse { Success = false });
     }
+
+    var rateLimit = rateLimiter.AttemptVerifyCode(httpContext.Connection.RemoteIpAddress, normalizedEmail);
+    if (!rateLimit.IsAllowed) return OtpRateLimitExceeded(httpContext, rateLimit);
 
     var user = await db.Users
         .Where(u =>
@@ -1828,6 +1832,14 @@ app.MapGet("/api/company/usage/machines/{machineId}/users", async (string machin
 
 
 app.Run();
+
+static IResult OtpRateLimitExceeded(HttpContext httpContext, OtpRateLimitDecision decision)
+{
+    var retryAfterSeconds = Math.Max(1, (int)Math.Ceiling((decision.RetryAfter ?? TimeSpan.FromMinutes(1)).TotalSeconds));
+    httpContext.Response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    return Results.Json(new { error = "Trop de tentatives. Veuillez réessayer plus tard." },
+        statusCode: StatusCodes.Status429TooManyRequests);
+}
 
 // Maps a Company entity to its API contract — never expose EF entities directly.
 static CompanyDto ToCompanyDto(Company company) => new()
