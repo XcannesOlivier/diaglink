@@ -12,15 +12,40 @@ namespace WebApp.Api.Services;
 public class BlobStorageService
 {
     private readonly BlobServiceClient _client;
+    private readonly IPdfPageCounter _pageCounter;
 
-    public BlobStorageService(BlobServiceClient client)
+    public BlobStorageService(BlobServiceClient client, IPdfPageCounter pageCounter)
     {
         _client = client ?? throw new InvalidOperationException("BlobServiceClient is not configured. Set AZURE_STORAGE_CONNECTION_STRING.");
+        _pageCounter = pageCounter ?? throw new ArgumentNullException(nameof(pageCounter));
     }
 
     public async Task<List<string>> UploadFilesAsync(string containerName, string companyName, string machineName, IFormFileCollection files, CancellationToken cancellationToken = default)
     {
         if (files is null || files.Count == 0) throw new ArgumentException("No files provided.");
+        if (files.Count > MachineRequestUploadLimits.MaxDocumentCount)
+            throw new ArgumentException($"A maximum of {MachineRequestUploadLimits.MaxDocumentCount} PDF files is allowed.");
+
+        foreach (var file in files)
+        {
+            if (file.Length <= 0) throw new ArgumentException($"File {file.FileName} is empty.");
+            if (file.Length > MachineRequestUploadLimits.MaxDocumentBytes)
+                throw new ArgumentException($"File {file.FileName} exceeds size limit ({MachineRequestUploadLimits.MaxDocumentBytes} bytes).");
+            if (!file.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(file.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Only PDF files are accepted.");
+        }
+
+        if (files.Sum(file => file.Length) > MachineRequestUploadLimits.MaxCombinedDocumentBytes)
+            throw new ArgumentException($"Combined PDF size exceeds limit ({MachineRequestUploadLimits.MaxCombinedDocumentBytes} bytes).");
+
+        foreach (var file in files)
+        {
+            await using var inspectionStream = file.OpenReadStream();
+            try { await _pageCounter.CountPagesAsync(inspectionStream, cancellationToken); }
+            catch (InvalidDataException exception)
+            { throw new ArgumentException($"File {file.FileName} is not a valid readable PDF.", exception); }
+        }
 
         var container = _client.GetBlobContainerClient(containerName);
         await container.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: cancellationToken);
@@ -32,22 +57,11 @@ public class BlobStorageService
 
         foreach (var f in files)
         {
-            if (f.Length == 0) continue;
-
-            // Basic validation: only PDF allowed
-            if (!f.ContentType?.Equals("application/pdf", StringComparison.OrdinalIgnoreCase) == true && !f.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new ArgumentException("Only PDF files are accepted.");
-            }
-
-            const long MaxBytes = 20 * 1024 * 1024; // 20MB
-            if (f.Length > MaxBytes) throw new ArgumentException($"File {f.FileName} exceeds size limit ({MaxBytes} bytes).");
-
             var safeName = SanitizeFileName(f.FileName);
             var blobName = $"{companySlug}/{machineSlug}/{safeName}";
             var blob = container.GetBlobClient(blobName);
             using var stream = f.OpenReadStream();
-            var headers = new BlobHttpHeaders { ContentType = f.ContentType ?? "application/pdf" };
+            var headers = new BlobHttpHeaders { ContentType = "application/pdf" };
             await blob.UploadAsync(stream, headers, cancellationToken: cancellationToken);
             uploaded.Add(blobName);
         }

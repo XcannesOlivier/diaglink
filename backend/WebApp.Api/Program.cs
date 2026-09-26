@@ -394,7 +394,12 @@ app.MapPost("/api/files/upload", async (HttpContext httpContext, DiagLinkDbConte
     }
 })
 .RequireAuthorization("SuperAdminOnly")
-.Accepts<IFormFileCollection>("multipart/form-data");
+.Accepts<IFormFileCollection>("multipart/form-data")
+.WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(MachineRequestUploadLimits.MaxRequestBodyBytes))
+.WithMetadata(new Microsoft.AspNetCore.Mvc.RequestFormLimitsAttribute
+{
+    MultipartBodyLengthLimit = MachineRequestUploadLimits.MaxRequestBodyBytes
+});
 
 // Public pre-auth endpoint: checks whether an email belongs to an active dbo.Users record.
 // Intentionally has no .RequireAuthorization() — must be callable before any Microsoft sign-in.
