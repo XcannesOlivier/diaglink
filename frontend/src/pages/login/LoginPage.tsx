@@ -1,6 +1,10 @@
+import { useState } from 'react';
 import { Button, Input, Spinner } from '@fluentui/react-components';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import logoDiagLink from '../../assets/Logo DiagLink.png';
+import { AIFoundryLogo } from '../../components/icons/AIFoundryLogo';
+import { InstallShortcutDialog } from '../../components/marketing/InstallShortcutDialog';
+import { detectShortcutPlatform, type ShortcutPlatform } from '../../utils/installShortcut';
 import authStyles from '../../App.module.css';
 
 interface LoginPageProps {
@@ -19,9 +23,20 @@ interface LoginPageProps {
 
 export function LoginPage({ isCheckingSession, email, setEmail, emailCheckMessage, isCheckingEmail, showCodeStep, code, setCode, handleContinue, handleVerifyCode, handleChangeEmail }: LoginPageProps) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [installDialog, setInstallDialog] = useState<ShortcutPlatform | null>(() =>
+    searchParams.get('install') === '1' ? detectShortcutPlatform() : null);
 
   const verifyAndNavigate = async (value?: string) => {
     if (await handleVerifyCode(value)) navigate('/app', { replace: true });
+  };
+
+  const closeInstallDialog = () => {
+    setInstallDialog(null);
+    if (searchParams.get('install') !== '1') return;
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete('install');
+    setSearchParams(nextSearchParams, { replace: true });
   };
 
   return (
@@ -69,8 +84,16 @@ export function LoginPage({ isCheckingSession, email, setEmail, emailCheckMessag
         )}
 
         <p className={authStyles.secureNote}>Connexion sécurisée</p>
-        <div className={authStyles.poweredBy}><span><span className={authStyles.poweredByText}>Propulsé par </span>Microsoft Foundry</span></div>
+        <Link to="/" className={authStyles.returnHomeLink}>Site DiagLink</Link>
+        <Button appearance="subtle" size="small" className={authStyles.installShortcutButton}
+          onClick={() => setInstallDialog(detectShortcutPlatform())}>Installer DiagLink</Button>
+        <div className={authStyles.poweredBy}>
+          <AIFoundryLogo className={authStyles.foundryLogo} width={16} height={16} />
+          <span>Propulsé par Microsoft Foundry</span>
+        </div>
       </div>
+      <InstallShortcutDialog platform={installDialog} showOpenLoginButton={false}
+        onClose={closeInstallDialog} />
     </div>
   );
 }

@@ -13,5 +13,5 @@ export function FinalCta() {
 }
 
 export function PublicFooter({ loginTarget }: { loginTarget: string }) {
-  return <footer className={styles.footer}><div className={styles.container}><img src={logoDiagLink} alt="DiagLink" /><nav aria-label="Liens de pied de page"><Link to="/mentions-legales">Mentions légales</Link><Link to="/confidentialite">Confidentialité</Link><Link to="/contact">Contact</Link><Link to={loginTarget}>Connexion</Link></nav><small>© {new Date().getFullYear()} DiagLink</small></div></footer>;
+  return <footer className={styles.footer}><div className={styles.container}><img src={logoDiagLink} alt="DiagLink" /><nav aria-label="Liens de pied de page"><Link to="/mentions-legales">Mentions légales</Link><Link to="/confidentialite">Confidentialité</Link><Link to="/contact">Contact</Link><Link to={loginTarget} target="_blank" rel="noopener noreferrer">Connexion</Link></nav><small>© {new Date().getFullYear()} DiagLink</small></div></footer>;
 }

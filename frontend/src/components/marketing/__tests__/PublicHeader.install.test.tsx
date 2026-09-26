@@ -4,12 +4,6 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PublicHeader } from '../PublicHeader';
 
-const platform = vi.fn();
-vi.mock('../../../utils/installShortcut', async importOriginal => ({
-  ...await importOriginal<typeof import('../../../utils/installShortcut')>(),
-  detectShortcutPlatform: () => platform(),
-}));
-
 function Location() {
   return <span data-location>{useLocation().pathname}</span>;
 }
@@ -18,8 +12,6 @@ describe('PublicHeader install shortcut', () => {
   let root: Root;
   let container: HTMLDivElement;
   beforeEach(async () => {
-    sessionStorage.clear();
-    platform.mockReturnValue('windows');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -32,63 +24,51 @@ describe('PublicHeader install shortcut', () => {
 
   const installButton = () => [...container.querySelectorAll('button')]
     .find(button => button.textContent === 'Installer DiagLink') as HTMLButtonElement;
-  const dialogButton = (label: string) => [...document.body.querySelectorAll('button')]
-    .find(button => button.textContent === label) as HTMLButtonElement;
   async function render(isAuthenticated: boolean) {
     await act(async () => root.render(<MemoryRouter><PublicHeader loginTarget={isAuthenticated ? '/app' : '/login'}
       isAuthenticated={isAuthenticated} /><Location /></MemoryRouter>));
   }
 
-  it('shows an explanation before navigating an unauthenticated user', async () => {
-    await render(false);
+  it.each([false, true])('opens the login installation route in a new tab when authenticated is %s', async isAuthenticated => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    await render(isAuthenticated);
     await act(async () => installButton().click());
     expect(container.querySelector('[data-location]')?.textContent).toBe('/');
-    expect(document.body.textContent).toContain('connectez-vous d’abord à votre espace');
-    expect(sessionStorage.getItem('diaglink.pendingInstallPlatform')).toBeNull();
-  });
-
-  it('cancels without navigating or preserving an installation intent', async () => {
-    await render(false);
-    await act(async () => installButton().click());
-    await act(async () => dialogButton('Annuler').click());
-    expect(container.querySelector('[data-location]')?.textContent).toBe('/');
-    expect(sessionStorage.getItem('diaglink.pendingInstallPlatform')).toBeNull();
-  });
-
-  it('starts the existing login route and preserves the installation intent after confirmation', async () => {
-    await render(false);
-    await act(async () => installButton().click());
-    await act(async () => dialogButton('Se connecter et continuer').click());
-    expect(container.querySelector('[data-location]')?.textContent).toBe('/login');
-    expect(sessionStorage.getItem('diaglink.pendingInstallPlatform')).toBe('windows');
+    expect(document.body.textContent).not.toContain('Créer un raccourci DiagLink');
+    expect(open).toHaveBeenCalledWith('/login?install=1', '_blank', 'noopener,noreferrer');
   });
 
   it('routes desktop and mobile primary actions to the existing machine setup flow', async () => {
     await render(false);
     const setupLinks = () => [...container.querySelectorAll('a')]
       .filter(link => link.textContent === 'Configurer ma première machine');
+    const loginLinks = () => [...container.querySelectorAll('a')]
+      .filter(link => link.textContent === 'Se connecter');
     expect(setupLinks()).toHaveLength(1);
     expect(setupLinks()[0].getAttribute('href')).toBe('/commencer');
+    expect(loginLinks()).toHaveLength(0);
     expect(container.textContent).not.toContain('Voir une démonstration');
 
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Ouvrir le menu"]')!.click());
     expect(setupLinks()).toHaveLength(2);
     expect(setupLinks().every(link => link.getAttribute('href') === '/commencer')).toBe(true);
+    expect(loginLinks()).toHaveLength(1);
+    expect(loginLinks()[0].getAttribute('href')).toBe('/login');
+    expect(loginLinks()[0].getAttribute('target')).toBe('_blank');
+    expect(loginLinks()[0].getAttribute('rel')).toBe('noopener noreferrer');
     await act(async () => setupLinks()[1].click());
     expect(container.querySelector('[data-location]')?.textContent).toBe('/commencer');
     expect(container.querySelector('[aria-label="Navigation mobile"]')).toBeNull();
   });
 
-  it.each([
-    ['windows', 'windows'],
-    ['ios', 'ios'],
-    ['android', 'android'],
-    ['other', 'other'],
-  ])('navigates authenticated %s users directly to the chat route', async (value, stored) => {
-    platform.mockReturnValue(value);
-    await render(true);
-    await act(async () => installButton().click());
-    expect(container.querySelector('[data-location]')?.textContent).toBe('/app');
-    expect(sessionStorage.getItem('diaglink.pendingInstallPlatform')).toBe(stored);
+  it('uses the same new-tab installation route from the mobile menu', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    await render(false);
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Ouvrir le menu"]')!.click());
+    const mobileInstallButton = [...container.querySelectorAll('button')]
+      .find(button => button.textContent === 'Installer DiagLink');
+    await act(async () => mobileInstallButton?.click());
+    expect(open).toHaveBeenCalledWith('/login?install=1', '_blank', 'noopener,noreferrer');
+    expect(container.querySelector('[aria-label="Navigation mobile"]')).toBeNull();
   });
 });

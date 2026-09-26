@@ -45,7 +45,6 @@ afterEach(async () => {
 });
 
 beforeEach(() => {
-  sessionStorage.clear();
   authentication.isAuthenticated = false;
   authentication.isCheckingSession = false;
 });
@@ -75,6 +74,9 @@ describe('main application routes', () => {
   it('renders the public demonstration page directly', async () => {
     await renderAt('/demonstration');
     expect(container?.textContent).toContain('Découvrez DiagLink en situation réelle.');
+    const setupLink = [...container!.querySelectorAll('a')]
+      .find(link => link.textContent === 'Configurer ma première machine');
+    expect(setupLink?.getAttribute('href')).toBe('/commencer');
   });
 
   it('renders the public first-machine setup page directly', async () => {
@@ -106,37 +108,6 @@ describe('main application routes', () => {
     expect(container?.textContent).toContain('authenticated-app');
   });
 
-  it.each([
-    ['windows', 'Installer DiagLink sur votre ordinateur'],
-    ['ios', 'Ouvrez cette page dans Safari'],
-    ['android', 'Ouvrez le menu ⋮ de Chrome'],
-    ['other', 'Créez un raccourci vers DiagLink'],
-  ])('shows pending %s shortcut instructions after reaching the authenticated chat route', async (platform, instructions) => {
-    authentication.isAuthenticated = true;
-    sessionStorage.setItem('diaglink.pendingInstallPlatform', platform);
-    await renderAt('/app');
-    expect(document.body.textContent).toContain(instructions);
-    expect(sessionStorage.getItem('diaglink.pendingInstallPlatform')).toBeNull();
-  });
-
-  it('keeps the installation intent on login and consumes it after authenticated arrival on /app', async () => {
-    sessionStorage.setItem('diaglink.pendingInstallPlatform', 'ios');
-    await renderAt('/login');
-    expect(sessionStorage.getItem('diaglink.pendingInstallPlatform')).toBe('ios');
-    await act(async () => root?.unmount());
-    root = null;
-    container?.remove();
-    container = null;
-
-    authentication.isAuthenticated = true;
-    await renderAt('/app');
-    expect(document.body.textContent).toContain('Ouvrez cette page dans Safari');
-    expect(sessionStorage.getItem('diaglink.pendingInstallPlatform')).toBeNull();
-    const close = [...document.body.querySelectorAll('button')].find(button => button.textContent === 'J’ai compris');
-    await act(async () => (close as HTMLButtonElement).click());
-    expect(document.body.textContent).not.toContain('Ouvrez cette page dans Safari');
-  });
-
   it('keeps the legacy administration alias compatible', async () => {
     authentication.isAuthenticated = true;
     await renderAt('/administration');
@@ -147,5 +118,12 @@ describe('main application routes', () => {
     authentication.isAuthenticated = true;
     await renderAt('/login');
     expect(container?.textContent).toContain('authenticated-app');
+  });
+
+  it('keeps an authenticated installation request on the login page', async () => {
+    authentication.isAuthenticated = true;
+    await renderAt('/login?install=1');
+    expect(container?.textContent).toContain('login-page');
+    expect(container?.textContent).not.toContain('authenticated-app');
   });
 });

@@ -25,7 +25,7 @@
 }
 
 .authLogo {
-  height: 110px;
+  height: 84px;
   width: auto;
   display: block;
   margin: 0 auto 12px;
@@ -115,6 +115,20 @@
   line-height: 1.5;
 }
 
+.returnHomeLink {
+  display: inline-block;
+  margin-top: 6px;
+  color: #666666;
+  font-size: 0.78rem;
+  text-decoration: underline;
+}
+
+.installShortcutButton {
+  display: flex;
+  margin: 8px auto 0;
+  color: #666666;
+}
+
 .poweredBy {
   margin-top: 34px;
   padding-top: 16px;
@@ -133,17 +147,9 @@
   flex-shrink: 0;
 }
 
-.poweredByText {
-  display: inline;
-}
-
 @media (max-width: 1000px) {
   .authLogo {
-    height: 96px;
-  }
-
-  .poweredByText {
-    display: none !important;
+    height: 72px;
   }
 }
 
@@ -160,7 +166,7 @@
   }
 
   .authLogo {
-    height: 69px;
+    height: 56px;
   }
 
   .authTitle {

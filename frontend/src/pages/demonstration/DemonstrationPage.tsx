@@ -64,7 +64,7 @@ export function DemonstrationPage({ isAuthenticated }: { isAuthenticated: boolea
         <section className={styles.cta}>
           <div className={landingStyles.container}>
             <h2>Prêt à utiliser DiagLink sur vos machines ?</h2>
-            <Link className={landingStyles.primaryButton} to="/contact">Nous contacter</Link>
+            <Link className={landingStyles.primaryButton} to="/commencer">Configurer ma première machine</Link>
           </div>
         </section>
       </main>

@@ -13,7 +13,7 @@ export function HeroSection({ loginTarget }: { loginTarget: string }) {
           <p className={styles.lead}>Posez votre problème. DiagLink analyse la documentation technique de votre machine et vous guide dans le diagnostic, étape par étape.</p>
           <div className={styles.heroActions}>
             <Link className={styles.primaryButton} to="/demonstration">Voir une démonstration</Link>
-            <Link className={styles.secondaryButton} to={loginTarget}>Se connecter</Link>
+            <Link className={styles.secondaryButton} to={loginTarget} target="_blank" rel="noopener noreferrer">Se connecter</Link>
           </div>
           <ul className={styles.benefits}>
             {['Réduisez vos temps d’arrêt', 'Accédez à l’information plus rapidement', 'Soutenez vos équipes terrain'].map(item => <li key={item}><CheckmarkCircle20Filled />{item}</li>)}

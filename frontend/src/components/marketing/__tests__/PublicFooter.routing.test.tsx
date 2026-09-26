@@ -15,6 +15,23 @@ afterEach(async () => {
 });
 
 describe('PublicFooter routing', () => {
+  it('opens the login route in a new tab without an opener', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<MemoryRouter><PublicFooter loginTarget="/login" /></MemoryRouter>);
+    });
+
+    const loginLink = Array.from(container.querySelectorAll('a'))
+      .find(link => link.textContent === 'Connexion');
+
+    expect(loginLink?.getAttribute('href')).toBe('/login');
+    expect(loginLink?.getAttribute('target')).toBe('_blank');
+    expect(loginLink?.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
   it('opens the privacy page from the Confidentialité link', async () => {
     container = document.createElement('div');
     document.body.appendChild(container);

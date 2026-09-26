@@ -112,6 +112,13 @@ describe('/commencer submission', () => {
     expect(button?.textContent).toBe('Ajouter vos documents pour continuer');
   });
 
+  it('marks the machine description as optional', async () => {
+    await renderPage();
+
+    const description = host.querySelector<HTMLTextAreaElement>('textarea[name="description"]');
+    expect(description?.closest('label')?.textContent).toContain('Description / informations complémentaires (facultatif)');
+  });
+
   it('renders a dedicated Checkout return screen and not the empty form', async () => {
     const opener = { postMessage: vi.fn() } as unknown as Window;
     window.name = 'diaglink-machine-request-checkout';

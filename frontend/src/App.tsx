@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from './components/core/ErrorBoundary';
 import { AuthenticatedApp } from './components/AuthenticatedApp';
@@ -11,23 +10,14 @@ import { DemonstrationPage } from './pages/demonstration/DemonstrationPage';
 import { StartPage } from './pages/start/StartPage';
 import { CheckoutReturnPage } from './pages/checkout-return/CheckoutReturnPage';
 import { LoginPage } from './pages/login/LoginPage';
-import { InstallShortcutDialog } from './components/marketing/InstallShortcutDialog';
 import { ScrollToTop } from './components/core/ScrollToTop';
-import { pendingInstallPlatformKey, type ShortcutPlatform } from './utils/installShortcut';
 import './App.css';
 
 function App() {
   const authentication = useAppAuthentication();
   const location = useLocation();
-  const [installDialog, setInstallDialog] = useState<ShortcutPlatform | null>(null);
-
-  useEffect(() => {
-    if (!authentication.isAuthenticated || location.pathname !== '/app') return;
-    const pending = sessionStorage.getItem(pendingInstallPlatformKey);
-    if (pending !== 'windows' && pending !== 'ios' && pending !== 'android' && pending !== 'other') return;
-    sessionStorage.removeItem(pendingInstallPlatformKey);
-    setInstallDialog(pending);
-  }, [authentication.isAuthenticated, location.pathname]);
+  const isInstallShortcutRequest = location.pathname === '/login'
+    && new URLSearchParams(location.search).get('install') === '1';
 
   return (
     <ErrorBoundary>
@@ -43,7 +33,7 @@ function App() {
         <Route
           path="/login"
           element={
-            !authentication.isCheckingSession && authentication.isAuthenticated
+            !isInstallShortcutRequest && !authentication.isCheckingSession && authentication.isAuthenticated
               ? <Navigate to="/app" replace />
               : <LoginPage {...authentication} />
           }
@@ -61,7 +51,6 @@ function App() {
         <Route path="/administration" element={<Navigate to="/app/administration" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      <InstallShortcutDialog platform={installDialog} onClose={() => setInstallDialog(null)} />
     </ErrorBoundary>
   );
 }

@@ -135,17 +135,18 @@
   padding-bottom: 0;
 }
 
-/* Row that shows "Powered by" + Foundry + DiagLink logo */
+/* Desktop branding below the chat input */
 .poweredRow {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: flex-start; /* align left */
-  gap: 12px;
-  padding: 0.5rem 1rem 0.5rem 1rem; /* left/right padding, matches chat input spacing */
+  justify-content: center;
+  gap: 4px;
+  padding: 0.5rem 1rem;
 }
 
 .diagLinkLogo {
-  height: 49px;
+  height: 32px;
   width: auto;
   opacity: 0.98;
 }

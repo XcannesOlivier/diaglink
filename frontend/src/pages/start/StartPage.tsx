@@ -312,7 +312,7 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
               <label>Fabricant / marque<input type="text" name="manufacturer" {...fieldProps('manufacturer')} />{fieldError('manufacturer')}</label>
               <label>Modèle<input type="text" name="model" {...fieldProps('model')} />{fieldError('model')}</label>
               <label>Référence ou numéro de série <span>(facultatif)</span><input type="text" name="serialNumber" {...fieldProps('serialNumber')} /></label>
-              <label className={styles.fullField}>Description / informations complémentaires<textarea name="description" rows={5} {...fieldProps('description')} /></label>
+              <label className={styles.fullField}>Description / informations complémentaires <span>(facultatif)</span><textarea name="description" rows={5} {...fieldProps('description')} /></label>
             </div>
           </section>
 
