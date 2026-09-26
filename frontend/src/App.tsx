@@ -12,6 +12,7 @@ import { StartPage } from './pages/start/StartPage';
 import { CheckoutReturnPage } from './pages/checkout-return/CheckoutReturnPage';
 import { LoginPage } from './pages/login/LoginPage';
 import { InstallShortcutDialog } from './components/marketing/InstallShortcutDialog';
+import { ScrollToTop } from './components/core/ScrollToTop';
 import { pendingInstallPlatformKey, type ShortcutPlatform } from './utils/installShortcut';
 import './App.css';
 
@@ -30,6 +31,7 @@ function App() {
 
   return (
     <ErrorBoundary>
+      <ScrollToTop />
       <Routes>
         <Route path="/" element={<LandingPage isAuthenticated={authentication.isAuthenticated} />} />
         <Route path="/contact" element={<ContactPage isAuthenticated={authentication.isAuthenticated} />} />
