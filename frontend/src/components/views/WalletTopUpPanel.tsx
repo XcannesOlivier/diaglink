@@ -1,14 +1,21 @@
 import {createPortal} from 'react-dom';
 import styles from './CompanyFinancePanel.module.css';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Field, Input } from '@fluentui/react-components';
 import { getWalletTopUps, startWalletTopUp, type WalletOverview } from '../../services/walletTopUpService';
 
-interface Props { companyId: string; getAccessToken: () => Promise<string | null>; onDiagLinkSessionExpired?: () => void; diagnosticContent?: ReactNode; diagnosticTarget?: HTMLElement|null }
+interface Props {
+  companyId: string;
+  getAccessToken: () => Promise<string | null>;
+  onDiagLinkSessionExpired?: () => void;
+  technicalTarget?: HTMLElement | null;
+  repairTarget?: HTMLElement | null;
+  onInterventionsChange?: (interventions: string[]) => void;
+}
 const euro=(value:number)=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',minimumFractionDigits:2,maximumFractionDigits:2}).format(value);
 type Pending = { id: string; amount: number };
 const topUpStatus=(value:string)=>value==='Completed'?'Payé':value==='AwaitingPayment'?'En attente de paiement':value==='PaymentCreated'?'Paiement créé':value;
-export function WalletTopUpPanel({ companyId, getAccessToken, onDiagLinkSessionExpired, diagnosticContent, diagnosticTarget }: Props) {
+export function WalletTopUpPanel({ companyId, getAccessToken, onDiagLinkSessionExpired, technicalTarget, repairTarget, onInterventionsChange }: Props) {
   const storageKey = `diaglink:wallet-topup:${companyId}`;
   const [pending, setPending] = useState<Pending | null>(() => {
     try { const value = JSON.parse(localStorage.getItem(storageKey) || 'null');
@@ -63,16 +70,37 @@ export function WalletTopUpPanel({ companyId, getAccessToken, onDiagLinkSessionE
     try { const url = new URL(value || ''); return url.protocol === 'https:' && url.hostname === 'checkout.stripe.com' && !url.username && !url.password ? url.href : null; }
     catch { return null; }
   }
-  const diagnostic=(
-      <section aria-label="Diagnostic des recharges"><h4>Recharges — diagnostic</h4>
-      {diagnosticContent}
+  const incompleteOperations = useMemo(
+    () => data?.operations.filter(operation => operation.stage !== 'Completed') ?? [],
+    [data]);
+  const interventions = useMemo(() => {
+    const values = incompleteOperations.map(operation => `Recharge de ${euro(operation.amountEur)} — ${topUpStatus(operation.stage)}`);
+    if (pending && !incompleteOperations.some(operation => operation.id === pending.id)) values.push(`Recharge de ${euro(pending.amount)} — réponse à confirmer`);
+    return values;
+  }, [incompleteOperations, pending]);
+  useEffect(() => { onInterventionsChange?.(interventions); }, [interventions, onInterventionsChange]);
+  const technicalDetails=(
+      <section aria-label="Détails techniques des recharges"><h4>Recharges enregistrées</h4>
+      {data?.operations.length === 0 && <p>Aucune recharge enregistrée.</p>}
       {data?.operations.map(op=><article key={op.id} className={styles.rechargeDiagnostic}>
           <p>Opération : {op.id}</p><p>Session : {op.stripeSessionId ?? '—'} · Paiement : {op.stripePaymentIntentId ?? '—'}</p>
           <p>Confirmé UTC : {op.paymentConfirmedAtUtc ?? '—'} · Ledger : {op.ledgerEntryId ?? '—'} · Événement : {op.externalEventId ?? '—'}</p>
-          <Button appearance="subtle" size="small" disabled={busy || loading || !data.enabled || (!!pending && pending.id !== op.id)}
-            onClick={() => void submit({ id: op.id, amount: op.amountEur })}>{op.stage === 'Completed' ? 'Rejouer la recharge sans effet' : 'Reprendre la recharge'}</Button>
       </article>)}
       </section>
+  );
+  const repairTools=(
+    <section aria-label="Réparation des recharges"><h4>Recharges à reprendre</h4>
+      {incompleteOperations.length === 0 && !pending && <p>Aucune recharge ne nécessite d’intervention.</p>}
+      {pending && !incompleteOperations.some(operation => operation.id === pending.id) && <article className={styles.repairItem}>
+        <p><strong>Réponse à confirmer</strong> · {euro(pending.amount)}</p>
+        <Button disabled={busy || loading || !data?.enabled} onClick={() => void submit(pending)}>Réessayer la recharge</Button>
+      </article>}
+      {incompleteOperations.map(operation => <article key={operation.id} className={styles.repairItem}>
+        <p><strong>{euro(operation.amountEur)}</strong> · {topUpStatus(operation.stage)}</p>
+        <Button disabled={busy || loading || !data?.enabled || (!!pending && pending.id !== operation.id)}
+          onClick={() => void submit({ id: operation.id, amount: operation.amountEur })}>Reprendre la recharge</Button>
+      </article>)}
+    </section>
   );
   return <section className={styles.recharge} aria-label="Recharge wallet">
     <div className={styles.cardHeading}><h4>Crédit supplémentaire</h4>
@@ -106,7 +134,8 @@ export function WalletTopUpPanel({ companyId, getAccessToken, onDiagLinkSessionE
       </details>
       </div>
     </div>}
-    {diagnosticTarget?createPortal(diagnostic,diagnosticTarget):diagnosticTarget===undefined?diagnostic:null}
+    {technicalTarget ? createPortal(technicalDetails, technicalTarget) : technicalTarget === undefined ? technicalDetails : null}
+    {repairTarget ? createPortal(repairTools, repairTarget) : repairTarget === undefined ? repairTools : null}
     <p role="status">{message}</p>
   </section>;
 }

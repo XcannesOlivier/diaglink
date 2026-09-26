@@ -15,7 +15,7 @@ export function StripeAdminPanel({ getAccessToken, onDiagLinkSessionExpired }: {
     {state.kind === 'loading' && <p>Chargement des entreprises…</p>}
     {state.kind !== 'loading' && state.kind !== 'success' && <p role="alert">Entreprises indisponibles ou accès non autorisé.</p>}
     {state.kind === 'success' && <>
-      <label>Entreprise <select value={selected} onChange={e => setSelected(e.target.value)}>
+      <label><span className={styles.visuallyHidden}>Entreprise</span><select aria-label="Entreprise" value={selected} onChange={e => setSelected(e.target.value)}>
         <option value="">Sélectionner une entreprise</option>
         {state.data.map(c => <option key={c.id} value={c.id}>{c.name} ({c.status})</option>)}
       </select></label>

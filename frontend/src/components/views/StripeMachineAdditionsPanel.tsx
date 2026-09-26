@@ -1,16 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import {createPortal} from 'react-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@fluentui/react-components';
 import { addStripeMachine, getStripeAdditions, type StripeAdditionSummary, type StripeCompanySummary } from '../../services/stripeAdminService';
+import styles from './CompanyFinancePanel.module.css';
 
 interface Props {
   companyId: string; account: StripeCompanySummary; getAccessToken: () => Promise<string | null>;
   onDiagLinkSessionExpired?: () => void;
+  technicalTarget?: HTMLElement | null;
+  repairTarget?: HTMLElement | null;
+  onInterventionsChange?: (interventions: string[]) => void;
 }
-export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken, onDiagLinkSessionExpired }: Props) {
+export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken, onDiagLinkSessionExpired, technicalTarget, repairTarget, onInterventionsChange }: Props) {
   const [operations, setOperations] = useState<StripeAdditionSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [revision, setRevision] = useState(0);
-  const [machine, setMachine] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -45,29 +49,22 @@ export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken
     }
     setRevision(r => r + 1);
   }
-  const candidates = (account.activeMachines ?? []).filter(m => !m.hasBillingPeriod && !operations.some(o => o.machineId === m.id && (o.stage !== 'Completed' || new Date(o.cycleEndUtc) > new Date())));
-  const selected = candidates.some(m => m.id === machine) ? machine : candidates[0]?.id ?? '';
-  const pending = operations.some(op => op.stage !== 'Completed');
-  return <section aria-label="Ajouts de machines Stripe">
-    <h4>Ajouts de machines</h4>
-    <p>10 € IA complets + prorata du service à 19,90 €. Aucun budget IA avant paiement intégral confirmé.</p>
-    <p>Pour payer la facture, utilisez le Dashboard Stripe. Le webhook reprend ensuite l’opération.</p>
-    <Button disabled={busy} onClick={() => setRevision(r => r + 1)}>Actualiser les opérations</Button>
+  const pendingOperations = useMemo(
+    () => operations.filter(operation => operation.stage !== 'Completed' || operation.reconciliationRequired),
+    [operations]);
+  const interventions = useMemo(() => pendingOperations.map(operation =>
+    `${operation.machineName} — ${operation.reconciliationRequired ? 'réconciliation requise' : 'ajout à reprendre'}`), [pendingOperations]);
+  useEffect(() => { onInterventionsChange?.(interventions); }, [interventions, onInterventionsChange]);
+  const technicalDetails = <section aria-label="Détails techniques des ajouts de machines">
+    <div className={styles.cardHeading}><h4>Ajouts de machines enregistrés</h4>
+      <Button appearance="subtle" size="small" disabled={busy} onClick={() => setRevision(value => value + 1)}>Actualiser les opérations</Button></div>
     {loadError && <p role="alert">{loadError}</p>}
     {!loaded && !loadError && <p>Chargement des opérations…</p>}
-    {loaded && <>
-      <label>Machine active à ajouter <select value={selected} onChange={e => setMachine(e.target.value)} disabled={busy || pending}>
-        {!candidates.length && <option value="">Aucune machine éligible</option>}
-        {candidates.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </select></label>
-      <Button disabled={busy || !account.testActionsEnabled || account.subscriptionStatus !== 'active' || !selected || pending}
-        onClick={() => void run(selected)}>Lancer l’ajout Stripe</Button>
-      {pending && <p>Une opération est en cours : terminez-la avant un autre ajout.</p>}
-      {operations.length === 0 && <p>Aucune opération StripeMachineAddition.</p>}
-      {operations.map(op => <article key={op.id} style={{ borderTop: '1px solid #ccc', marginTop: 12, paddingTop: 8, overflowWrap: 'anywhere' }}>
+    {loaded && operations.length === 0 && <p>Aucune opération StripeMachineAddition.</p>}
+    {operations.map(op => <article key={op.id} className={styles.rechargeDiagnostic}>
         <strong>{op.machineName} — {op.stage}</strong>
         {op.reconciliationRequired && <p role="alert">ReconciliationRequired : cycle terminé, vérification manuelle nécessaire.</p>}
-        <details><summary>Voir les détails</summary><dl>
+        <dl>
           <dt>Opération / machine</dt><dd>{op.id} / {op.machineId}</dd>
           <dt>Facture Stripe</dt><dd>{op.stripeInvoiceId ?? '—'}</dd>
           <dt>Montants HT</dt><dd>IA : {op.aiAmountEur.toFixed(2)} € · service : {op.serviceAmountEur.toFixed(2)} € · total : {(op.aiAmountEur + op.serviceAmountEur).toFixed(2)} €</dd>
@@ -78,11 +75,21 @@ export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken
           <dt>Période machine</dt><dd>{op.machineBillingPeriodId ?? '—'}</dd>
           <dt>Événement Stripe</dt><dd>{op.externalEventId ?? '—'}</dd>
           <dt>Terminé UTC</dt><dd>{op.completedAtUtc ?? '—'}</dd>
-        </dl></details>
-        <Button disabled={busy || !account.testActionsEnabled || op.reconciliationRequired || op.stage === 'Completed'}
-          onClick={() => void run(op.machineId)}>{op.stage === 'Completed' ? 'Rejouer sans effet' : 'Reprendre l’opération'}</Button>
+        </dl>
       </article>)}
-    </>}
+  </section>;
+  const repairTools = <section aria-label="Réparation des ajouts de machines"><h4>Ajouts de machines à examiner</h4>
+    {loaded && pendingOperations.length === 0 && <p>Aucun ajout de machine ne nécessite d’intervention.</p>}
+    {pendingOperations.map(operation => <article key={operation.id} className={styles.repairItem}>
+      <p><strong>{operation.machineName}</strong> · {operation.reconciliationRequired ? 'Réconciliation requise' : operation.stage}</p>
+      {operation.reconciliationRequired
+        ? <p>Le cycle est terminé. Vérifiez les données enregistrées et l’historique Stripe avant toute intervention.</p>
+        : <Button disabled={busy || !account.testActionsEnabled} onClick={() => void run(operation.machineId)}>Reprendre l’opération</Button>}
+    </article>)}
     <p role="status">{message}</p>
   </section>;
+  return <>
+    {technicalTarget ? createPortal(technicalDetails, technicalTarget) : technicalTarget === undefined ? technicalDetails : null}
+    {repairTarget ? createPortal(repairTools, repairTarget) : repairTarget === undefined ? repairTools : null}
+  </>;
 }

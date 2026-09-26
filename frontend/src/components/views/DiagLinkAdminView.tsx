@@ -36,11 +36,6 @@ const useStyles = makeStyles({
   },
   headerText: { minWidth: 0, overflowWrap: 'anywhere' },
   chevron: { flexShrink: 0 },
-  subtitle: {
-    display: 'block',
-    color: tokens.colorNeutralForeground3,
-    marginTop: tokens.spacingVerticalXS,
-  },
   metrics: {
     marginTop: tokens.spacingVerticalL,
     display: 'grid',
@@ -89,7 +84,6 @@ export const DiagLinkAdminView: React.FC<{ onDiagLinkSessionExpired?: () => void
                   onClick={() => setStatisticsOpen(open => !open)}>
                   <span className={styles.headerText}>
                     <Text size={500} weight="semibold">Statistiques globales</Text>
-                    <Text className={styles.subtitle}>Vue d'ensemble de la plateforme DiagLink</Text>
                   </span>
                   {statisticsOpen
                     ? <ChevronDown20Regular className={styles.chevron} aria-hidden="true" />

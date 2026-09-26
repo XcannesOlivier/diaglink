@@ -12,7 +12,7 @@ it('displays the three useful metrics without inventing a credit ceiling',async(
  vi.stubGlobal('fetch',fetch);const host=document.createElement('div'),root=createRoot(host);
  try{await act(async()=>root.render(<CompanySummaryBanner companyId="a" account={{subscriptionStatus:'active',activeMachineCount:2,latestInvoiceStatus:'open',amountRemainingCents:2990} as StripeCompanySummary} token={async()=>null} revision={0}/>));
  expect(host.querySelectorAll('dt')).toHaveLength(3);
- expect([...host.querySelectorAll('dd')].map(e=>e.textContent?.replace(/\s/g,' '))).toEqual(['2','20,00 €','Abonnement actifMontant impayé29,90 €']);
+ expect([...host.querySelectorAll('dd')].map(e=>e.textContent?.replace(/\s/g,' '))).toEqual(['2 machines','20,00 €','Abonnement actif · 29,90 € impayés']);
  expect([...host.querySelectorAll('dt')].map(e=>e.textContent)).toEqual(['Machines facturables','Crédit supplémentaire','Abonnement']);
  expect(host.querySelector('dd [aria-hidden="true"]')).toBeNull();
  expect(host.textContent).not.toContain('Usages IA du mois');
@@ -35,7 +35,7 @@ it.each([
  const host=document.createElement('div'),root=createRoot(host);
  try{await act(async()=>root.render(<CompanySummaryBanner companyId="a" account={{subscriptionStatus,latestInvoiceStatus,amountRemainingCents} as StripeCompanySummary} token={async()=>null} revision={0}/>));
  const cell=host.querySelectorAll('dd')[2];expect(cell.textContent).toContain(label);
- expect(cell.textContent?.includes('Montant impayé')).toBe(unpaid);
+ expect(cell.textContent?.includes('impayés')).toBe(unpaid);
  if(unpaid)expect(cell.textContent).toContain(new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(29.9));
  else expect(cell.textContent).not.toContain('€');
  }finally{await act(async()=>root.unmount());}

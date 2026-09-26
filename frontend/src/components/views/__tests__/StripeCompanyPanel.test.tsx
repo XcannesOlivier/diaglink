@@ -3,43 +3,39 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { StripeCompanyPanel } from '../StripeCompanyPanel';
+import styles from '../CompanyFinancePanel.module.css';
 const { request } = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock('../../../services/stripeAdminService', () => ({ stripeCompanyRequest: request }));
 vi.mock('../StripeMachineAdditionsPanel', () => ({ StripeMachineAdditionsPanel: () => null }));
-vi.mock('../WalletTopUpPanel', () => ({ WalletTopUpPanel: ({diagnosticContent,diagnosticTarget}: {diagnosticContent?: import('react').ReactNode;diagnosticTarget?:HTMLElement|null}) => diagnosticTarget?createPortal(<section aria-label="Diagnostic wallet">{diagnosticContent}</section>,diagnosticTarget):<span>Crédit supplémentaire</span> }));
+vi.mock('../WalletTopUpPanel', () => ({ WalletTopUpPanel: ({technicalTarget,repairTarget}: {technicalTarget?:HTMLElement|null;repairTarget?:HTMLElement|null}) => <>{technicalTarget&&createPortal(<section aria-label="Détails wallet"/>,technicalTarget)}{repairTarget&&createPortal(<section aria-label="Réparation wallet"/>,repairTarget)}<span>Crédit supplémentaire</span></> }));
 
 describe('StripeCompanyPanel', () => {
   let root: Root;
   let container: HTMLDivElement;
   const token = vi.fn();
   const data = { stripeCustomerId: null, stripeSubscriptionId: null, subscriptionStatus: null,
-    currentPeriodStartUtc: null, currentPeriodEndUtc: null, activeMachineCount: 2, testActionsEnabled: true };
+    currentPeriodStartUtc: null, currentPeriodEndUtc: null, activeMachineCount: 2, testActionsEnabled: true,
+    machines: [{ id: 'm1', name: 'Machine A', billable: true, rightsEndUtc: null }, { id: 'm2', name: 'Machine B', billable: true, rightsEndUtc: null }] };
   beforeEach(() => { request.mockReset(); container = document.createElement('div'); document.body.append(container); root = createRoot(container); });
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
   async function render() { await act(async () => root.render(<StripeCompanyPanel companyId="c1" getAccessToken={token} />)); }
 
-  it('loads without mutations and updates after explicit action; prevents double clicks', async () => {
+  it('loads without mutations and refreshes only the recorded data', async () => {
     request.mockResolvedValueOnce({ kind: 'success', data }); await render();
     expect(request).toHaveBeenCalledExactlyOnceWith(token, 'c1');
     expect(container.textContent).toContain('Machines actives');
-    let resolve!: (value: unknown) => void;
-    request.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
-    const button = [...container.querySelectorAll('button')].find(b => b.textContent?.includes('le client Stripe'))!;
-    await act(async () => { button.click(); button.click(); });
-    expect(request).toHaveBeenCalledTimes(2); expect(button.disabled).toBe(true);
-    await act(async () => resolve({ kind: 'success', data: { ...data, stripeCustomerId: 'cus_test' } }));
-    expect(container.textContent).toContain('cus_test'); expect(button.disabled).toBe(false);
-    request.mockResolvedValueOnce({ kind: 'success', data: { ...data, stripeSubscriptionId: 'sub_test', subscriptionStatus: 'active',
-      currentPeriodStartUtc: '2026-09-11T00:00:00Z', currentPeriodEndUtc: '2026-10-11T00:00:00Z' } });
-    await act(async () => [...container.querySelectorAll('button')].find(b => b.textContent?.includes('l’abonnement Stripe'))!.click());
-    expect(request).toHaveBeenLastCalledWith(token, 'c1', 'subscription');
-    expect(container.textContent).toContain('sub_test'); expect(container.textContent).toContain('2026-10-11');
+    expect(container.textContent).not.toContain('Créer / récupérer');
+    request.mockResolvedValueOnce({ kind: 'success', data: { ...data, stripeCustomerId: 'cus_test' } });
+    await act(async () => [...container.querySelectorAll('button')].find(b => b.textContent === 'Actualiser les données enregistrées')!.click());
+    expect(request).toHaveBeenLastCalledWith(token, 'c1');
+    expect(container.textContent).toContain('cus_test');
   });
 
   it('orders company sections without repeated summary cards', async () => {
     request.mockResolvedValue({ kind: 'success', data }); await render();
     expect([...container.querySelectorAll('summary')].map(s => s.textContent)).toEqual([
-      'Consommation Agent', 'Crédits et paiements', 'Diagnostic Super Admin'
+      'Consommation Agent', 'Crédits et paiements', 'État de facturationAucun abonnement enregistré · 2/2 machines · Aucun impayé · Aucune intervention',
+      'Machines facturables (2)', 'Détails techniques', 'Outils de réparation'
     ]);
     expect(container.querySelectorAll('[aria-label="Résumé de l’entreprise"]')).toHaveLength(1);
     expect(container.textContent).not.toContain('Statut et consommation des machines');
@@ -47,9 +43,40 @@ describe('StripeCompanyPanel', () => {
     expect(container.textContent).not.toContain('Crédit supplémentaire entreprise');
   });
 
-  it('disables actions when test configuration is unavailable', async () => {
-    request.mockResolvedValue({ kind: 'success', data: { ...data, testActionsEnabled: false } }); await render();
-    expect([...container.querySelectorAll('button')].filter(b => b.textContent?.startsWith('Créer')).every(b => b.disabled)).toBe(true);
+  it('shows a business billing summary without claiming live Stripe synchronization', async () => {
+    request.mockResolvedValue({ kind: 'success', data: { ...data, subscriptionStatus: 'active', amountRemainingCents: 1250 } }); await render();
+    expect(container.textContent).toContain('État de facturation');
+    expect(container.textContent).toContain('Actif · 2/2 machines · 12,50 € impayés · Aucune intervention');
+    expect(container.textContent).not.toContain('Synchronisé avec Stripe');
+  });
+
+  it('keeps technical details and repair tools collapsed by default', async () => {
+    request.mockResolvedValue({ kind: 'success', data: { ...data, stripeCustomerId: 'cus_test' } }); await render();
+    const sections = [...container.querySelectorAll('details')].filter(details => {
+      const text = details.querySelector('summary')?.textContent ?? '';
+      return text.startsWith('État de facturation') || ['Détails techniques', 'Outils de réparation'].includes(text);
+    });
+    expect(sections).toHaveLength(3);
+    expect(sections.every(details => !details.open)).toBe(true);
+    const repairs = sections.find(details => details.querySelector('summary')?.textContent === 'Outils de réparation')!;
+    expect(repairs.classList.contains(styles.repairTools)).toBe(false);
+    expect(container.textContent).toContain('cus_test');
+  });
+
+  it('opens billing details and keeps machine management folded until requested', async () => {
+    request.mockResolvedValue({ kind: 'success', data: { ...data, subscriptionStatus: 'active' } }); await render();
+    const billing = [...container.querySelectorAll('details')].find(details => details.querySelector('summary')?.textContent?.startsWith('État de facturation'))!;
+    expect(billing.open).toBe(false);
+    expect(billing.querySelector('summary')?.textContent).toContain('Actif · 2/2 machines · Aucun impayé · Aucune intervention');
+    await act(async () => billing.querySelector('summary')!.click());
+    expect(billing.open).toBe(true);
+    expect(billing.textContent).toContain('Opérations nécessitant une intervention');
+    const machines = [...billing.querySelectorAll('details')].find(details => details.querySelector('summary')?.textContent === 'Machines facturables (2)')!;
+    expect(machines.open).toBe(false);
+    await act(async () => machines.querySelector('summary')!.click());
+    expect(machines.open).toBe(true);
+    const action = [...machines.querySelectorAll('button')].find(button => button.textContent === 'Désactiver Machine A');
+    expect(action?.disabled).toBe(false);
   });
 
   it('shows authorization errors without actions', async () => {
@@ -57,10 +84,4 @@ describe('StripeCompanyPanel', () => {
     expect(container.textContent).toContain('Accès Super Admin requis'); expect(container.textContent).not.toContain('Créer / récupérer');
   });
 
-  it('shows a conflict without claiming success', async () => {
-    request.mockResolvedValueOnce({ kind: 'success', data }); await render();
-    request.mockResolvedValueOnce({ kind: 'conflict', message: 'Réconciliation requise' });
-    await act(async () => [...container.querySelectorAll('button')].find(b => b.textContent?.includes('le client Stripe'))!.click());
-    expect(container.textContent).toContain('Réconciliation requise');
-  });
 });

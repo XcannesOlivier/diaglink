@@ -45,18 +45,20 @@ describe('Wallet top-up', () => {
     expect(box.querySelector('a')?.href).toBe(operation.paymentUrl);
     expect(box.querySelector('a')?.target).toBe('_self');
     expect(box.querySelector(`.${styles.topUpAwaiting}`)?.textContent).toBe('En attente de paiement');
-    const diagnostic=box.querySelector('section[aria-label="Diagnostic des recharges"]')!;
+    const diagnostic=box.querySelector('section[aria-label="Détails techniques des recharges"]')!;
     const history=[...box.querySelectorAll('details')].find(d=>d.querySelector('summary')?.textContent==='Historique des recharges')!;expect(history.open).toBe(false);expect(box.querySelector('a')?.closest('details')).toBe(history);
     expect(diagnostic.textContent).toContain(operation.stripeSessionId);
-    expect(diagnostic.contains(button('Reprendre la recharge'))).toBe(true);
+    const repairs=box.querySelector('section[aria-label="Réparation des recharges"]')!;
+    expect(diagnostic.contains(button('Reprendre la recharge'))).toBe(false);
+    expect(repairs.contains(button('Reprendre la recharge'))).toBe(true);
     read.mockResolvedValue({ kind: 'success', data: { ...overview, balance: 20, walletExists: true,
       operations: [{ ...operation, stage: 'Completed', status: 'Completed', paymentUrl: null, ledgerEntryId: 'ledger1', externalEventId: 'evt_paid' }] } });
     await click('Actualiser le wallet');
     expect(box.textContent).toContain(new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(20)); expect(box.textContent).toContain('ledger1'); expect(start).toHaveBeenCalledTimes(1);
     expect(box.querySelector('a')).toBeNull();
     expect(box.querySelector(`.${styles.topUpCompleted}`)?.textContent).toBe('Payé');
-    start.mockResolvedValue({ kind: 'success', data: { ...operation, status: 'AlreadyCompleted' } });
-    await click('Rejouer la recharge sans effet'); expect(start).toHaveBeenLastCalledWith(token, 'c1', 'op1', 20);
+    expect(box.textContent).toContain('Aucune recharge ne nécessite d’intervention.');
+    expect([...box.querySelectorAll('button')].some(item => item.textContent?.includes('Rejouer'))).toBe(false);
   });
 
   it('keeps the operation key across a lost response and reload, and blocks duplicate clicks', async () => {

@@ -37,11 +37,9 @@
 @media(max-width:700px){.cards{grid-template-columns:minmax(0,1fr)}.subscription{grid-column:auto}.cards article,.cards>details{padding:18px}.metric strong{font-size:28px}.technical>dl{grid-template-columns:minmax(0,1fr)}.technical dd{margin-bottom:8px}}
 @media(max-width:420px){.details{grid-template-columns:minmax(0,1fr);gap:6px}.details dd{text-align:left;margin-bottom:10px}.buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.buttons button{min-width:0}.cards article,.cards>details{padding:16px}.technical[open]{padding:0 12px 12px}.technical[open]>summary{margin-inline:-12px}}
 
-.companyBanner{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:16px 0 24px;padding:20px;border:1px solid var(--colorBrandStroke2);border-radius:12px;background:var(--colorNeutralBackground2)}
-.companyBanner>div{min-width:0;padding:4px 12px;border-left:2px solid var(--colorNeutralStroke2)}.companyBanner dt{font-size:13px;line-height:1.5;color:var(--colorNeutralForeground2);margin-bottom:8px}.companyBanner dd{margin:0;font-size:22px;line-height:1.3;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.companyBanner .unpaidMetric{border-color:var(--colorStatusWarningBorder1);color:var(--colorStatusWarningForeground1)}
-@media(max-width:1100px){.companyBanner{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:700px){.companyBanner{grid-template-columns:repeat(2,minmax(0,1fr));padding:16px;gap:16px 8px}.companyBanner dd{font-size:20px}}
-@media(max-width:360px){.companyBanner{grid-template-columns:minmax(0,1fr)}}
+.companyBanner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 20px;padding:0}
+.companyBanner>div{min-width:0}.companyBanner dt{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.companyBanner dd{margin:0;padding:7px 10px;border:1px solid var(--colorNeutralStroke2);border-radius:6px;background:var(--colorNeutralBackground2);font-size:14px;line-height:1.4;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+@media(max-width:480px){.companyBanner{display:grid;grid-template-columns:minmax(0,1fr)}.companyBanner dd{text-align:center}}
 
 .quotaList{list-style:none;padding:0;margin:0;display:grid;gap:16px}.quotaRow{padding:12px 0;border-top:1px solid var(--colorNeutralStroke2)}.quotaRow:first-child{border-top:0}.quotaRow .cardHeading{margin-bottom:12px}.quotaRow .cardHeading strong{font-size:15px}.quotaRow .note{margin-bottom:0}
 
@@ -57,10 +55,7 @@
 .topUpLink{color:var(--colorBrandForeground1);font-size:13px;text-underline-offset:3px;margin-inline-start:auto}
 .rechargeHistory strong{font-size:16px;font-variant-numeric:tabular-nums}
 
-.companyBanner .bannerSubscription{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;font-size:16px;line-height:1.4}
-.bannerSubscriptionState{flex:1 1 110px;min-width:0;color:var(--colorNeutralForeground1)}
-.bannerUnpaid{display:flex;flex-direction:column;gap:4px;color:var(--colorStatusWarningForeground1);background:var(--colorStatusWarningBackground1);border:1px solid var(--colorStatusWarningBorder1);border-radius:6px;padding:6px 8px}
-.bannerUnpaid>span{font-size:12px}.bannerUnpaid>strong{font-size:20px;font-variant-numeric:tabular-nums}
+.visuallyHidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
 .consumptionMetrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-block:14px}
 .consumptionMetrics article{padding:12px;background:var(--colorNeutralBackground1);border-radius:8px;min-width:0}
@@ -81,6 +76,7 @@
 .adminFinanceRoot{width:100%;max-width:100%;min-width:0;overflow-x:hidden}
 .adminFinanceRoot>.technical{margin-block:10px;border-radius:12px}
 .adminFinanceRoot>.technical>summary{display:flex;align-items:center;min-height:48px;box-sizing:border-box;padding:14px 18px;font-size:15px;line-height:1.35}
+.adminFinanceRoot>.technical>summary::after{content:'›';flex-shrink:0;margin-left:auto;font-size:22px;line-height:1;color:var(--colorNeutralForeground2);transition:transform .15s ease}.adminFinanceRoot>.technical[open]>summary::after{transform:rotate(90deg)}
 .adminFinanceRoot nav{margin:10px 0;font-size:13px;color:var(--colorNeutralForeground2);overflow-wrap:anywhere}
 .adminFinanceRoot .buttons{display:grid;grid-template-columns:repeat(2,minmax(180px,max-content)) minmax(96px,max-content);align-items:end;justify-content:start;gap:10px 14px}
 .adminFinanceRoot .buttons label{display:grid;gap:6px;min-width:0;font-size:13px;color:var(--colorNeutralForeground2)}
@@ -88,6 +84,8 @@
 .adminFinanceRoot .consumptionMetrics{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .adminFinanceRoot .machineConsumptionMetrics{grid-template-columns:repeat(3,minmax(0,1fr))}
 .adminFinanceRoot .consumptionMetrics article{display:flex;flex-direction:column;justify-content:flex-start;min-height:112px;box-sizing:border-box;border:1px solid var(--colorNeutralStroke2)}
+.adminFinanceRoot .consumptionMetrics article.companyQuotaCard{border:1px solid var(--colorPaletteGreenForeground1)!important}
+.adminFinanceRoot .consumptionMetrics article.machineQuotaCard{border:1px solid var(--colorBrandStroke1)!important}
 .adminFinanceRoot .consumptionMetrics strong{line-height:1.25;overflow-wrap:anywhere}
 .adminFinanceRoot .compactTableScroll{max-width:100%;border:1px solid var(--colorNeutralStroke2);border-radius:9px}
 .adminFinanceRoot .compactTable caption{text-align:left;padding:12px 10px;font-weight:600;color:var(--colorNeutralForeground1)}
@@ -137,7 +135,14 @@
 @media(max-width:420px){.adminFinanceRoot .walletTopUpControls>.buttons{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .diagnosticSubsection{margin:12px 0;padding:14px;border:1px solid var(--colorNeutralStroke2);border-radius:9px;background:var(--colorNeutralBackground1);min-width:0}.diagnosticSubsection>h4,.diagnosticCosts>h4,.diagnosticAdvanced>h4{margin:0 0 10px;font-size:15px}.diagnosticSummary{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(0,1.3fr);gap:8px 16px;margin:0}.diagnosticSummary dt{color:var(--colorNeutralForeground2)}.diagnosticSummary dd{margin:0;font-weight:600;overflow-wrap:anywhere}.diagnosticSubsection>.technical{margin:12px 0 0}.diagnosticAdvanced,.diagnosticCosts{min-width:0}.diagnosticAdvanced>h4,.diagnosticCosts>h4{padding:10px 0 0}.diagnosticAdvanced .diagnosticSubsection{margin-top:8px}.adminFinanceRoot .subscriptionPayment{margin-top:4px;padding-top:8px}
 .diagnosticCosts section>dl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.diagnosticCosts section>dl>div{padding:12px;border:1px solid var(--colorNeutralStroke2);border-radius:8px;background:var(--colorNeutralBackground1)}.diagnosticCosts section>dl>div dt{font-size:12px}.diagnosticCosts section>dl>div dd{text-align:left;font-size:18px;margin-top:6px}.diagnosticSubsection details>summary{cursor:pointer;color:var(--colorNeutralForeground2)}
+.billingState{margin-block:18px 10px!important}.billingState>summary{display:grid!important;grid-template-columns:minmax(150px,.35fr) minmax(0,1fr) auto;gap:12px;align-items:center}.billingState>summary::after{margin-left:0}.billingTitle{color:var(--colorNeutralForeground1);font-size:15px}.billingInlineState{min-width:0;color:var(--colorNeutralForeground2);font-weight:500;overflow-wrap:anywhere}.interventionState{color:var(--colorStatusWarningForeground1);font-weight:700}.billingBody{display:grid;gap:16px}.billingHeader{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.billingHeader p{margin:0;color:var(--colorNeutralForeground2)}
+.billingSummary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0}.billingSummary>div{min-width:0;padding:14px;border:1px solid var(--colorNeutralStroke2);border-radius:8px;background:var(--colorNeutralBackground1)}.billingSummary dt{font-size:13px;color:var(--colorNeutralForeground2);line-height:1.4}.billingSummary dd{margin:7px 0 0;font-size:18px;font-weight:600;line-height:1.35;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.billingAlert{padding:16px;border:1px solid var(--colorStatusWarningBorder1);border-radius:8px;background:var(--colorStatusWarningBackground1);color:var(--colorStatusWarningForeground1)}.billingAlert>strong{text-transform:uppercase;font-size:13px}.billingAlert ul{margin:10px 0;padding-inline-start:22px}.billingAlert button{margin-top:4px}
+.billingManagement{margin:0;border-left:3px solid var(--colorBrandStroke1)}.billingManagement h4{margin-top:0}.repairTools{border-color:var(--colorStatusWarningBorder1)}.repairItem{padding:12px 0;border-top:1px solid var(--colorNeutralStroke2)}.repairItem:first-of-type{border-top:0}.repairItem p{margin:0 0 8px}
 @media(max-width:760px){.diagnosticSummary{grid-template-columns:minmax(0,1fr);gap:4px}.diagnosticSummary dd{margin-bottom:6px}.diagnosticCosts section>dl{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.billingSummary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.billingState>summary{grid-template-columns:minmax(0,1fr) auto;gap:4px 10px}.billingInlineState{grid-column:1/-1;grid-row:2}.billingState>summary::after{grid-column:2;grid-row:1}.billingHeader button{width:100%}}
+@media(max-width:520px){.billingSummary{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:460px){.diagnosticCosts section>dl{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:480px){
  .adminFinanceRoot .consumptionMetrics{grid-template-columns:minmax(0,1fr)}

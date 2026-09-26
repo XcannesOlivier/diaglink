@@ -1,13 +1,13 @@
-import {createPortal} from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { StripeAdminPanel } from '../StripeAdminPanel';
 import type { StripeAdditionSummary, StripeCompanySummary } from '../../../services/stripeAdminService';
+import styles from '../CompanyFinancePanel.module.css';
 
 const mocks = vi.hoisted(() => ({ companies: vi.fn(), account: vi.fn(), operations: vi.fn(), add: vi.fn() }));
 vi.mock('../../../services/companyService', () => ({ getCompanies: mocks.companies }));
-vi.mock('../WalletTopUpPanel', () => ({ WalletTopUpPanel: ({diagnosticContent,diagnosticTarget}: {diagnosticContent?: import('react').ReactNode;diagnosticTarget?:HTMLElement|null}) => diagnosticTarget?createPortal(<details><summary>Outils Stripe et diagnostic</summary>{diagnosticContent}</details>,diagnosticTarget):null }));
+vi.mock('../WalletTopUpPanel', () => ({ WalletTopUpPanel: () => null }));
 vi.mock('../../../services/stripeAdminService', () => ({ stripeCompanyRequest: mocks.account,
   getStripeAdditions: mocks.operations, addStripeMachine: mocks.add }));
 
@@ -38,16 +38,20 @@ describe('Stripe MVP administration', () => {
   function button(text: string) { return [...container.querySelectorAll('button')].find(b => b.textContent === text)!; }
   async function click(text: string) { await act(async () => button(text).click()); }
 
-  it('runs Customer, Subscription, AwaitingPayment, read-only webhook refresh, Completed and replay', async () => {
-    await render(); expect(mocks.account).toHaveBeenCalledWith(token, 'c1'); expect(mocks.add).not.toHaveBeenCalled();
-    mocks.account.mockResolvedValue({ kind: 'success', data: { ...empty, billingAccountId: 'ba1', stripeCustomerId: 'cus_test' } });
-    await click('Créer / récupérer le client Stripe'); expect(container.textContent).toContain('cus_test'); expect(container.textContent).toContain('ba1');
-    mocks.account.mockResolvedValue({ kind: 'success', data: { ...empty, billingAccountId: 'ba1', stripeCustomerId: 'cus_test',
-      stripeSubscriptionId: 'sub_test', subscriptionStatus: 'active', currentPeriodEndUtc: op.cycleEndUtc } });
-    await click('Créer / récupérer l’abonnement Stripe'); expect(mocks.account).toHaveBeenLastCalledWith(token, 'c1', 'subscription');
-    mocks.add.mockResolvedValue({ kind: 'success', data: { operationId: 'op1', status: 'AwaitingPayment' } });
+  it('shows only incomplete historical additions as repair actions', async () => {
     mocks.operations.mockResolvedValue({ kind: 'success', data: [op] });
-    await click('Lancer l’ajout Stripe');
+    await render(); expect(mocks.account).toHaveBeenCalledWith(token, 'c1'); expect(mocks.add).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('Lancer l’ajout Stripe');
+    expect(container.textContent).toContain('Intervention requise');
+    const billing = [...container.querySelectorAll('details')].find(details => details.querySelector('summary')?.textContent?.startsWith('État de facturation'))!;
+    const repairs = [...container.querySelectorAll('details')].find(details => details.querySelector('summary')?.textContent === 'Outils de réparation (1)')!;
+    expect(billing.open).toBe(false); expect(billing.querySelector('summary')?.textContent).toContain('⚠ 1 intervention'); expect(repairs.open).toBe(false);
+    expect(repairs.classList.contains(styles.repairTools)).toBe(true);
+    await act(async () => billing.querySelector('summary')!.click());
+    await click('Examiner / reprendre');
+    expect(repairs.open).toBe(true);
+    mocks.add.mockResolvedValue({ kind: 'success', data: { operationId: 'op1', status: 'AwaitingPayment' } });
+    await click('Reprendre l’opération');
     expect(mocks.add).toHaveBeenCalledExactlyOnceWith(token, 'c1', 'm1');
     expect(container.textContent).toContain('AwaitingPayment'); expect(container.textContent).toContain('19.95 €');
     expect(container.textContent).not.toContain('period1');
@@ -55,20 +59,21 @@ describe('Stripe MVP administration', () => {
       paymentConfirmedAtUtc: '2026-09-15T12:01:00Z', externalEventId: 'evt_test', completedAtUtc: '2026-09-15T12:01:01Z' }] });
     await click('Actualiser les opérations');
     expect(mocks.add).toHaveBeenCalledTimes(1); expect(container.textContent).toContain('Completed'); expect(container.textContent).toContain('period1');
-    mocks.add.mockResolvedValue({ kind: 'success', data: { operationId: 'op1', status: 'AlreadyCompleted' } });
-    const completedButton = [...container.querySelectorAll('button')].find(b => b.textContent === 'Rejouer sans effet')!;
-    expect(completedButton.disabled).toBe(true);
-    await click('Rejouer sans effet'); expect(mocks.add).toHaveBeenCalledTimes(1);
+    expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('Reprendre l’opération'))).toBe(false);
+    expect(container.textContent).toContain('Aucun ajout de machine ne nécessite d’intervention.');
+    expect(container.textContent).not.toContain('Intervention requise');
+    expect(repairs.querySelector('summary')?.textContent).toBe('Outils de réparation');
+    expect(repairs.classList.contains(styles.repairTools)).toBe(false);
   });
 
-  it('retries the same machine after an uncertain response and blocks double clicks', async () => {
+  it('retries the same incomplete addition after an uncertain response and blocks double clicks', async () => {
     mocks.account.mockResolvedValue({ kind: 'success', data: { ...empty, subscriptionStatus: 'active' } });
+    mocks.operations.mockResolvedValue({ kind: 'success', data: [{ ...op, stage: 'StripeQuantityUpdated' }] });
     await render();
     let resolve!: (value: unknown) => void;
     mocks.add.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
-    await act(async () => { button('Lancer l’ajout Stripe').click(); button('Lancer l’ajout Stripe').click(); });
+    await act(async () => { button('Reprendre l’opération').click(); button('Reprendre l’opération').click(); });
     expect(mocks.add).toHaveBeenCalledTimes(1);
-    mocks.operations.mockResolvedValue({ kind: 'success', data: [{ ...op, stage: 'StripeQuantityUpdated' }] });
     await act(async () => resolve({ kind: 'error' }));
     mocks.add.mockResolvedValue({ kind: 'success', data: { operationId: 'op1', status: 'AwaitingPayment' } });
     await click('Reprendre l’opération'); expect(mocks.add).toHaveBeenLastCalledWith(token, 'c1', 'm1');
@@ -81,11 +86,12 @@ describe('Stripe MVP administration', () => {
     expect(container.textContent).not.toContain('cus_first'); expect(mocks.account).toHaveBeenLastCalledWith(token, 'c2');
   });
 
-  it('disables mutation for live/disabled config, nonactive subscription and expired operation', async () => {
+  it('requires manual verification instead of replaying a reconciliation operation', async () => {
     mocks.account.mockResolvedValue({ kind: 'success', data: { ...empty, testActionsEnabled: false } });
     mocks.operations.mockResolvedValue({ kind: 'success', data: [{ ...op, reconciliationRequired: true }] });
     await render();
-    expect(button('Lancer l’ajout Stripe').disabled).toBe(true); expect(button('Reprendre l’opération').disabled).toBe(true);
+    expect(container.textContent).not.toContain('Lancer l’ajout Stripe');
+    expect([...container.querySelectorAll('button')].some(item => item.textContent === 'Reprendre l’opération')).toBe(false);
     expect(container.textContent).toContain('ReconciliationRequired'); expect(mocks.add).not.toHaveBeenCalled();
   });
 });

@@ -21,11 +21,8 @@ export function CompanySummaryBanner({companyId,account,token,revision}:{company
   account.subscriptionStatus==='trialing'&&account.machineRequestProvisioningCompleted?'Abonnement actif':
   ({trialing:'Abonnement en cours d’activation',canceled:'Résilié',incomplete:'Paiement initial en attente',incomplete_expired:'Paiement initial expiré',paused:'Suspendu'} as Record<string,string>)[account.subscriptionStatus??'']??(account.subscriptionStatus?'À vérifier':'Aucun abonnement');
  return <dl className={styles.companyBanner} aria-label="Résumé de l’entreprise">
-  <div><dt>Machines facturables</dt><dd>{account?.activeMachineCount??'…'}</dd></div>
-  <div><dt>Crédit supplémentaire</dt><dd>{wallet}</dd></div>
-  <div><dt>Abonnement</dt><dd className={styles.bannerSubscription}>
-   <span className={styles.bannerSubscriptionState}>{subscriptionLabel}</span>
-   {unpaid&&<span className={styles.bannerUnpaid}><span>Montant impayé</span><strong>{euro(account!.amountRemainingCents!/100)}</strong></span>}
-  </dd></div>
+    <div><dt>Machines facturables</dt><dd>{account ? `${account.activeMachineCount} machine${account.activeMachineCount > 1 ? 's' : ''}` : '…'}</dd></div>
+    <div><dt>Crédit supplémentaire</dt><dd>{wallet}</dd></div>
+    <div><dt>Abonnement</dt><dd>{subscriptionLabel}{unpaid ? ` · ${euro(account!.amountRemainingCents! / 100)} impayés` : ''}</dd></div>
  </dl>;
 }
