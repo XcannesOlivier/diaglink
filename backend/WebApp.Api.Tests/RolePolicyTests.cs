@@ -18,6 +18,7 @@ public class RolePolicyTests
     private static readonly string[] SuperAdminOnlyRoles = [DiagLinkRoles.SuperAdmin];
     private static readonly string[] TechnicianOrAboveRoles =
         [DiagLinkRoles.Technician, DiagLinkRoles.CompanyAdmin, DiagLinkRoles.SuperAdmin];
+    private static readonly string[] SupportContactRoles = [DiagLinkRoles.Technician, DiagLinkRoles.CompanyAdmin];
 
     private static ClaimsPrincipal BuildPrincipal(string role)
     {
@@ -69,4 +70,18 @@ public class RolePolicyTests
     [TestMethod]
     public async Task TechnicianOrAbove_AcceptsCompanyAdmin()
         => Assert.IsTrue(await EvaluateAsync(TechnicianOrAboveRoles, DiagLinkRoles.CompanyAdmin));
+
+    [TestMethod]
+    public async Task SupportContact_AcceptsTechnicianAndCompanyAdmin()
+    {
+        Assert.IsTrue(await EvaluateAsync(SupportContactRoles, DiagLinkRoles.Technician));
+        Assert.IsTrue(await EvaluateAsync(SupportContactRoles, DiagLinkRoles.CompanyAdmin));
+    }
+
+    [TestMethod]
+    public async Task SupportContact_RejectsSuperAdminAndUnknownRole()
+    {
+        Assert.IsFalse(await EvaluateAsync(SupportContactRoles, DiagLinkRoles.SuperAdmin));
+        Assert.IsFalse(await EvaluateAsync(SupportContactRoles, "viewer"));
+    }
 }

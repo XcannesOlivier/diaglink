@@ -160,6 +160,7 @@ builder.Services.AddAuthorization(options =>
     AddRolePolicy("TechnicianOrAbove", DiagLinkRoles.Technician, DiagLinkRoles.CompanyAdmin, DiagLinkRoles.SuperAdmin);
     AddRolePolicy("CompanyAdminOrAbove", DiagLinkRoles.CompanyAdmin, DiagLinkRoles.SuperAdmin);
     AddRolePolicy("SuperAdminOnly", DiagLinkRoles.SuperAdmin);
+    AddRolePolicy("SupportContact", DiagLinkRoles.Technician, DiagLinkRoles.CompanyAdmin);
 
     // Strictly company_admin — excludes diaglink_super_admin on purpose. A super-admin's company_id
     // claim isn't a meaningful tenant, so endpoints scoped by that claim (technician provisioning,
@@ -293,6 +294,7 @@ app.MapMachineRequestPayments();
 app.MapCompanyFinance();
 app.MapPublicMachineRequests();
 app.MapPublicContact();
+app.MapSupportContact();
 app.MapAdditionalMachineRequests();
 app.MapAdditionalDocumentsRequests();
 app.MapAdminMachineRequests();

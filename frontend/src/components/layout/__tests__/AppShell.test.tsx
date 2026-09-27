@@ -21,6 +21,10 @@ vi.mock('../../../services/machineRequestAdminApi', async importOriginal => {
   const original = await importOriginal<typeof import('../../../services/machineRequestAdminApi')>();
   return { ...original, listMachineRequests: listMachineRequestsMock };
 });
+vi.mock('../../core/SupportContactDialog', () => ({
+  SupportContactDialog: ({ open, machineId }: { open: boolean; machineId?: string }) =>
+    open ? <div role="dialog" data-machine-id={machineId}>Modale support</div> : null,
+}));
 
 // AppShell/AgentChat read global state via useAppContext (used directly and via useAppState) — stub it
 // with a controllable state instead of wiring up the real AppProvider (which also depends on MSAL).
@@ -123,6 +127,50 @@ describe('AppShell navigation', () => {
     expect(text).not.toContain('Nouvelles demandes');
   });
 
+  it.each(['technician', 'company_admin'] as const)('shows support contact actions for %s', role => {
+    mockState = buildState({ userId: 'u1', companyId: 'c1', role });
+    const container = renderAppShell();
+    const contactButtons = Array.from(document.body.querySelectorAll('button'))
+      .filter(button => button.textContent?.trim() === 'Contacter DiagLink');
+
+    expect(contactButtons.length).toBeGreaterThanOrEqual(1);
+    expect(container.textContent).not.toContain('Modale support');
+  });
+
+  it('places the support action before settings in the mobile drawer', () => {
+    mockState = buildState({ userId: 'u1', companyId: 'c1', role: 'technician' });
+    const container = renderAppShell();
+    const menuButton = container.querySelector('button[aria-label="Ouvrir le menu"]');
+
+    expect(menuButton).not.toBeNull();
+    act(() => (menuButton as HTMLButtonElement).click());
+
+    const actionLabels = Array.from(document.body.querySelectorAll('button'))
+      .map(button => button.textContent?.trim());
+    const contactIndexes = actionLabels.flatMap((label, index) => label === 'Contacter DiagLink' ? [index] : []);
+    const settingsIndexes = actionLabels.flatMap((label, index) => label === 'Paramètres' ? [index] : []);
+    expect(contactIndexes).toHaveLength(2);
+    expect(settingsIndexes).toHaveLength(2);
+    expect(contactIndexes[1]).toBeLessThan(settingsIndexes[1]);
+  });
+
+  it('opens support contact without navigation and passes the selected machine', () => {
+    mockState = {
+      ...buildState({ userId: 'u1', companyId: 'c1', role: 'technician' }),
+      machine: { selected: { id: 'machine-42', name: 'Presse 4', reference: 'PR-004' } },
+    };
+    const container = renderAppShell();
+    const initialPath = window.location.pathname;
+    const contactButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.trim() === 'Contacter DiagLink');
+
+    expect(contactButton).toBeDefined();
+    act(() => contactButton!.click());
+
+    expect(window.location.pathname).toBe(initialPath);
+    expect(container.querySelector('[role="dialog"]')?.getAttribute('data-machine-id')).toBe('machine-42');
+  });
+
   it('diaglink_super_admin sees requests and the existing administration entries', () => {
     mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' });
     const container = renderAppShell();
@@ -133,6 +181,7 @@ describe('AppShell navigation', () => {
     expect(text).toContain('Machines');
     expect(text).toContain('Administration DiagLink');
     expect(text).toContain('Nouvelles demandes');
+    expect(text).not.toContain('Contacter DiagLink');
   });
 
   it('renders the existing chat surface for the chat view', () => {

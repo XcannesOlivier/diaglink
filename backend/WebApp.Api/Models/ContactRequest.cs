@@ -7,4 +7,6 @@ public sealed record ContactRequest(
     string? Phone,
     string? Message);
 
+public sealed record SupportContactRequest(string? Message, Guid? MachineId);
+
 public sealed record ContactResponse(bool Success);

@@ -10,7 +10,7 @@ import {
   Text,
   Badge,
 } from '@fluentui/react-components';
-import { Dismiss24Regular, Settings24Regular } from '@fluentui/react-icons';
+import { Dismiss24Regular, Mail24Regular, Settings24Regular } from '@fluentui/react-icons';
 import { useAppState } from '../../hooks/useAppState';
 import { useAuth } from '../../hooks/useAuth';
 import { AgentChat } from '../AgentChat';
@@ -23,6 +23,7 @@ import { CompaniesView } from '../views/CompaniesView';
 import { DiagLinkAdminView } from '../views/DiagLinkAdminView';
 import { MachineRequestsView } from '../views/MachineRequestsView';
 import { SettingsPanel } from '../core/SettingsPanel';
+import { SupportContactDialog } from '../core/SupportContactDialog';
 import { getNavItemsForRole, resolveView, ROLE_LABELS } from '../../utils/navigation';
 import logoDiagLink from '../../assets/Logo DiagLink.png';
 import type { AppView } from '../../types/navigation';
@@ -176,6 +177,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   const currentView = ui.currentView;
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSupportContactOpen, setIsSupportContactOpen] = useState(false);
   const [machineRequests, setMachineRequests] = useState<MachineRequestListItem[]>([]);
   const [machineRequestsLoading, setMachineRequestsLoading] = useState(false);
   const [machineRequestsError, setMachineRequestsError] = useState(false);
@@ -243,7 +245,13 @@ export const AppShell: React.FC<AppShellProps> = ({
     setIsMobileMenuOpen(false);
   };
 
+  const handleOpenSupportContact = () => {
+    setIsSupportContactOpen(true);
+    setIsMobileMenuOpen(false);
+  };
+
   const mobileNavItems = getNavItemsForRole(currentUser?.role, pendingMachineRequestCount);
+  const canContactSupport = currentUser?.role === 'technician' || currentUser?.role === 'company_admin';
   const showMobileViewCloseButton = ['companies', 'users', 'machines', 'machine-requests', 'diaglink-admin'].includes(currentView);
 
   return (
@@ -255,6 +263,16 @@ export const AppShell: React.FC<AppShellProps> = ({
         <div className={styles.nav}>
           <Navigation role={currentUser?.role} currentView={currentView} onSelectView={handleSelectView} pendingMachineRequestCount={pendingMachineRequestCount} />
         </div>
+        {canContactSupport && (
+          <Button
+            className={styles.settingsButton}
+            appearance="subtle"
+            icon={<Mail24Regular />}
+            onClick={handleOpenSupportContact}
+          >
+            Contacter DiagLink
+          </Button>
+        )}
         <Button
           className={styles.settingsButton}
           appearance="subtle"
@@ -301,6 +319,16 @@ export const AppShell: React.FC<AppShellProps> = ({
               </Button>
             ))}
           </div>
+          {canContactSupport && (
+            <Button
+              className={styles.mobileNavItem}
+              appearance="subtle"
+              icon={<Mail24Regular />}
+              onClick={handleOpenSupportContact}
+            >
+              Contacter DiagLink
+            </Button>
+          )}
           <Button
             className={styles.mobileNavItem}
             appearance="subtle"
@@ -376,6 +404,15 @@ export const AppShell: React.FC<AppShellProps> = ({
         )}
         {currentView === 'diaglink-admin' && <DiagLinkAdminView onDiagLinkSessionExpired={onDiagLinkSessionExpired} />}
       </div>
+      {canContactSupport && (
+        <SupportContactDialog
+          open={isSupportContactOpen}
+          onOpenChange={setIsSupportContactOpen}
+          getAccessToken={getAccessToken}
+          machineId={state.machine.selected?.id}
+          onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+        />
+      )}
       <SettingsPanel isOpen={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
     </div>
   );
