@@ -107,7 +107,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onDequeueMessage,
   droppedFiles,
   onDroppedFilesConsumed,
-  onChangeMachine,
   machineId,
 }) => {
   const [inputText, setInputText] = useState<string>("");
@@ -399,16 +398,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         )}
         <div className={styles.buttonRow}>
           <div className={styles.actionButtons}>
-            {onChangeMachine && (
-              <Button
-                size="small"
-                appearance="secondary"
-                onClick={onChangeMachine}
-              >
-                <span className={styles.changeMachineDesktopLabel}>Changer de machine</span>
-                <span className={styles.changeMachineCompactLabel}>Machines</span>
-              </Button>
-            )}
             <MachineDocuments key={machineId ?? 'no-machine'} machineId={machineId} />
             <Tooltip content="Joindre un fichier" relationship="label" withArrow>
               <Button

@@ -70,11 +70,11 @@ export function MachineDocuments({ machineId }: { machineId?: string }) {
       setOpen(data.open);
     }}>
       <PopoverTrigger disableButtonEnhancement>
-        <Tooltip content="Documents" relationship="label" withArrow
+        <Tooltip content="Doc Machines" relationship="label" withArrow
           visible={!isCompact && tooltipVisible}
           onVisibleChange={(_, data) => setTooltipVisible(!isCompact && data.visible)}>
-          <Button size="small" appearance="subtle" icon={<DocumentPdfRegular />} disabled={!machineId} aria-label="Documents">
-            <span className={styles.documentsLabel}>Documents</span>
+          <Button size="small" appearance="subtle" icon={<DocumentPdfRegular />} disabled={!machineId} aria-label="Doc Machines">
+            <span className={styles.documentsLabel}>Doc Machines</span>
           </Button>
         </Tooltip>
       </PopoverTrigger>

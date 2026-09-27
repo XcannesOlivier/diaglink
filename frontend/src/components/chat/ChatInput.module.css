@@ -201,10 +201,6 @@
     display: inline;
   }
 
-  .documentsLabel {
-    display: none;
-  }
-
   .mobileMenuButton {
     display: inline-flex !important;
   }
