@@ -23,6 +23,8 @@ param azureStorageConnectionString string
 param contactRecipientAddress string
 @secure()
 param stripeSecretKey string
+@secure()
+param stripeMachineRequestWebhookSecret string
 @description('Enable Stripe payment flows.')
 param stripeEnabled bool
 @description('Stripe Checkout return URL for the public first-machine request flow.')
@@ -154,6 +156,10 @@ var stripeEnv = [
     secretRef: 'stripe-secret-key'
   }
   {
+    name: 'STRIPE_MACHINE_REQUEST_WEBHOOK_SECRET'
+    secretRef: 'stripe-machine-request-webhook-secret'
+  }
+  {
     name: 'STRIPE_ENABLED'
     value: string(stripeEnabled)
   }
@@ -183,6 +189,10 @@ var containerSecrets = [
   {
     name: 'stripe-secret-key'
     value: stripeSecretKey
+  }
+  {
+    name: 'stripe-machine-request-webhook-secret'
+    value: stripeMachineRequestWebhookSecret
   }
 ]
 

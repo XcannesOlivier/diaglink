@@ -50,6 +50,10 @@ param contactRecipientAddress string
 @description('Stripe secret key used by payment services; supply from azd secret STRIPE_SECRET_KEY.')
 param stripeSecretKey string
 
+@secure()
+@description('Stripe signing secret for machine request payment webhooks; supply from azd secret STRIPE_MACHINE_REQUEST_WEBHOOK_SECRET.')
+param stripeMachineRequestWebhookSecret string
+
 @description('Enable Stripe payment flows.')
 param stripeEnabled bool = true
 
@@ -135,6 +139,7 @@ module app 'main-app.bicep' = {
     azureStorageConnectionString: azureStorageConnectionString
     contactRecipientAddress: contactRecipientAddress
     stripeSecretKey: stripeSecretKey
+    stripeMachineRequestWebhookSecret: stripeMachineRequestWebhookSecret
     stripeEnabled: stripeEnabled
     stripeMachineRequestReturnUrl: stripeMachineRequestReturnUrl
     stripeMachineRequestAppReturnUrl: stripeMachineRequestAppReturnUrl

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "15837794895217729573"
+      "templateHash": "1103848923325056690"
     }
   },
   "parameters": {
@@ -102,6 +102,12 @@
       "type": "securestring",
       "metadata": {
         "description": "Stripe secret key used by payment services; supply from azd secret STRIPE_SECRET_KEY."
+      }
+    },
+    "stripeMachineRequestWebhookSecret": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Stripe signing secret for machine request payment webhooks; supply from azd secret STRIPE_MACHINE_REQUEST_WEBHOOK_SECRET."
       }
     },
     "stripeEnabled": {
@@ -1270,6 +1276,9 @@
           "stripeSecretKey": {
             "value": "[parameters('stripeSecretKey')]"
           },
+          "stripeMachineRequestWebhookSecret": {
+            "value": "[parameters('stripeMachineRequestWebhookSecret')]"
+          },
           "stripeEnabled": {
             "value": "[parameters('stripeEnabled')]"
           },
@@ -1299,7 +1308,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "9866102124383269234"
+              "templateHash": "11490761715006211774"
             }
           },
           "parameters": {
@@ -1371,6 +1380,9 @@
               "type": "securestring"
             },
             "stripeSecretKey": {
+              "type": "securestring"
+            },
+            "stripeMachineRequestWebhookSecret": {
               "type": "securestring"
             },
             "stripeEnabled": {
@@ -1570,6 +1582,10 @@
                 "secretRef": "stripe-secret-key"
               },
               {
+                "name": "STRIPE_MACHINE_REQUEST_WEBHOOK_SECRET",
+                "secretRef": "stripe-machine-request-webhook-secret"
+              },
+              {
                 "name": "STRIPE_ENABLED",
                 "value": "[string(parameters('stripeEnabled'))]"
               },
@@ -1598,6 +1614,10 @@
               {
                 "name": "stripe-secret-key",
                 "value": "[parameters('stripeSecretKey')]"
+              },
+              {
+                "name": "stripe-machine-request-webhook-secret",
+                "value": "[parameters('stripeMachineRequestWebhookSecret')]"
               }
             ],
             "pricingIdentities": "[variables('$fxv#1').AiPricingIdentity.Deployments]",
