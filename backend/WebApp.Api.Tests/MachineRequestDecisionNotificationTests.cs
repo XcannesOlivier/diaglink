@@ -1,6 +1,10 @@
+using System.Data.Common;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Stripe;
@@ -110,6 +114,33 @@ public sealed class MachineRequestDecisionNotificationTests
         Assert.AreEqual(MachineRequestPaymentStatus.Authorized, persisted.Status);
         Assert.IsNull(persisted.CancelledAtUtc);
         Assert.AreEqual(0, await db.EmailOutbox.CountAsync());
+    }
+
+    [TestMethod]
+    public async Task InitialAcceptRunsTransactionInsideSqlServerRetryingExecutionStrategy()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var probe = new DecisionTransactionProbe();
+        var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
+            .UseSqlite(connection)
+            .ReplaceService<IExecutionStrategyFactory, FinancialExecutionStrategyTests.RetryFactory>()
+            .AddInterceptors(probe)
+            .Options;
+        await using var db = new DecisionDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Companies (Id TEXT PRIMARY KEY);");
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Machines (Id TEXT PRIMARY KEY);");
+        var fixture = Fixture.Seed(db);
+
+        var result = await fixture.Service.CaptureFromAdminDecisionAsync(
+            fixture.PaymentId, fixture.PreparationCents, fixture.Request, default);
+
+        Assert.AreEqual("captured", result!.Status);
+        Assert.IsTrue(probe.ObservedRetryingStrategy);
+        Assert.AreEqual(MachineRequestPaymentStatus.Captured,
+            (await db.MachineRequestPayments.AsNoTracking().SingleAsync()).Status);
+        Assert.AreEqual(1, await db.EmailOutbox.CountAsync());
     }
 
     [TestMethod]
@@ -246,6 +277,30 @@ public sealed class MachineRequestDecisionNotificationTests
     private sealed class FixedTimeProvider : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => new(2026, 9, 25, 10, 0, 0, TimeSpan.Zero);
+    }
+
+    private sealed class DecisionTransactionProbe : DbTransactionInterceptor
+    {
+        public bool ObservedRetryingStrategy { get; private set; }
+
+        public override ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection,
+            TransactionEndEventData eventData, DbTransaction result, CancellationToken cancellationToken = default)
+        {
+            ObservedRetryingStrategy = ExecutionStrategy.Current is SqlServerRetryingExecutionStrategy;
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class DecisionDbContext(DbContextOptions<DiagLinkDbContext> options) : DiagLinkDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            var rowVersion = modelBuilder.Entity<EmailOutbox>().Property(item => item.RowVersion)
+                .ValueGeneratedNever().Metadata;
+            rowVersion.SetBeforeSaveBehavior(PropertySaveBehavior.Save);
+            rowVersion.SetAfterSaveBehavior(PropertySaveBehavior.Save);
+        }
     }
 
     private sealed class Gateway : IMachineRequestPaymentGateway

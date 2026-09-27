@@ -171,47 +171,54 @@ public sealed class MachineRequestPaymentStore(DiagLinkDbContext db)
 
         // Validate the immutable outbox value before opening the transaction or changing the payment.
         var pendingOutbox = EmailOutboxStore.CreatePending(notification, DateTime.UtcNow);
-        await using var transaction = db.Database.IsRelational()
-            ? await db.Database.BeginTransactionAsync(ct)
-            : null;
-        try
+        async Task<MachineRequestPayment> ExecuteAsync()
         {
-            var entity = await db.MachineRequestPayments.SingleAsync(item => item.Id == payment.PaymentRequestId, ct);
-            ValidateDecisionPayload(entity, target, notification.Payload);
-            if (entity.Status != target)
+            await using var transaction = db.Database.IsRelational()
+                ? await db.Database.BeginTransactionAsync(ct)
+                : null;
+            try
             {
-                EnsureVersion(entity, payment);
-                if (entity.Status != PaymentStatus.Authorized)
-                    throw new InvalidOperationException("Le paiement n'est pas dans l'état authorized.");
-                var now = DateTime.UtcNow;
-                entity.Status = target;
-                entity.UpdatedAtUtc = now;
-                if (target == PaymentStatus.Captured) entity.CapturedAtUtc = now;
-                else entity.CancelledAtUtc = now;
-            }
+                var entity = await db.MachineRequestPayments.SingleAsync(item => item.Id == payment.PaymentRequestId, ct);
+                ValidateDecisionPayload(entity, target, notification.Payload);
+                if (entity.Status != target)
+                {
+                    EnsureVersion(entity, payment);
+                    if (entity.Status != PaymentStatus.Authorized)
+                        throw new InvalidOperationException("Le paiement n'est pas dans l'état authorized.");
+                    var now = DateTime.UtcNow;
+                    entity.Status = target;
+                    entity.UpdatedAtUtc = now;
+                    if (target == PaymentStatus.Captured) entity.CapturedAtUtc = now;
+                    else entity.CancelledAtUtc = now;
+                }
 
-            var exists = await db.EmailOutbox.AnyAsync(item =>
-                item.MachineRequestId == pendingOutbox.MachineRequestId
-                && item.NotificationType == expectedNotification, ct);
-            if (!exists) db.EmailOutbox.Add(pendingOutbox);
-            await db.SaveChangesAsync(ct);
-            if (transaction is not null) await transaction.CommitAsync(ct);
-            return FromEntity(entity);
-        }
-        catch (DbUpdateException exception)
-        {
-            if (transaction is not null) await transaction.RollbackAsync(CancellationToken.None);
-            db.ChangeTracker.Clear();
-            var current = await GetAsync(payment.PaymentRequestId, CancellationToken.None);
-            var completedByAnotherInstance = current?.Status == targetStatus
-                && await db.EmailOutbox.AsNoTracking().AnyAsync(item =>
+                var exists = await db.EmailOutbox.AnyAsync(item =>
                     item.MachineRequestId == pendingOutbox.MachineRequestId
-                    && item.NotificationType == expectedNotification, CancellationToken.None);
-            return completedByAnotherInstance
-                ? current!
-                : throw new InvalidOperationException(
-                    "La décision financière et sa notification n'ont pas pu être enregistrées atomiquement.", exception);
+                    && item.NotificationType == expectedNotification, ct);
+                if (!exists) db.EmailOutbox.Add(pendingOutbox);
+                await db.SaveChangesAsync(ct);
+                if (transaction is not null) await transaction.CommitAsync(ct);
+                return FromEntity(entity);
+            }
+            catch (DbUpdateException exception)
+            {
+                if (transaction is not null) await transaction.RollbackAsync(CancellationToken.None);
+                db.ChangeTracker.Clear();
+                var current = await GetAsync(payment.PaymentRequestId, CancellationToken.None);
+                var completedByAnotherInstance = current?.Status == targetStatus
+                    && await db.EmailOutbox.AsNoTracking().AnyAsync(item =>
+                        item.MachineRequestId == pendingOutbox.MachineRequestId
+                        && item.NotificationType == expectedNotification, CancellationToken.None);
+                return completedByAnotherInstance
+                    ? current!
+                    : throw new InvalidOperationException(
+                        "La décision financière et sa notification n'ont pas pu être enregistrées atomiquement.", exception);
+            }
         }
+
+        if (!db.Database.IsRelational()) return await ExecuteAsync();
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(ExecuteAsync);
     }
 
     private static void ValidateDecisionPayload(PaymentEntity entity, PaymentStatus target, object payload)
