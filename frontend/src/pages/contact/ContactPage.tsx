@@ -3,13 +3,14 @@ import { ChatMultiple24Regular } from '@fluentui/react-icons';
 import { PublicHeader } from '../../components/marketing/PublicHeader';
 import { PublicFooter } from '../../components/marketing/ClosingSections';
 import { ContactSubmissionError, submitContact, type ContactFormValues } from '../../services/contactApi';
+import { APP_LOGIN_URL } from '../../config/origins';
 import landingStyles from '../landing/LandingPage.module.css';
 import styles from './ContactPage.module.css';
 
 const initialValues: ContactFormValues = { name: '', company: '', email: '', phone: '', message: '' };
 
 export function ContactPage({ isAuthenticated }: { isAuthenticated: boolean }) {
-  const loginTarget = isAuthenticated ? '/app' : '/login';
+  const loginTarget = APP_LOGIN_URL;
   const submissionLock = useRef(false);
   const [values, setValues] = useState(initialValues);
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');

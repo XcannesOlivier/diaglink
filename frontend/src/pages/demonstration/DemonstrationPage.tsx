@@ -2,6 +2,7 @@ import { Play24Filled } from '@fluentui/react-icons';
 import { Link } from 'react-router-dom';
 import { PublicHeader } from '../../components/marketing/PublicHeader';
 import { PublicFooter } from '../../components/marketing/ClosingSections';
+import { APP_LOGIN_URL } from '../../config/origins';
 import landingStyles from '../landing/LandingPage.module.css';
 import styles from './DemonstrationPage.module.css';
 
@@ -27,7 +28,7 @@ function VideoFrame({ source, label, mobile = false }: { source: string | null; 
 }
 
 export function DemonstrationPage({ isAuthenticated }: { isAuthenticated: boolean }) {
-  const loginTarget = isAuthenticated ? '/app' : '/login';
+  const loginTarget = APP_LOGIN_URL;
 
   return (
     <div className={landingStyles.page}>

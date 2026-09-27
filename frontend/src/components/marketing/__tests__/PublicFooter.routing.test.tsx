@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PublicFooter } from '../ClosingSections';
+import { APP_LOGIN_URL } from '../../../config/origins';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -21,13 +22,13 @@ describe('PublicFooter routing', () => {
     root = createRoot(container);
 
     await act(async () => {
-      root?.render(<MemoryRouter><PublicFooter loginTarget="/login" /></MemoryRouter>);
+      root?.render(<MemoryRouter><PublicFooter loginTarget={APP_LOGIN_URL} /></MemoryRouter>);
     });
 
     const loginLink = Array.from(container.querySelectorAll('a'))
       .find(link => link.textContent === 'Connexion');
 
-    expect(loginLink?.getAttribute('href')).toBe('/login');
+    expect(loginLink?.getAttribute('href')).toBe(APP_LOGIN_URL);
     expect(loginLink?.getAttribute('target')).toBe('_blank');
     expect(loginLink?.getAttribute('rel')).toBe('noopener noreferrer');
   });

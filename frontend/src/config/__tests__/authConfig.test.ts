@@ -20,4 +20,12 @@ describe('authConfig', () => {
     const { loginRequest } = await import('../../config/authConfig');
     expect(loginRequest.scopes[0]).toBe('api://backend-client-id/Chat.ReadWrite');
   });
+
+  it('keeps the current localhost origin in development', async () => {
+    vi.stubEnv('VITE_ENTRA_SPA_CLIENT_ID', 'spa-client-id');
+    vi.stubEnv('VITE_ENTRA_TENANT_ID', 'tenant-id');
+    const { msalConfig } = await import('../../config/authConfig');
+    expect(msalConfig.auth.redirectUri).toBe(window.location.origin);
+    expect(msalConfig.auth.postLogoutRedirectUri).toBe(window.location.origin);
+  });
 });

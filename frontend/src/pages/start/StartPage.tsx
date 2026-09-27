@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent,
 import { ArrowUpload24Regular } from '@fluentui/react-icons';
 import { PublicHeader } from '../../components/marketing/PublicHeader';
 import { PublicFooter } from '../../components/marketing/ClosingSections';
+import { APP_LOGIN_URL } from '../../config/origins';
 import landingStyles from '../landing/LandingPage.module.css';
 import styles from './StartPage.module.css';
 import { calculateMaximumAuthorizationPrice, calculatePreparationPrice } from './documentPricing';
@@ -56,7 +57,7 @@ function formatCents(cents: number) {
 }
 
 export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
-  const loginTarget = isAuthenticated ? '/app' : '/login';
+  const loginTarget = APP_LOGIN_URL;
   const inputRef = useRef<HTMLInputElement>(null);
   const nextFileId = useRef(0);
   const submissionLock = useRef(false);

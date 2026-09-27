@@ -276,6 +276,10 @@ app.UseStatusCodePages();
 // Map health checks
 app.MapDefaultEndpoints();
 
+// Keep the public website and authenticated application on their canonical hosts.
+// This only redirects explicit HTML routes; APIs and health probes stay on the requested host.
+app.UseDomainRouting();
+
 // Serve static files from wwwroot (frontend)
 app.UseDefaultFiles();
 app.UseStaticFiles();

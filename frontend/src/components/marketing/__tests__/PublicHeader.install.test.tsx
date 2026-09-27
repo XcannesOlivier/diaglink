@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PublicHeader } from '../PublicHeader';
+import { APP_INSTALL_URL, APP_LOGIN_URL } from '../../../config/origins';
 
 function Location() {
   return <span data-location>{useLocation().pathname}</span>;
@@ -25,7 +26,7 @@ describe('PublicHeader install shortcut', () => {
   const installButton = () => [...container.querySelectorAll('button')]
     .find(button => button.textContent === 'Installer DiagLink') as HTMLButtonElement;
   async function render(isAuthenticated: boolean) {
-    await act(async () => root.render(<MemoryRouter><PublicHeader loginTarget={isAuthenticated ? '/app' : '/login'}
+    await act(async () => root.render(<MemoryRouter><PublicHeader loginTarget={APP_LOGIN_URL}
       isAuthenticated={isAuthenticated} /><Location /></MemoryRouter>));
   }
 
@@ -35,7 +36,7 @@ describe('PublicHeader install shortcut', () => {
     await act(async () => installButton().click());
     expect(container.querySelector('[data-location]')?.textContent).toBe('/');
     expect(document.body.textContent).not.toContain('Créer un raccourci DiagLink');
-    expect(open).toHaveBeenCalledWith('/login?install=1', '_blank', 'noopener,noreferrer');
+    expect(open).toHaveBeenCalledWith(APP_INSTALL_URL, '_blank', 'noopener,noreferrer');
   });
 
   it('routes desktop and mobile primary actions to the existing machine setup flow', async () => {
@@ -53,7 +54,7 @@ describe('PublicHeader install shortcut', () => {
     expect(setupLinks()).toHaveLength(2);
     expect(setupLinks().every(link => link.getAttribute('href') === '/commencer')).toBe(true);
     expect(loginLinks()).toHaveLength(1);
-    expect(loginLinks()[0].getAttribute('href')).toBe('/login');
+    expect(loginLinks()[0].getAttribute('href')).toBe(APP_LOGIN_URL);
     expect(loginLinks()[0].getAttribute('target')).toBe('_blank');
     expect(loginLinks()[0].getAttribute('rel')).toBe('noopener noreferrer');
     await act(async () => setupLinks()[1].click());
@@ -68,7 +69,7 @@ describe('PublicHeader install shortcut', () => {
     const mobileInstallButton = [...container.querySelectorAll('button')]
       .find(button => button.textContent === 'Installer DiagLink');
     await act(async () => mobileInstallButton?.click());
-    expect(open).toHaveBeenCalledWith('/login?install=1', '_blank', 'noopener,noreferrer');
+    expect(open).toHaveBeenCalledWith(APP_INSTALL_URL, '_blank', 'noopener,noreferrer');
     expect(container.querySelector('[aria-label="Navigation mobile"]')).toBeNull();
   });
 });

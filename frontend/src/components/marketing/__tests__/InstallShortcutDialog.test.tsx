@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InstallShortcutDialog } from '../InstallShortcutDialog';
 import type { ShortcutBrowser, ShortcutPlatform } from '../../../utils/installShortcut';
+import { APP_LOGIN_URL } from '../../../config/origins';
 
 describe('InstallShortcutDialog', () => {
   let root: Root | null = null;
@@ -87,7 +88,7 @@ describe('InstallShortcutDialog', () => {
     const openButton = [...document.body.querySelectorAll('button')]
       .find(button => button.textContent === 'Ouvrir DiagLink');
     await act(async () => openButton?.click());
-    expect(open).toHaveBeenCalledWith('/login', '_blank', 'noopener,noreferrer');
+    expect(open).toHaveBeenCalledWith(APP_LOGIN_URL, '_blank', 'noopener,noreferrer');
   });
 
   it('uses the current login page without offering another navigation', async () => {

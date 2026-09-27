@@ -1,5 +1,6 @@
 import type { Configuration } from "@azure/msal-browser";
 import { LogLevel } from "@azure/msal-browser";
+import { getEntraRedirectOrigin } from './origins';
 
 // Environment variables (must be set during build or deployment)
 const clientId = import.meta.env.VITE_ENTRA_SPA_CLIENT_ID;
@@ -27,8 +28,8 @@ export const msalConfig: Configuration = {
   auth: {
     clientId: clientId,
     authority: `https://login.microsoftonline.com/${tenantId}`,
-    redirectUri: window.location.origin, // Will be https://<container-app-url> in production
-    postLogoutRedirectUri: window.location.origin,
+    redirectUri: getEntraRedirectOrigin(import.meta.env.DEV, window.location.origin),
+    postLogoutRedirectUri: getEntraRedirectOrigin(import.meta.env.DEV, window.location.origin),
     navigateToLoginRequestUrl: false, // Avoid redirect loops
   },
   cache: {

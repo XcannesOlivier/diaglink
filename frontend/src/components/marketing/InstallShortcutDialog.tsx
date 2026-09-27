@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from '@fluentui/react-components';
 import { detectShortcutBrowser, type ShortcutBrowser, type ShortcutPlatform } from '../../utils/installShortcut';
+import { APP_LOGIN_URL } from '../../config/origins';
 
 export function InstallShortcutDialog({ platform, onClose, browser = detectShortcutBrowser(), showOpenLoginButton = true }: {
   platform: ShortcutPlatform | null;
@@ -16,7 +17,7 @@ export function InstallShortcutDialog({ platform, onClose, browser = detectShort
   showOpenLoginButton?: boolean;
 }) {
   const mobile = platform === 'ios' || platform === 'android';
-  const openLogin = () => window.open('/login', '_blank', 'noopener,noreferrer');
+  const openLogin = () => window.open(APP_LOGIN_URL, '_blank', 'noopener,noreferrer');
   return (
     <Dialog open={platform !== null} onOpenChange={(_event, data) => !data.open && onClose()}>
       <DialogSurface>

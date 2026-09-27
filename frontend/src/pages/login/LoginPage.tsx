@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Button, Input, Spinner } from '@fluentui/react-components';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import logoDiagLink from '../../assets/Logo DiagLink.png';
 import { AIFoundryLogo } from '../../components/icons/AIFoundryLogo';
 import { InstallShortcutDialog } from '../../components/marketing/InstallShortcutDialog';
 import { detectShortcutPlatform, type ShortcutPlatform } from '../../utils/installShortcut';
+import { PUBLIC_ORIGIN } from '../../config/origins';
 import authStyles from '../../App.module.css';
 
 interface LoginPageProps {
@@ -84,7 +85,7 @@ export function LoginPage({ isCheckingSession, email, setEmail, emailCheckMessag
         )}
 
         <p className={authStyles.secureNote}>Connexion sécurisée</p>
-        <Link to="/" className={authStyles.returnHomeLink}>Site DiagLink</Link>
+        <a href={`${PUBLIC_ORIGIN}/`} className={authStyles.returnHomeLink}>Site DiagLink</a>
         <Button appearance="subtle" size="small" className={authStyles.installShortcutButton}
           onClick={() => setInstallDialog(detectShortcutPlatform())}>Installer DiagLink</Button>
         <div className={authStyles.poweredBy}>

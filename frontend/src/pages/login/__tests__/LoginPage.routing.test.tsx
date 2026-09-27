@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { LoginPage } from '../LoginPage';
+import { PUBLIC_ORIGIN } from '../../../config/origins';
 
 function Location() {
   const location = useLocation();
@@ -38,12 +39,8 @@ describe('LoginPage routing', () => {
 
     const homeLink = [...container.querySelectorAll('a')]
       .find(link => link.textContent === 'Site DiagLink');
-    expect(homeLink?.getAttribute('href')).toBe('/');
+    expect(homeLink?.getAttribute('href')).toBe(`${PUBLIC_ORIGIN}/`);
     expect(homeLink?.getAttribute('target')).toBeNull();
-
-    await act(async () => homeLink?.click());
-
-    expect(container.querySelector('[data-location]')?.textContent).toBe('/');
 
     await act(async () => root.unmount());
     container.remove();

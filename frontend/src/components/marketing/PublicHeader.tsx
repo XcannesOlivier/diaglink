@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Dismiss24Regular, Navigation24Regular } from '@fluentui/react-icons';
 import logoDiagLink from '../../assets/Logo DiagLink.png';
+import { APP_INSTALL_URL } from '../../config/origins';
 import styles from '../../pages/landing/LandingPage.module.css';
 
 const links = [['Pourquoi DiagLink ?', '#pourquoi'], ['Fonctionnalités', '#fonctionnalites'], ['Comment ça marche ?', '#fonctionnement'], ['Tarifs', '#tarifs']] as const;
@@ -11,7 +12,7 @@ export function PublicHeader({ loginTarget, landingPath = '' }: { loginTarget: s
   const landingHref = (hash: string) => `${landingPath}${hash}`;
   const install = () => {
     setMenuOpen(false);
-    window.open('/login?install=1', '_blank', 'noopener,noreferrer');
+    window.open(APP_INSTALL_URL, '_blank', 'noopener,noreferrer');
   };
   return (
     <header className={styles.header}>

@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { DocumentLock24Regular } from '@fluentui/react-icons';
 import { PublicHeader } from '../../components/marketing/PublicHeader';
 import { PublicFooter } from '../../components/marketing/ClosingSections';
+import { APP_LOGIN_URL } from '../../config/origins';
 import landingStyles from '../landing/LandingPage.module.css';
 import styles from './PrivacyPage.module.css';
 
@@ -30,7 +31,7 @@ const purposes = [
 const rights = ['Accès', 'Rectification', 'Effacement', 'Limitation', 'Opposition lorsque applicable', 'Portabilité lorsque applicable'];
 
 export function PrivacyPage({ isAuthenticated }: { isAuthenticated: boolean }) {
-  const loginTarget = isAuthenticated ? '/app' : '/login';
+  const loginTarget = APP_LOGIN_URL;
   return (
     <div className={landingStyles.page}>
       <PublicHeader loginTarget={loginTarget} isAuthenticated={isAuthenticated} landingPath="/" />

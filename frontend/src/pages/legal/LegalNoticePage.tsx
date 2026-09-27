@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { PublicHeader } from '../../components/marketing/PublicHeader';
 import { PublicFooter } from '../../components/marketing/ClosingSections';
+import { APP_LOGIN_URL } from '../../config/origins';
 import landingStyles from '../landing/LandingPage.module.css';
 import legalStyles from '../privacy/PrivacyPage.module.css';
 
@@ -17,7 +18,7 @@ const publisherDetails: Array<{ label: string; value: string | null }> = [
 ];
 
 export function LegalNoticePage({ isAuthenticated }: { isAuthenticated: boolean }) {
-  const loginTarget = isAuthenticated ? '/app' : '/login';
+  const loginTarget = APP_LOGIN_URL;
   const completedPublisherDetails = publisherDetails.filter(
     (detail): detail is { label: string; value: string } => detail.value !== null,
   );
