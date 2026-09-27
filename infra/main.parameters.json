@@ -38,6 +38,12 @@
     "stripeSecretKey": {
       "value": "${STRIPE_SECRET_KEY}"
     },
+    "stripeMachineRequestReturnUrl": {
+      "value": "${STRIPE_MACHINE_REQUEST_RETURN_URL=https://diaglink.com/commencer}"
+    },
+    "stripeMachineRequestAppReturnUrl": {
+      "value": "${STRIPE_MACHINE_REQUEST_APP_RETURN_URL=https://app.diaglink.com/app/checkout-return}"
+    },
     "customDomainName": {
       "value": "${CUSTOM_DOMAIN_NAME=app.diaglink.com}"
     },

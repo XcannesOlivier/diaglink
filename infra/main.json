@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "14450039008923501187"
+      "templateHash": "7973582102217620079"
     }
   },
   "parameters": {
@@ -102,6 +102,20 @@
       "type": "securestring",
       "metadata": {
         "description": "Stripe secret key used by payment services; supply from azd secret STRIPE_SECRET_KEY."
+      }
+    },
+    "stripeMachineRequestReturnUrl": {
+      "type": "string",
+      "defaultValue": "https://diaglink.com/commencer",
+      "metadata": {
+        "description": "Stripe Checkout return URL for the public first-machine request flow."
+      }
+    },
+    "stripeMachineRequestAppReturnUrl": {
+      "type": "string",
+      "defaultValue": "https://app.diaglink.com/app/checkout-return",
+      "metadata": {
+        "description": "Stripe Checkout return URL for authenticated application machine requests."
       }
     },
     "customDomainName": {
@@ -1249,6 +1263,12 @@
           "stripeSecretKey": {
             "value": "[parameters('stripeSecretKey')]"
           },
+          "stripeMachineRequestReturnUrl": {
+            "value": "[parameters('stripeMachineRequestReturnUrl')]"
+          },
+          "stripeMachineRequestAppReturnUrl": {
+            "value": "[parameters('stripeMachineRequestAppReturnUrl')]"
+          },
           "customDomainName": {
             "value": "[parameters('customDomainName')]"
           },
@@ -1269,7 +1289,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "3808104176058951057"
+              "templateHash": "1296114843000888073"
             }
           },
           "parameters": {
@@ -1342,6 +1362,18 @@
             },
             "stripeSecretKey": {
               "type": "securestring"
+            },
+            "stripeMachineRequestReturnUrl": {
+              "type": "string",
+              "metadata": {
+                "description": "Stripe Checkout return URL for the public first-machine request flow."
+              }
+            },
+            "stripeMachineRequestAppReturnUrl": {
+              "type": "string",
+              "metadata": {
+                "description": "Stripe Checkout return URL for authenticated application machine requests."
+              }
             },
             "customDomainName": {
               "type": "string",
@@ -1520,6 +1552,14 @@
               {
                 "name": "STRIPE_SECRET_KEY",
                 "secretRef": "stripe-secret-key"
+              },
+              {
+                "name": "STRIPE_MACHINE_REQUEST_RETURN_URL",
+                "value": "[parameters('stripeMachineRequestReturnUrl')]"
+              },
+              {
+                "name": "STRIPE_MACHINE_REQUEST_APP_RETURN_URL",
+                "value": "[parameters('stripeMachineRequestAppReturnUrl')]"
               }
             ],
             "containerSecrets": [

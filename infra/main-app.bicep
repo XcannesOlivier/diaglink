@@ -23,6 +23,10 @@ param azureStorageConnectionString string
 param contactRecipientAddress string
 @secure()
 param stripeSecretKey string
+@description('Stripe Checkout return URL for the public first-machine request flow.')
+param stripeMachineRequestReturnUrl string
+@description('Stripe Checkout return URL for authenticated application machine requests.')
+param stripeMachineRequestAppReturnUrl string
 @description('Custom domain bound to the Container App ingress.')
 param customDomainName string
 @description('Name of the existing Container Apps managed certificate.')
@@ -146,6 +150,14 @@ var stripeEnv = [
   {
     name: 'STRIPE_SECRET_KEY'
     secretRef: 'stripe-secret-key'
+  }
+  {
+    name: 'STRIPE_MACHINE_REQUEST_RETURN_URL'
+    value: stripeMachineRequestReturnUrl
+  }
+  {
+    name: 'STRIPE_MACHINE_REQUEST_APP_RETURN_URL'
+    value: stripeMachineRequestAppReturnUrl
   }
 ]
 
