@@ -27,6 +27,10 @@ param stripeSecretKey string
 param customDomainName string
 @description('Name of the existing Container Apps managed certificate.')
 param customDomainCertificateName string
+@description('Public custom domain bound to the same Container App ingress.')
+param publicCustomDomainName string
+@description('Name of the existing Container Apps managed certificate for the public domain.')
+param publicCustomDomainCertificateName string = ''
 
 var abbrs = loadJsonContent('./abbreviations.json')
 
@@ -37,6 +41,11 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-03-01'
 resource customDomainCertificate 'Microsoft.App/managedEnvironments/managedCertificates@2024-03-01' existing = {
   parent: containerAppsEnvironment
   name: customDomainCertificateName
+}
+
+resource publicCustomDomainCertificate 'Microsoft.App/managedEnvironments/managedCertificates@2024-03-01' existing = if (!empty(publicCustomDomainCertificateName)) {
+  parent: containerAppsEnvironment
+  name: publicCustomDomainCertificateName
 }
 
 // Base env vars always present
@@ -196,13 +205,19 @@ module webApp './core/host/container-app.bicep' = {
     healthProbePath: '/api/health'
     userAssignedIdentityId: userAssignedIdentityId
     secrets: containerSecrets
-    customDomains: [
+    customDomains: concat([
       {
         name: customDomainName
         bindingType: 'SniEnabled'
         certificateId: customDomainCertificate.id
       }
-    ]
+    ], !empty(publicCustomDomainCertificateName) ? [
+      {
+        name: publicCustomDomainName
+        bindingType: 'SniEnabled'
+        certificateId: publicCustomDomainCertificate!.id
+      }
+    ] : [])
   }
 }
 

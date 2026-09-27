@@ -43,6 +43,12 @@
     },
     "customDomainCertificateName": {
       "value": "${CUSTOM_DOMAIN_CERTIFICATE_NAME=app.diaglink.com-cae-yhob-260911101349}"
+    },
+    "publicCustomDomainName": {
+      "value": "${PUBLIC_CUSTOM_DOMAIN_NAME=diaglink.com}"
+    },
+    "publicCustomDomainCertificateName": {
+      "value": "${PUBLIC_CUSTOM_DOMAIN_CERTIFICATE_NAME=}"
     }
   }
 }

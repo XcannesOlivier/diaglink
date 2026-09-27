@@ -56,6 +56,12 @@ param customDomainName string
 @description('Name of the existing Container Apps managed certificate.')
 param customDomainCertificateName string
 
+@description('Public custom domain bound to the same Container App ingress.')
+param publicCustomDomainName string
+
+@description('Name of the existing Container Apps managed certificate for the public domain.')
+param publicCustomDomainCertificateName string = ''
+
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var appTags = {
@@ -122,6 +128,8 @@ module app 'main-app.bicep' = {
     stripeSecretKey: stripeSecretKey
     customDomainName: customDomainName
     customDomainCertificateName: customDomainCertificateName
+    publicCustomDomainName: publicCustomDomainName
+    publicCustomDomainCertificateName: publicCustomDomainCertificateName
   }
 }
 

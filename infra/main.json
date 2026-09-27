@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "16588542420646812641"
+      "templateHash": "14450039008923501187"
     }
   },
   "parameters": {
@@ -114,6 +114,19 @@
       "type": "string",
       "metadata": {
         "description": "Name of the existing Container Apps managed certificate."
+      }
+    },
+    "publicCustomDomainName": {
+      "type": "string",
+      "metadata": {
+        "description": "Public custom domain bound to the same Container App ingress."
+      }
+    },
+    "publicCustomDomainCertificateName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of the existing Container Apps managed certificate for the public domain."
       }
     }
   },
@@ -1241,6 +1254,12 @@
           },
           "customDomainCertificateName": {
             "value": "[parameters('customDomainCertificateName')]"
+          },
+          "publicCustomDomainName": {
+            "value": "[parameters('publicCustomDomainName')]"
+          },
+          "publicCustomDomainCertificateName": {
+            "value": "[parameters('publicCustomDomainCertificateName')]"
           }
         },
         "template": {
@@ -1250,7 +1269,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "13933245214537296825"
+              "templateHash": "3808104176058951057"
             }
           },
           "parameters": {
@@ -1334,6 +1353,19 @@
               "type": "string",
               "metadata": {
                 "description": "Name of the existing Container Apps managed certificate."
+              }
+            },
+            "publicCustomDomainName": {
+              "type": "string",
+              "metadata": {
+                "description": "Public custom domain bound to the same Container App ingress."
+              }
+            },
+            "publicCustomDomainCertificateName": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Name of the existing Container Apps managed certificate for the public domain."
               }
             }
           },
@@ -1563,13 +1595,7 @@
                     "value": "[variables('containerSecrets')]"
                   },
                   "customDomains": {
-                    "value": [
-                      {
-                        "name": "[parameters('customDomainName')]",
-                        "bindingType": "SniEnabled",
-                        "certificateId": "[resourceId('Microsoft.App/managedEnvironments/managedCertificates', last(split(parameters('containerAppsEnvironmentId'), '/')), parameters('customDomainCertificateName'))]"
-                      }
-                    ]
+                    "value": "[concat(createArray(createObject('name', parameters('customDomainName'), 'bindingType', 'SniEnabled', 'certificateId', resourceId('Microsoft.App/managedEnvironments/managedCertificates', last(split(parameters('containerAppsEnvironmentId'), '/')), parameters('customDomainCertificateName')))), if(not(empty(parameters('publicCustomDomainCertificateName'))), createArray(createObject('name', parameters('publicCustomDomainName'), 'bindingType', 'SniEnabled', 'certificateId', resourceId('Microsoft.App/managedEnvironments/managedCertificates', last(split(parameters('containerAppsEnvironmentId'), '/')), parameters('publicCustomDomainCertificateName')))), createArray()))]"
                   }
                 },
                 "template": {
