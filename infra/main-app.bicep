@@ -23,6 +23,8 @@ param azureStorageConnectionString string
 param contactRecipientAddress string
 @secure()
 param stripeSecretKey string
+@description('Enable Stripe payment flows.')
+param stripeEnabled bool
 @description('Stripe Checkout return URL for the public first-machine request flow.')
 param stripeMachineRequestReturnUrl string
 @description('Stripe Checkout return URL for authenticated application machine requests.')
@@ -150,6 +152,10 @@ var stripeEnv = [
   {
     name: 'STRIPE_SECRET_KEY'
     secretRef: 'stripe-secret-key'
+  }
+  {
+    name: 'STRIPE_ENABLED'
+    value: string(stripeEnabled)
   }
   {
     name: 'STRIPE_MACHINE_REQUEST_RETURN_URL'

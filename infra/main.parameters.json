@@ -38,6 +38,9 @@
     "stripeSecretKey": {
       "value": "${STRIPE_SECRET_KEY}"
     },
+    "stripeEnabled": {
+      "value": "${STRIPE_ENABLED=true}"
+    },
     "stripeMachineRequestReturnUrl": {
       "value": "${STRIPE_MACHINE_REQUEST_RETURN_URL=https://diaglink.com/commencer}"
     },

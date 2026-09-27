@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7973582102217620079"
+      "templateHash": "15837794895217729573"
     }
   },
   "parameters": {
@@ -102,6 +102,13 @@
       "type": "securestring",
       "metadata": {
         "description": "Stripe secret key used by payment services; supply from azd secret STRIPE_SECRET_KEY."
+      }
+    },
+    "stripeEnabled": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Enable Stripe payment flows."
       }
     },
     "stripeMachineRequestReturnUrl": {
@@ -1263,6 +1270,9 @@
           "stripeSecretKey": {
             "value": "[parameters('stripeSecretKey')]"
           },
+          "stripeEnabled": {
+            "value": "[parameters('stripeEnabled')]"
+          },
           "stripeMachineRequestReturnUrl": {
             "value": "[parameters('stripeMachineRequestReturnUrl')]"
           },
@@ -1289,7 +1299,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "1296114843000888073"
+              "templateHash": "9866102124383269234"
             }
           },
           "parameters": {
@@ -1362,6 +1372,12 @@
             },
             "stripeSecretKey": {
               "type": "securestring"
+            },
+            "stripeEnabled": {
+              "type": "bool",
+              "metadata": {
+                "description": "Enable Stripe payment flows."
+              }
             },
             "stripeMachineRequestReturnUrl": {
               "type": "string",
@@ -1552,6 +1568,10 @@
               {
                 "name": "STRIPE_SECRET_KEY",
                 "secretRef": "stripe-secret-key"
+              },
+              {
+                "name": "STRIPE_ENABLED",
+                "value": "[string(parameters('stripeEnabled'))]"
               },
               {
                 "name": "STRIPE_MACHINE_REQUEST_RETURN_URL",

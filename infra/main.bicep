@@ -50,6 +50,9 @@ param contactRecipientAddress string
 @description('Stripe secret key used by payment services; supply from azd secret STRIPE_SECRET_KEY.')
 param stripeSecretKey string
 
+@description('Enable Stripe payment flows.')
+param stripeEnabled bool = true
+
 @description('Stripe Checkout return URL for the public first-machine request flow.')
 param stripeMachineRequestReturnUrl string = 'https://diaglink.com/commencer'
 
@@ -132,6 +135,7 @@ module app 'main-app.bicep' = {
     azureStorageConnectionString: azureStorageConnectionString
     contactRecipientAddress: contactRecipientAddress
     stripeSecretKey: stripeSecretKey
+    stripeEnabled: stripeEnabled
     stripeMachineRequestReturnUrl: stripeMachineRequestReturnUrl
     stripeMachineRequestAppReturnUrl: stripeMachineRequestAppReturnUrl
     customDomainName: customDomainName
