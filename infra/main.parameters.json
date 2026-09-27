@@ -35,6 +35,9 @@
     "contactRecipientAddress": {
       "value": "${CONTACT_RECIPIENT_ADDRESS}"
     },
+    "stripeSecretKey": {
+      "value": "${STRIPE_SECRET_KEY}"
+    },
     "customDomainName": {
       "value": "${CUSTOM_DOMAIN_NAME=app.diaglink.com}"
     },

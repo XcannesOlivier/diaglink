@@ -21,6 +21,8 @@ param authOtpPepper string
 param azureStorageConnectionString string
 @secure()
 param contactRecipientAddress string
+@secure()
+param stripeSecretKey string
 @description('Custom domain bound to the Container App ingress.')
 param customDomainName string
 @description('Name of the existing Container Apps managed certificate.')
@@ -131,6 +133,13 @@ var contactEnv = [
   }
 ]
 
+var stripeEnv = [
+  {
+    name: 'STRIPE_SECRET_KEY'
+    secretRef: 'stripe-secret-key'
+  }
+]
+
 var containerSecrets = [
   {
     name: 'auth-otp-pepper'
@@ -143,6 +152,10 @@ var containerSecrets = [
   {
     name: 'contact-recipient-address'
     value: contactRecipientAddress
+  }
+  {
+    name: 'stripe-secret-key'
+    value: stripeSecretKey
   }
 ]
 
@@ -164,7 +177,7 @@ var pricingIdentityEnvGroups = [for (identity, index) in pricingIdentities: [
 ]]
 var pricingIdentityEnv = flatten(pricingIdentityEnvGroups)
 
-var containerEnv = concat(baseEnv, miEnv, oboEnv, diagLinkEnv, emailEnv, authEnv, storageEnv, contactEnv, pricingIdentityEnv)
+var containerEnv = concat(baseEnv, miEnv, oboEnv, diagLinkEnv, emailEnv, authEnv, storageEnv, contactEnv, stripeEnv, pricingIdentityEnv)
 
 // Single Container App - serves both frontend and backend
 module webApp './core/host/container-app.bicep' = {

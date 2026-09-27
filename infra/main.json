@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "13647891604769760895"
+      "templateHash": "16588542420646812641"
     }
   },
   "parameters": {
@@ -96,6 +96,12 @@
       "type": "securestring",
       "metadata": {
         "description": "Email address that receives submissions from the public contact form."
+      }
+    },
+    "stripeSecretKey": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Stripe secret key used by payment services; supply from azd secret STRIPE_SECRET_KEY."
       }
     },
     "customDomainName": {
@@ -1227,6 +1233,9 @@
           "contactRecipientAddress": {
             "value": "[parameters('contactRecipientAddress')]"
           },
+          "stripeSecretKey": {
+            "value": "[parameters('stripeSecretKey')]"
+          },
           "customDomainName": {
             "value": "[parameters('customDomainName')]"
           },
@@ -1241,7 +1250,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "10913548432414877882"
+              "templateHash": "13933245214537296825"
             }
           },
           "parameters": {
@@ -1310,6 +1319,9 @@
               "type": "securestring"
             },
             "contactRecipientAddress": {
+              "type": "securestring"
+            },
+            "stripeSecretKey": {
               "type": "securestring"
             },
             "customDomainName": {
@@ -1472,6 +1484,12 @@
                 "secretRef": "contact-recipient-address"
               }
             ],
+            "stripeEnv": [
+              {
+                "name": "STRIPE_SECRET_KEY",
+                "secretRef": "stripe-secret-key"
+              }
+            ],
             "containerSecrets": [
               {
                 "name": "auth-otp-pepper",
@@ -1484,11 +1502,15 @@
               {
                 "name": "contact-recipient-address",
                 "value": "[parameters('contactRecipientAddress')]"
+              },
+              {
+                "name": "stripe-secret-key",
+                "value": "[parameters('stripeSecretKey')]"
               }
             ],
             "pricingIdentities": "[variables('$fxv#1').AiPricingIdentity.Deployments]",
             "pricingIdentityEnv": "[flatten(variables('pricingIdentityEnvGroups'))]",
-            "containerEnv": "[concat(variables('baseEnv'), variables('miEnv'), variables('oboEnv'), variables('diagLinkEnv'), variables('emailEnv'), variables('authEnv'), variables('storageEnv'), variables('contactEnv'), variables('pricingIdentityEnv'))]"
+            "containerEnv": "[concat(variables('baseEnv'), variables('miEnv'), variables('oboEnv'), variables('diagLinkEnv'), variables('emailEnv'), variables('authEnv'), variables('storageEnv'), variables('contactEnv'), variables('stripeEnv'), variables('pricingIdentityEnv'))]"
           },
           "resources": [
             {

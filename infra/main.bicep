@@ -46,6 +46,10 @@ param azureStorageConnectionString string
 @description('Email address that receives submissions from the public contact form.')
 param contactRecipientAddress string
 
+@secure()
+@description('Stripe secret key used by payment services; supply from azd secret STRIPE_SECRET_KEY.')
+param stripeSecretKey string
+
 @description('Custom domain bound to the Container App ingress.')
 param customDomainName string
 
@@ -115,6 +119,7 @@ module app 'main-app.bicep' = {
     authOtpPepper: authOtpPepper
     azureStorageConnectionString: azureStorageConnectionString
     contactRecipientAddress: contactRecipientAddress
+    stripeSecretKey: stripeSecretKey
     customDomainName: customDomainName
     customDomainCertificateName: customDomainCertificateName
   }
