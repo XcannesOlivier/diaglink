@@ -9,7 +9,7 @@ import { calculateMaximumAuthorizationPrice, calculatePreparationPrice } from '.
 import { trimStartFormValues, validateStartForm, type RequiredStartField, type StartFormValues } from './startFormValidation';
 import { MachineRequestSubmissionError, submitMachineRequest, type MachineRequestResponse } from '../../services/machineRequestApi';
 import { createMachineRequestPayment, MachineRequestPaymentTerminalError, waitForMachineRequestAuthorization } from '../../services/machineRequestPaymentApi';
-import { authorizationConfirmedMessage, checkoutReturnedMessage, checkoutWindowName, isCheckoutReturnWindow, isTrustedCheckoutMessage, requestSubmittedMessage } from './checkoutPopup';
+import { authorizationConfirmedMessage, checkoutReturnedMessage, checkoutWindowName, isCheckoutReturnWindow, isTrustedPublicCheckoutMessage, isTrustedPublicCheckoutOpenerMessage, postPublicCheckoutMessage, requestSubmittedMessage } from './checkoutPopup';
 import { formatFileSize, inspectPdfFiles, type SelectedPdf } from './pdfSelection';
 
 const steps = ['Coordonnées', 'Machine', 'Documents', 'Récapitulatif'];
@@ -65,6 +65,7 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
   const checkoutWindow = useRef<Window | null>(null);
   const isCheckoutReturn = useMemo(isCheckoutReturnWindow, []);
   const [returnAuthorizationConfirmed, setReturnAuthorizationConfirmed] = useState(false);
+  const [returnVerificationError, setReturnVerificationError] = useState<string | null>(null);
   const [checkoutReturnObserved, setCheckoutReturnObserved] = useState(false);
   const [selectedPdfs, setSelectedPdfs] = useState<SelectedPdf[]>([]);
   const [fileErrors, setFileErrors] = useState<string[]>([]);
@@ -87,24 +88,42 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
   useEffect(() => {
     if (isCheckoutReturn) {
       const opener = window.opener;
-      if (!opener) return;
-
-      opener.postMessage({ type: checkoutReturnedMessage }, window.location.origin);
       const handleOpenerMessage = (event: MessageEvent) => {
-        if (event.origin !== window.location.origin || event.source !== opener || !event.data || typeof event.data !== 'object') return;
+        if (!opener || !isTrustedPublicCheckoutOpenerMessage(event, opener, event.data?.type)) return;
         if (event.data.type === authorizationConfirmedMessage) setReturnAuthorizationConfirmed(true);
         if (event.data.type === requestSubmittedMessage) window.close();
       };
       window.addEventListener('message', handleOpenerMessage);
-      return () => window.removeEventListener('message', handleOpenerMessage);
+      if (opener) postPublicCheckoutMessage(opener, checkoutReturnedMessage);
+
+      let cancelled = false;
+      const verifyAuthorization = async () => {
+        const storedAttempt = readPaymentAttempt();
+        if (!storedAttempt?.paymentRequestId) return;
+        try {
+          if (!storedAttempt.authorized) await waitForMachineRequestAuthorization(storedAttempt.paymentRequestId);
+          if (cancelled) return;
+          storedAttempt.authorized = true;
+          writePaymentAttempt(storedAttempt);
+          setReturnAuthorizationConfirmed(true);
+          if (opener) postPublicCheckoutMessage(opener, authorizationConfirmedMessage);
+        } catch (error) {
+          if (!cancelled) setReturnVerificationError(error instanceof Error ? error.message : 'La vérification du paiement a échoué.');
+        }
+      };
+      void verifyAuthorization();
+      return () => {
+        cancelled = true;
+        window.removeEventListener('message', handleOpenerMessage);
+      };
     }
 
     const handleCheckoutMessage = (event: MessageEvent) => {
       const popup = checkoutWindow.current;
-      if (!isTrustedCheckoutMessage(event, popup, checkoutReturnedMessage)) return;
+      if (!isTrustedPublicCheckoutMessage(event, popup, checkoutReturnedMessage)) return;
       setCheckoutReturnObserved(true);
       if (paymentAttempt.current?.authorized) {
-        popup!.postMessage({ type: authorizationConfirmedMessage }, window.location.origin);
+        postPublicCheckoutMessage(popup!, authorizationConfirmedMessage);
       }
     };
     window.addEventListener('message', handleCheckoutMessage);
@@ -221,7 +240,7 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
         await waitForMachineRequestAuthorization(paymentRequestId);
         paymentAttempt.current.authorized = true;
         writePaymentAttempt(paymentAttempt.current);
-        checkoutWindow.current?.postMessage({ type: authorizationConfirmedMessage }, window.location.origin);
+        if (checkoutWindow.current) postPublicCheckoutMessage(checkoutWindow.current, authorizationConfirmedMessage);
       }
       setSubmissionPhase('uploading');
       const completedRequest = await submitMachineRequest(trimmedValues, selectedPdfs.map(pdf => pdf.file), paymentRequestId);
@@ -229,7 +248,7 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
       localStorage.removeItem(paymentAttemptStorageKey);
       paymentAttempt.current = null;
       window.focus();
-      checkoutWindow.current?.postMessage({ type: requestSubmittedMessage }, window.location.origin);
+      if (checkoutWindow.current) postPublicCheckoutMessage(checkoutWindow.current, requestSubmittedMessage);
       checkoutWindow.current?.close();
     } catch (error) {
       if (!paymentAttempt.current?.paymentRequestId) checkoutWindow.current?.close();
@@ -272,9 +291,9 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
               <h2 id="checkout-return-title">{returnAuthorizationConfirmed
                 ? 'Paiement autorisé — finalisation de votre demande…'
                 : 'Vérification de votre autorisation en cours…'}</h2>
-              <p>{window.opener
+              <p>{returnVerificationError ?? (window.opener
                 ? 'Votre demande est finalisée dans l’onglet d’origine. Cette fenêtre se fermera automatiquement une fois la transmission confirmée.'
-                : 'Revenez à l’onglet d’origine pour suivre la finalisation de votre demande. Vous pouvez fermer cette fenêtre.'}</p>
+                : 'Revenez à l’onglet d’origine pour suivre la finalisation de votre demande. Vous pouvez fermer cette fenêtre.')}</p>
             </div>
           </section>
         ) : confirmation ? (

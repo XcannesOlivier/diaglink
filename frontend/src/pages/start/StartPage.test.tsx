@@ -132,6 +132,28 @@ describe('/commencer submission', () => {
       { type: 'diaglink:machine-request-checkout-returned' }, window.location.origin);
   });
 
+  it('verifies a persisted public payment from the Checkout return window', async () => {
+    const opener = { postMessage: vi.fn() } as unknown as Window;
+    window.name = 'diaglink-machine-request-checkout';
+    Object.defineProperty(window, 'opener', { configurable: true, value: opener });
+    localStorage.setItem('diaglink:initial-machine-payment-attempt', JSON.stringify({
+      idempotencyKey: '11111111-1111-4111-8111-111111111111',
+      totalPages: 12,
+      email: 'claire@example.com',
+      paymentRequestId: 'payment-42',
+      checkoutUrl: 'https://checkout.stripe.test/session',
+      authorized: false,
+    }));
+
+    await renderPage();
+
+    expect(mocks.waitForAuthorization).toHaveBeenCalledWith('payment-42');
+    expect(host.textContent).toContain('Paiement autorisé — finalisation de votre demande…');
+    expect(JSON.parse(localStorage.getItem('diaglink:initial-machine-payment-attempt')!).authorized).toBe(true);
+    expect(opener.postMessage).toHaveBeenCalledWith(
+      { type: 'diaglink:machine-request-authorization-confirmed' }, 'https://app.diaglink.com');
+  });
+
   it('handles a Checkout return without opener without showing an empty form', async () => {
     window.name = 'diaglink-machine-request-checkout';
 
@@ -203,7 +225,7 @@ describe('/commencer submission', () => {
 
     await act(async () => window.dispatchEvent(new MessageEvent('message', {
       data: { type: 'diaglink:machine-request-checkout-returned' },
-      origin: window.location.origin,
+      origin: 'https://diaglink.com',
       source: checkoutPopup as unknown as Window,
     })));
     expect(mocks.submitMachineRequest).not.toHaveBeenCalled();
