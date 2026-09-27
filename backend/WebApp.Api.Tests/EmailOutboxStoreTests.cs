@@ -1,4 +1,8 @@
+using System.Data;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -68,6 +72,57 @@ public class EmailOutboxStoreTests
     }
 
     [TestMethod]
+    public async Task ClaimRunsSerializableTransactionInsideRetryStrategy()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var probe = new ClaimTransactionProbe();
+        var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
+            .UseSqlite(connection)
+            .ReplaceService<IExecutionStrategyFactory, FinancialExecutionStrategyTests.RetryFactory>()
+            .AddInterceptors(probe)
+            .Options;
+        await using var db = new DiagLinkDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var store = new EmailOutboxStore(db, TimeProvider.System);
+        await SeedRelationalOutboxAsync(db);
+        probe.Enable();
+
+        var claimed = await store.ClaimEligibleAsync(10, TimeSpan.FromMinutes(2));
+
+        Assert.AreEqual(1, claimed.Count);
+        Assert.AreEqual(1, probe.TransactionCount);
+        Assert.AreEqual(IsolationLevel.Serializable, probe.IsolationLevel);
+    }
+
+    [TestMethod]
+    public async Task ClaimRetriesWholeTransactionWithoutDuplicateClaim()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var probe = new ClaimTransactionProbe(failFirstCommit: true);
+        var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
+            .UseSqlite(connection)
+            .ReplaceService<IExecutionStrategyFactory, FinancialExecutionStrategyTests.RetryFactory>()
+            .AddInterceptors(probe)
+            .Options;
+        await using var db = new DiagLinkDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var store = new EmailOutboxStore(db, TimeProvider.System);
+        await SeedRelationalOutboxAsync(db);
+        probe.Enable();
+
+        var claimed = await store.ClaimEligibleAsync(10, TimeSpan.FromMinutes(2));
+
+        Assert.AreEqual(1, claimed.Count);
+        Assert.AreEqual(2, probe.TransactionCount);
+        Assert.AreEqual(1, probe.CommitFailures);
+        var persisted = await db.EmailOutbox.AsNoTracking().SingleAsync();
+        Assert.AreEqual(claimed[0].LeaseId, persisted.LeaseId);
+        Assert.IsNotNull(persisted.LockedUntilUtc);
+    }
+
+    [TestMethod]
     public async Task MarkSentRequiresLeaseAndPersistsProviderOperationId()
     {
         await using var fixture = Fixture.Create();
@@ -113,6 +168,53 @@ public class EmailOutboxStoreTests
 
     private static EmailOutboxEnqueue Request(string requestId, EmailNotificationType type) => new(
         requestId, Guid.NewGuid(), type, "client@example.test", "Client", new { machineName = "Machine A" });
+
+    private static Task SeedRelationalOutboxAsync(DiagLinkDbContext db)
+    {
+        var id = Guid.NewGuid();
+        var requestId = Guid.NewGuid().ToString("N");
+        var now = DateTime.UtcNow.AddMinutes(-1);
+        var recipientEmail = "client@example.test";
+        var payloadJson = "{}";
+        return db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO EmailOutbox
+                (Id, MachineRequestId, PaymentRequestId, NotificationType, RecipientEmail, RecipientName,
+                 PayloadJson, Status, AttemptCount, NextAttemptAtUtc, LeaseId, LockedUntilUtc,
+                 LastAttemptAtUtc, SentAtUtc, ProviderOperationId, LastError, CreatedAtUtc, RowVersion)
+            VALUES
+                ({id}, {requestId}, NULL, {(int)EmailNotificationType.RequestReceived}, {recipientEmail}, NULL,
+                 {payloadJson}, {(int)EmailOutboxStatus.Pending}, 0, {now}, NULL, NULL,
+                 NULL, NULL, NULL, NULL, {now}, {new byte[] { 1 }})
+            """);
+    }
+
+    private sealed class ClaimTransactionProbe(bool failFirstCommit = false) : DbTransactionInterceptor
+    {
+        private bool enabled;
+        public int TransactionCount { get; private set; }
+        public int CommitFailures { get; private set; }
+        public IsolationLevel? IsolationLevel { get; private set; }
+
+        public void Enable() => enabled = true;
+
+        public override ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection,
+            TransactionEndEventData eventData, DbTransaction result, CancellationToken cancellationToken = default)
+        {
+            if (!enabled) return ValueTask.FromResult(result);
+            Assert.IsInstanceOfType<SqlServerRetryingExecutionStrategy>(ExecutionStrategy.Current);
+            TransactionCount++;
+            IsolationLevel = result.IsolationLevel;
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction,
+            TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+        {
+            if (!enabled || !failFirstCommit || CommitFailures != 0) return ValueTask.FromResult(result);
+            CommitFailures++;
+            throw new TimeoutException("Local simulated transient failure before commit.");
+        }
+    }
 
     private sealed class Fixture : IAsyncDisposable, IDisposable
     {

@@ -70,39 +70,43 @@ public sealed class EmailOutboxStore(DiagLinkDbContext db, TimeProvider timeProv
     {
         if (batchSize is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(batchSize));
         if (leaseDuration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(leaseDuration));
-        var now = timeProvider.GetUtcNow().UtcDateTime;
-        var provider = db.Database.ProviderName ?? "";
-
-        await using var transaction = db.Database.IsRelational()
-            ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct)
-            : null;
-        IQueryable<EmailOutbox> query = db.EmailOutbox;
-        if (provider.Contains("SqlServer", StringComparison.OrdinalIgnoreCase))
-            query = db.EmailOutbox.FromSqlInterpolated($@"
-                SELECT TOP ({batchSize}) * FROM [dbo].[EmailOutbox] WITH (UPDLOCK, READPAST, ROWLOCK)
-                WHERE [Status] = {(int)EmailOutboxStatus.Pending}
-                  AND [NextAttemptAtUtc] <= {now}
-                  AND ([LockedUntilUtc] IS NULL OR [LockedUntilUtc] <= {now})
-                ORDER BY [CreatedAtUtc], [Id]");
-        else
-            query = query.Where(item => item.Status == EmailOutboxStatus.Pending
-                    && item.NextAttemptAtUtc <= now
-                    && (item.LockedUntilUtc == null || item.LockedUntilUtc <= now))
-                .OrderBy(item => item.CreatedAtUtc).ThenBy(item => item.Id).Take(batchSize);
-
-        var entries = await query.ToListAsync(ct);
-        var claimed = new List<ClaimedEmailOutbox>(entries.Count);
-        foreach (var entry in entries)
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async token =>
         {
-            var leaseId = Guid.NewGuid();
-            entry.LeaseId = leaseId;
-            entry.LockedUntilUtc = now.Add(leaseDuration);
-            entry.LastAttemptAtUtc = now;
-            claimed.Add(new(entry, leaseId));
-        }
-        await db.SaveChangesAsync(ct);
-        if (transaction is not null) await transaction.CommitAsync(ct);
-        return claimed;
+            var now = timeProvider.GetUtcNow().UtcDateTime;
+            var provider = db.Database.ProviderName ?? "";
+
+            await using var transaction = db.Database.IsRelational()
+                ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, token)
+                : null;
+            IQueryable<EmailOutbox> query = db.EmailOutbox;
+            if (provider.Contains("SqlServer", StringComparison.OrdinalIgnoreCase))
+                query = db.EmailOutbox.FromSqlInterpolated($@"
+                    SELECT TOP ({batchSize}) * FROM [dbo].[EmailOutbox] WITH (UPDLOCK, READPAST, ROWLOCK)
+                    WHERE [Status] = {(int)EmailOutboxStatus.Pending}
+                      AND [NextAttemptAtUtc] <= {now}
+                      AND ([LockedUntilUtc] IS NULL OR [LockedUntilUtc] <= {now})
+                    ORDER BY [CreatedAtUtc], [Id]");
+            else
+                query = query.Where(item => item.Status == EmailOutboxStatus.Pending
+                        && item.NextAttemptAtUtc <= now
+                        && (item.LockedUntilUtc == null || item.LockedUntilUtc <= now))
+                    .OrderBy(item => item.CreatedAtUtc).ThenBy(item => item.Id).Take(batchSize);
+
+            var entries = await query.ToListAsync(token);
+            var claimed = new List<ClaimedEmailOutbox>(entries.Count);
+            foreach (var entry in entries)
+            {
+                var leaseId = Guid.NewGuid();
+                entry.LeaseId = leaseId;
+                entry.LockedUntilUtc = now.Add(leaseDuration);
+                entry.LastAttemptAtUtc = now;
+                claimed.Add(new(entry, leaseId));
+            }
+            await db.SaveChangesAsync(token);
+            if (transaction is not null) await transaction.CommitAsync(token);
+            return claimed;
+        }, ct);
     }
 
     public async Task<bool> MarkSentAsync(Guid id, Guid leaseId, string? providerOperationId,
