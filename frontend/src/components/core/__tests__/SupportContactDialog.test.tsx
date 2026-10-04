@@ -49,6 +49,15 @@ afterEach(async () => {
 });
 
 describe('SupportContactDialog', () => {
+  it('ferme la modale avec la croix accessible', async () => {
+    const closeButton = document.body.querySelector<HTMLButtonElement>('button[aria-label="Fermer"]');
+
+    expect(closeButton).not.toBeNull();
+    await act(async () => closeButton?.click());
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it('shows the requested controls and sends the trimmed message with machine context', async () => {
     mocks.submitSupportContact.mockResolvedValue({ kind: 'success', data: { success: true } });
     await act(async () => setMessage('  La presse affiche E42.  '));
@@ -91,6 +100,7 @@ describe('SupportContactDialog', () => {
 
     expect(mocks.submitSupportContact).toHaveBeenCalledTimes(1);
     expect((document.body.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(document.body.querySelector<HTMLButtonElement>('button[aria-label="Fermer"]')?.disabled).toBe(true);
     await act(async () => {
       confirm();
       await Promise.resolve();

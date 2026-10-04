@@ -13,4 +13,85 @@ body {
   min-height: 100dvh;
 }
 
+/* Keep every modal close action anchored to its own dialog surface. */
+.fui-DialogSurface [data-dialog-close-button] {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  box-sizing: border-box;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+
+.fui-DialogSurface .fui-DialogTitle {
+  box-sizing: border-box;
+  min-width: 0;
+  padding-right: 60px;
+  overflow-wrap: anywhere;
+}
+
+/* Keep every Fluent UI modal comfortably inside narrow mobile viewports. */
+@media (max-width: 767px) {
+  .fui-DialogSurface {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: calc(100vw - 32px) !important;
+    max-width: calc(100vw - 32px) !important;
+    max-height: calc(100vh - 32px) !important;
+    max-height: calc(100dvh - 32px) !important;
+    margin-inline: auto;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    overscroll-behavior: contain;
+  }
+
+  .fui-DialogSurface > .fui-DialogBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .fui-DialogSurface .fui-DialogContent {
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .fui-DialogSurface .fui-DialogBody,
+  .fui-DialogSurface .fui-DialogContent,
+  .fui-DialogSurface .fui-DialogTitle,
+  .fui-DialogSurface .fui-DialogActions {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .fui-DialogSurface .fui-DialogTitle,
+  .fui-DialogSurface .fui-DialogContent {
+    overflow-wrap: anywhere;
+  }
+
+  .fui-DialogSurface .fui-DialogContent input,
+  .fui-DialogSurface .fui-DialogContent textarea,
+  .fui-DialogSurface .fui-DialogContent select {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .fui-DialogSurface .fui-DialogActions {
+    flex-wrap: wrap;
+  }
+
+  .fui-DialogSurface .fui-DialogActions .fui-Button {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+  }
+}
+
 

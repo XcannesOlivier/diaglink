@@ -2,9 +2,11 @@ import {CompanyMachineQuota} from './CompanyMachineQuota';
 import type {MachineDto} from '../../types/machine';
 import {useEffect,useId,useRef,useState} from 'react';
 import {Button,Field,Input} from '@fluentui/react-components';
-import {financeRequest,type FinanceSummary,type ClientTopUp} from '../../services/companyFinanceService';
+import {companyConsumptionRequest,financeRequest,type FinanceSummary,type ClientTopUp,type CompanyConsumptionMachine,type CompanyConsumptionReport} from '../../services/companyFinanceService';
 import styles from './CompanyFinancePanel.module.css';
 import {getMachines} from '../../services/machineService';
+import {usagePeriods,usageWindow,type UsagePeriod} from '../../utils/aiUsage';
+import {MachineSubscriptionDialog} from './MachineSubscriptionDialog';
 
 const euro=(n:number)=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',maximumFractionDigits:2}).format(n);
 const labels:Record<string,string>={active:'Actif',past_due:'Paiement en retard',unpaid:'Impayé',canceled:'Résilié',incomplete:'Paiement initial en attente',incomplete_expired:'Paiement initial expiré',trialing:'Abonnement en cours d’activation',paused:'Suspendu'};
@@ -14,8 +16,15 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
   const [machines,setMachines]=useState<MachineDto[]|null>(null);
   const [machinesError,setMachinesError]=useState(false);
   const [expandedMachines,setExpandedMachines]=useState(false);
+  const [machineSearch,setMachineSearch]=useState('');
+  const [openMachines,setOpenMachines]=useState<Set<string>>(()=>new Set());
+  const [period,setPeriod]=useState<UsagePeriod>('month');
+  const [filter,setFilter]=useState(()=>usageWindow('month'));
+  const [consumption,setConsumption]=useState<CompanyConsumptionReport|null>(null);
+  const [consumptionError,setConsumptionError]=useState(false);
+  const [managedMachine,setManagedMachine]=useState<CompanyConsumptionMachine|null>(null);
   const machinesListId=useId();
-  useEffect(()=>setExpandedMachines(false),[companyId]);
+  useEffect(()=>{setExpandedMachines(false);setMachineSearch('');setOpenMachines(new Set());setManagedMachine(null);},[companyId]);
   const machineCount=machines?.filter(m=>m.status==='active').length??null;
   const [message,setMessage]=useState(''),[amount,setAmount]=useState('20'),[busy,setBusy]=useState(false),[revision,setRevision]=useState(0);
   useEffect(()=>{let active=true;setMachines(null);setMachinesError(false);getMachines(getAccessToken).then(result=>{
@@ -23,6 +32,11 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
     if(result.kind==='success')setMachines(result.data.filter(m=>m.companyId===companyId));
     else {setMachinesError(true);if(result.kind==='unauthorized'&&result.diagLinkSessionExpired)onDiagLinkSessionExpired?.();}
   });return()=>{active=false;};},[companyId,getAccessToken,revision,onDiagLinkSessionExpired]);
+  useEffect(()=>{let active=true;setConsumption(null);setConsumptionError(false);companyConsumptionRequest(getAccessToken,filter).then(result=>{
+    if(!active)return;
+    if(result.kind==='success')setConsumption(result.data);
+    else{setConsumptionError(true);if(result.kind==='unauthorized'&&result.diagLinkSessionExpired)onDiagLinkSessionExpired?.();}
+  });return()=>{active=false;};},[companyId,getAccessToken,filter,revision,onDiagLinkSessionExpired]);
   const lock=useRef(false),generation=useRef(0);
   async function payInvoice(){
     if(lock.current)return;
@@ -65,6 +79,11 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
     }else{setMessage('Recharge non confirmée. Réessayez la même demande.');if(result.kind==='unauthorized'&&result.diagLinkSessionExpired)onDiagLinkSessionExpired?.();}
   }
   function safeUrl(value:string|null){try{const u=new URL(value||'');return u.protocol==='https:'&&u.hostname==='checkout.stripe.com'&&!u.username&&!u.password?u.href:null;}catch{return null;}}
+  const normalizedMachineSearch=machineSearch.trim().toLocaleLowerCase('fr-FR');
+  const filteredMachines=machines?.filter(machine=>machine.name.toLocaleLowerCase('fr-FR').includes(normalizedMachineSearch))??[];
+  const visibleMachines=normalizedMachineSearch||expandedMachines?filteredMachines:filteredMachines.slice(0,5);
+  const consumptionByMachine=new Map(consumption?.machines.map(machine=>[machine.id,machine])??[]);
+  const toggleMachine=(machineId:string)=>setOpenMachines(current=>{const next=new Set(current);if(next.has(machineId))next.delete(machineId);else next.add(machineId);return next;});
   return <section aria-label="Finances de l’entreprise" className={styles.panel}>
     <div className={styles.heading}><p className={styles.intro}>Gardez un œil sur vos crédits et votre abonnement.</p><Button disabled={busy} onClick={()=>setRevision(v=>v+1)}>Actualiser</Button></div>
     {!data&&!message&&<p>Chargement…</p>}
@@ -72,9 +91,13 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
       {data.creditStatus==='AiCreditExhausted'&&<div role="alert" className={styles.alert}>Crédit IA épuisé. Ajoutez du crédit supplémentaire pour continuer. Votre historique reste accessible.</div>}
       <div className={`${styles.cards} ${styles.companyCards}`}>
         <article className={styles.card} aria-label="Machines et quotas"><h3>Machines et quotas</h3>
-          {machinesError?<p role="alert">Machines indisponibles. Actualisez pour réessayer.</p>:machines===null?<p>Chargement des machines…</p>:machines.length===0?<p>Aucune machine dans votre entreprise.</p>:<ul id={machinesListId} className={styles.quotaList}>{(expandedMachines?machines:machines.slice(0,5)).map(m=><CompanyMachineQuota key={m.id} machine={m} token={getAccessToken} revision={revision} onSessionExpired={onDiagLinkSessionExpired}/>)}</ul>}
-          {machines&&machines.length>5&&<Button appearance="secondary" style={{marginTop:16,width:'100%'}} aria-expanded={expandedMachines} aria-controls={machinesListId} onClick={()=>setExpandedMachines(value=>!value)}>{expandedMachines?'Voir moins':'Voir plus de machines'}</Button>}
+          <div className={styles.companyMachineControls}><label>Période <select aria-label="Période de consommation des machines" value={period} onChange={event=>{const value=event.target.value as UsagePeriod;setPeriod(value);setFilter(usageWindow(value));}}>{Object.entries(usagePeriods).map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label><input className={styles.machineSearch} type="search" aria-label="Rechercher une machine" placeholder="Rechercher une machine..." value={machineSearch} onChange={event=>setMachineSearch(event.target.value)}/></div>
+          {consumptionError&&<p role="alert">Consommation indisponible. Actualisez pour réessayer.</p>}
+          {machinesError?<p role="alert">Machines indisponibles. Actualisez pour réessayer.</p>:machines===null?<p>Chargement des machines…</p>:machines.length===0?<p>Aucune machine dans votre entreprise.</p>:filteredMachines.length===0?<p className={styles.note}>Aucune machine trouvée.</p>:<ul id={machinesListId} className={`${styles.quotaList} ${styles.machineCards}`}>{visibleMachines.map((machine,index)=>{const usersId=`company-machine-users-${machine.id}`,usersOpen=openMachines.has(machine.id),machineConsumption=consumptionByMachine.get(machine.id);return <CompanyMachineQuota key={machine.id} machine={machine} consumption={machineConsumption} alternate={index%2===0} usersOpen={usersOpen} usersId={usersId} onToggleUsers={()=>toggleMachine(machine.id)} onManage={machineConsumption?()=>setManagedMachine(machineConsumption):undefined} token={getAccessToken} revision={revision} onSessionExpired={onDiagLinkSessionExpired}/>;})}</ul>}
+          {!normalizedMachineSearch&&filteredMachines.length>5&&<Button appearance="secondary" style={{marginTop:16,width:'100%'}} aria-expanded={expandedMachines} aria-controls={machinesListId} onClick={()=>setExpandedMachines(value=>!value)}>{expandedMachines?'Voir moins de machines':'Voir plus de machines'}</Button>}
+          <MachineSubscriptionDialog open={managedMachine!==null} machine={managedMachine} companyId={companyId} token={getAccessToken} actionEnabled companyScoped onOpenChange={open=>{if(!open)setManagedMachine(null);}} onSuccess={()=>setRevision(value=>value+1)} onDiagLinkSessionExpired={onDiagLinkSessionExpired}/>
         </article>
+        <div className={styles.companyFinanceRightColumn}>
         <article className={styles.card} aria-label="Crédit supplémentaire"><h3>Crédit supplémentaire</h3><p className={styles.muted}>Partagé entre toutes vos machines.</p>
           <div className={styles.metric}><strong>{euro(data.walletBalance)}</strong><span> disponibles</span></div>
           <div className={styles.walletBar} aria-hidden="true"><span style={{width:data.walletBalance>0?'100%':'0%'}}/></div>
@@ -99,6 +122,7 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
         <p className={styles.note}>Estimation pour les machines actives à 29,90 € HT par mois, hors recharges et ajustements.</p>
         {data.unpaidInvoiceAmount!==null&&<div className={styles.alert}><strong>Facture impayée · {euro(data.unpaidInvoiceAmount)}</strong><p>Montant à régler. Une recharge de crédit ne règle pas cette facture.</p><Button appearance="primary" disabled={busy} onClick={()=>void payInvoice()}>Régler la facture</Button></div>}
         </details>
+        </div>
       </div>
     </>}
     <p role="status">{message}</p>

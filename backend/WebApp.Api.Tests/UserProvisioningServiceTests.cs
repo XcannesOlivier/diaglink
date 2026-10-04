@@ -143,4 +143,87 @@ public class UserProvisioningServiceTests
         Assert.IsTrue(outcome.Success);
         Assert.AreEqual("technician", outcome.User!.Role);
     }
+
+    [TestMethod]
+    public async Task UpdateUserProfileAsync_TrimsAndPersistsOnlyEditableFields()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var companyId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = Guid.NewGuid(), CompanyId = companyId, Email = "tech@example.com", Role = "technician",
+            Status = "active", FirstName = "Avant", LastName = "Ancien", PhoneNumber = "000",
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        };
+        await using var context = CreateContext(dbName);
+        context.Users.Add(user);
+        await context.SaveChangesAsync();
+        var service = new UserProvisioningService(context);
+
+        var outcome = await service.UpdateUserProfileAsync(companyId, user.Id, new UpdateUserProfileRequest
+        {
+            FirstName = "  Alice ", LastName = " Martin  ", PhoneNumber = "  +33 1 02 03 04 05 ",
+        }, CancellationToken.None);
+
+        Assert.IsTrue(outcome.Success);
+        Assert.AreEqual("Alice", user.FirstName);
+        Assert.AreEqual("Martin", user.LastName);
+        Assert.AreEqual("+33 1 02 03 04 05", user.PhoneNumber);
+        Assert.AreEqual("tech@example.com", user.Email);
+        Assert.AreEqual("technician", user.Role);
+        Assert.AreEqual("active", user.Status);
+        Assert.AreEqual(companyId, user.CompanyId);
+
+        await using var reloadedContext = CreateContext(dbName);
+        var reloaded = await reloadedContext.Users.AsNoTracking().SingleAsync(candidate => candidate.Id == user.Id);
+        Assert.AreEqual("Alice", reloaded.FirstName);
+        Assert.AreEqual("Martin", reloaded.LastName);
+        Assert.AreEqual("+33 1 02 03 04 05", reloaded.PhoneNumber);
+    }
+
+    [TestMethod]
+    public async Task UpdateUserProfileAsync_CannotUpdateUserFromAnotherCompany()
+    {
+        var ownerCompanyId = Guid.NewGuid();
+        var foreignCompanyId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = Guid.NewGuid(), CompanyId = ownerCompanyId, Email = "tech@example.com", Role = "technician",
+            Status = "active", FirstName = "Avant", LastName = "Ancien", PhoneNumber = "000",
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        };
+        await using var context = CreateContext(Guid.NewGuid().ToString());
+        context.Users.Add(user);
+        await context.SaveChangesAsync();
+        var service = new UserProvisioningService(context);
+
+        var outcome = await service.UpdateUserProfileAsync(foreignCompanyId, user.Id, new UpdateUserProfileRequest
+        {
+            FirstName = "Alice", LastName = "Martin", PhoneNumber = "123",
+        }, CancellationToken.None);
+
+        Assert.IsFalse(outcome.Success);
+        Assert.AreEqual(UserProfileUpdateErrorKind.UserNotFound, outcome.ErrorKind);
+        Assert.AreEqual("Avant", user.FirstName);
+        Assert.AreEqual("Ancien", user.LastName);
+        Assert.AreEqual("000", user.PhoneNumber);
+    }
+
+    [TestMethod]
+    public async Task UpdateUserProfileAsync_RejectsEmptyAndOversizedFields()
+    {
+        await using var context = CreateContext(Guid.NewGuid().ToString());
+        var service = new UserProvisioningService(context);
+        var empty = await service.UpdateUserProfileAsync(Guid.NewGuid(), Guid.NewGuid(), new UpdateUserProfileRequest
+        {
+            FirstName = " ", LastName = "Martin", PhoneNumber = "123",
+        }, CancellationToken.None);
+        var tooLong = await service.UpdateUserProfileAsync(Guid.NewGuid(), Guid.NewGuid(), new UpdateUserProfileRequest
+        {
+            FirstName = "Alice", LastName = new string('x', 101), PhoneNumber = "123",
+        }, CancellationToken.None);
+
+        Assert.AreEqual(UserProfileUpdateErrorKind.MissingRequiredField, empty.ErrorKind);
+        Assert.AreEqual(UserProfileUpdateErrorKind.FieldTooLong, tooLong.ErrorKind);
+    }
 }

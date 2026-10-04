@@ -1,11 +1,19 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from "react";
 import {
   Badge,
   Button,
   Card,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  Input,
   Spinner,
   Text,
   makeStyles,
+  mergeClasses,
   tokens,
 } from "@fluentui/react-components";
 import {
@@ -23,7 +31,9 @@ import {
   downloadMachineRequestDocument,
   getMachineRequest,
   linkMachineRequestCustomer,
+  listArchivedMachineRequests,
   markMachineRequestReady,
+  updateMachineRequestArchive,
   updateMachineRequestStatus,
   type MachineRequestDetail,
   type MachineRequestListItem,
@@ -34,7 +44,12 @@ import { getMachines } from "../../services/machineService";
 import type { CompanyDto } from "../../types/company";
 import type { MachineDto } from "../../types/machine";
 import { additionalDocumentsMinimumAmountCents, additionalDocumentsPricePerPageCents } from "./additionalDocumentsPricing";
+import { DialogCloseButton } from "../core/DialogCloseButton";
+import { MachineRequestWorkflowStepper } from "./MachineRequestWorkflowStepper";
+import { getMachineRequestWorkflow } from "./machineRequestWorkflow";
 import { ViewRoot } from "./ViewLayout";
+
+const requestTableColumns = "120px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 90px 110px 110px minmax(150px,.9fr)";
 
 const useStyles = makeStyles({
   list: {
@@ -44,50 +59,95 @@ const useStyles = makeStyles({
   },
   listHeader: {
     display: "none",
-    "@media (min-width: 1100px)": {
+    padding: `0 calc(${tokens.spacingHorizontalM} + 1px)`,
+    color: tokens.colorNeutralForeground3,
+  },
+  requestTableGrid: {
+    "@media (min-width: 1024px)": {
       display: "grid",
-      gridTemplateColumns: "120px 1fr 1fr 1fr 90px 110px 110px auto",
+      gridTemplateColumns: requestTableColumns,
+      alignItems: "center",
       gap: tokens.spacingHorizontalM,
-      padding: `0 ${tokens.spacingHorizontalM}`,
-      color: tokens.colorNeutralForeground3,
     },
   },
   requestRow: {
     padding: tokens.spacingVerticalM,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
-    "@media (min-width: 1100px)": {
+    minWidth: 0,
+    maxWidth: "100%",
+    boxSizing: "border-box",
+    "@media (max-width: 1023px)": {
       display: "grid",
-      gridTemplateColumns: "120px 1fr 1fr 1fr 90px 110px 110px auto",
-      alignItems: "center",
-      gap: tokens.spacingHorizontalM,
+      gridTemplateColumns: "minmax(0,1fr)",
+      gap: tokens.spacingVerticalS,
     },
   },
   waitingRow: {
     borderLeft: `4px solid ${tokens.colorPaletteYellowBorderActive}`,
+    paddingLeft: `calc(${tokens.spacingHorizontalM} - 3px)`,
   },
   mobileLabel: {
     color: tokens.colorNeutralForeground3,
     marginRight: tokens.spacingHorizontalXS,
-    "@media (min-width: 1100px)": { display: "none" },
+    "@media (min-width: 1024px)": { display: "none" },
   },
   cell: {
     minWidth: 0,
     overflowWrap: "anywhere",
-    "@media (max-width: 1099px)": {
+    "@media (max-width: 1023px)": {
       display: "block",
       marginBottom: tokens.spacingVerticalS,
     },
+  },
+  dateCell: {
+    "@media (max-width: 1023px)": {
+      display: "flex",
+      flexDirection: "column",
+      gridColumn: "1 / -1",
+      gap: tokens.spacingVerticalXS,
+      marginBottom: 0,
+    },
+  },
+  requestType: { display: "block" },
+  compactOnlyLabel: {
+    display: "none",
+    "@media (max-width: 1023px)": {
+      display: "inline",
+      color: tokens.colorNeutralForeground3,
+      marginRight: tokens.spacingHorizontalXS,
+    },
+  },
+  companyCell: {
+    "@media (max-width: 1023px)": {
+      gridColumn: "1 / -1",
+      marginBottom: 0,
+      maxWidth: "100%",
+    },
+  },
+  desktopOnly: {
+    "@media (max-width: 1023px)": { display: "none !important" },
   },
   detailGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(2,minmax(0,1fr))",
     gap: tokens.spacingHorizontalL,
-    "@media (max-width: 800px)": { gridTemplateColumns: "1fr" },
+    minWidth: 0,
+    "@media (max-width: 800px)": {
+      gridTemplateColumns: "minmax(0,1fr)",
+      gap: tokens.spacingVerticalM,
+    },
   },
   detailCard: {
     padding: tokens.spacingVerticalL,
     gap: tokens.spacingVerticalM,
+    minWidth: 0,
+    maxWidth: "100%",
+    boxSizing: "border-box",
+    "@media (max-width: 800px)": {
+      padding: tokens.spacingVerticalM,
+      gap: tokens.spacingVerticalS,
+    },
   },
   fullWidth: {
     gridColumn: "1 / -1",
@@ -103,12 +163,40 @@ const useStyles = makeStyles({
     gridTemplateColumns: "minmax(130px,.7fr) minmax(0,1.3fr)",
     gap: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
     "@media (max-width: 520px)": {
-      gridTemplateColumns: "1fr",
-      gap: tokens.spacingVerticalXS,
+      gridTemplateColumns: "minmax(88px,40%) minmax(0,1fr)",
+      gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     },
   },
-  term: { color: tokens.colorNeutralForeground3 },
-  value: { margin: 0, overflowWrap: "anywhere" },
+  term: { color: tokens.colorNeutralForeground3, minWidth: 0, overflowWrap: "anywhere" },
+  value: { margin: 0, minWidth: 0, overflowWrap: "anywhere" },
+  detailHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: tokens.spacingHorizontalM,
+    marginBottom: tokens.spacingVerticalS,
+    "& > div": { minWidth: 0, overflowWrap: "anywhere" },
+    "& > .fui-Button": { flexShrink: 0 },
+    "@media (max-width: 1000px)": {
+      paddingRight: "52px",
+      boxSizing: "border-box",
+    },
+    "@media (max-width: 520px)": {
+      flexDirection: "column",
+      alignItems: "stretch",
+      gap: tokens.spacingVerticalS,
+      "& > .fui-Button": {
+        alignSelf: "flex-end",
+        maxWidth: "100%",
+        whiteSpace: "normal",
+      },
+    },
+  },
+  detailBackRow: {
+    display: "flex",
+    marginBottom: tokens.spacingVerticalL,
+    minWidth: 0,
+  },
   documents: { margin: 0, padding: 0, listStyle: "none" },
   document: {
     display: "flex",
@@ -123,6 +211,7 @@ const useStyles = makeStyles({
     flexDirection: "column",
     gap: tokens.spacingVerticalXXS,
     minWidth: 0,
+    overflowWrap: "anywhere",
   },
   totals: {
     display: "flex",
@@ -169,6 +258,44 @@ const useStyles = makeStyles({
     padding: `0 ${tokens.spacingHorizontalS}`,
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
+  },
+  history: {
+    marginTop: tokens.spacingVerticalXXL,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    paddingTop: tokens.spacingVerticalL,
+  },
+  historySummary: {
+    cursor: "pointer",
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase400,
+    scrollMarginTop: "calc(64px + env(safe-area-inset-top, 0px))",
+  },
+  historyContent: {
+    display: "grid",
+    gap: tokens.spacingVerticalM,
+    marginTop: tokens.spacingVerticalM,
+  },
+  historySearch: { width: "100%", maxWidth: "520px" },
+  rowActions: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: tokens.spacingVerticalXS,
+    "@media (max-width: 1023px)": {
+      display: "flex",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gridColumn: "1 / -1",
+      gap: tokens.spacingHorizontalM,
+      marginBottom: 0,
+    },
+  },
+  compactAction: {
+    "@media (max-width: 1023px)": {
+      flexShrink: 0,
+      "& .fui-Button": { minHeight: "44px" },
+    },
   },
 });
 
@@ -230,6 +357,8 @@ function requestActorLabel(kind: MachineRequestDetail["requestKind"]) {
   }
 }
 
+const isArchivable = (status: MachineRequestStatus) => status === "treated" || status === "rejected";
+
 interface MachineRequestsViewProps {
   requests: MachineRequestListItem[];
   isLoading: boolean;
@@ -238,6 +367,7 @@ interface MachineRequestsViewProps {
   onRetry: () => Promise<void>;
   onRequestUpdated: (request: MachineRequestDetail) => void;
   onDiagLinkSessionExpired?: () => void;
+  listResetKey?: number;
 }
 
 export function MachineRequestsView({
@@ -248,6 +378,7 @@ export function MachineRequestsView({
   onRetry,
   onRequestUpdated,
   onDiagLinkSessionExpired,
+  listResetKey = 0,
 }: MachineRequestsViewProps) {
   const styles = useStyles();
   const [selectedRequest, setSelectedRequest] =
@@ -264,6 +395,19 @@ export function MachineRequestsView({
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [selectedMachineId, setSelectedMachineId] = useState("");
   const [isLoadingProvisioning, setIsLoadingProvisioning] = useState(false);
+  const [archivedRequests, setArchivedRequests] = useState<MachineRequestListItem[]>([]);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyError, setHistoryError] = useState(false);
+  const historySummaryRef = useRef<HTMLElement>(null);
+  const [archiveAction, setArchiveAction] = useState<{ requestId: string; isArchived: boolean } | null>(null);
+  const [isUpdatingArchive, setIsUpdatingArchive] = useState(false);
+  const [locallyArchivedIds, setLocallyArchivedIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setSelectedRequest(null);
+    setDetailError(null);
+    setActionError(null);
+  }, [listResetKey]);
 
   const handleUnauthorized = (result: {
     kind: string;
@@ -272,6 +416,88 @@ export function MachineRequestsView({
     if (result.kind === "unauthorized" && result.diagLinkSessionExpired)
       onDiagLinkSessionExpired?.();
   };
+
+  const loadArchivedRequests = useCallback(async () => {
+    const result = await listArchivedMachineRequests(getAccessToken);
+    if (result.kind === "success") {
+      setArchivedRequests([...result.data].sort((left, right) =>
+        new Date(right.archivedAtUtc ?? right.createdAt).getTime() - new Date(left.archivedAtUtc ?? left.createdAt).getTime()));
+      setHistoryError(false);
+    } else {
+      handleUnauthorized(result);
+      setHistoryError(true);
+    }
+  }, [getAccessToken, onDiagLinkSessionExpired]);
+
+  useEffect(() => { void loadArchivedRequests(); }, [loadArchivedRequests]);
+
+  const handleHistoryToggle = (event: SyntheticEvent<HTMLDetailsElement>) => {
+    if (!event.currentTarget.open) return;
+    window.requestAnimationFrame(() => {
+      historySummaryRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+  };
+
+  const confirmArchiveChange = async () => {
+    if (!archiveAction || isUpdatingArchive) return;
+    const action = archiveAction;
+    setIsUpdatingArchive(true);
+    setActionError(null);
+    const result = await updateMachineRequestArchive(
+      getAccessToken,
+      action.requestId,
+      action.isArchived,
+    );
+    if (result.kind === "success") {
+      setLocallyArchivedIds(current => {
+        const next = new Set(current);
+        if (action.isArchived) next.add(result.data.requestId); else next.delete(result.data.requestId);
+        return next;
+      });
+      setSelectedRequest(current => current?.requestId === result.data.requestId ? result.data : current);
+      onRequestUpdated(result.data);
+      await Promise.all([onRetry(), loadArchivedRequests()]);
+      setArchiveAction(null);
+    } else {
+      handleUnauthorized(result);
+      setActionError(action.isArchived
+        ? "La demande n’a pas pu être archivée."
+        : "La demande n’a pas pu être restaurée.");
+    }
+    setIsUpdatingArchive(false);
+  };
+
+  const normalizedHistorySearch = historySearch.trim().toLocaleLowerCase("fr-FR");
+  const filteredArchivedRequests = archivedRequests.filter(request => !normalizedHistorySearch || [
+    request.company,
+    request.firstName,
+    request.lastName,
+    `${request.firstName} ${request.lastName}`,
+    request.email,
+    request.machineName,
+    request.manufacturer,
+    request.model,
+    request.serialNumber,
+    request.description,
+    requestKindLabel(request.requestKind),
+  ].some(value => value?.toLocaleLowerCase("fr-FR").includes(normalizedHistorySearch)));
+  const activeRequests = requests.filter(request => !request.isArchived && !locallyArchivedIds.has(request.requestId));
+
+  const archiveDialog = <Dialog open={archiveAction !== null} onOpenChange={(_event, data) => !data.open && !isUpdatingArchive && setArchiveAction(null)}>
+    <DialogSurface><DialogBody>
+      <DialogTitle action={<DialogCloseButton disabled={isUpdatingArchive} onClick={() => setArchiveAction(null)} />}>{archiveAction?.isArchived ? "Archiver cette demande ?" : "Restaurer cette demande ?"}</DialogTitle>
+      <DialogContent>{archiveAction?.isArchived
+        ? "Elle sera déplacée dans l’historique et restera entièrement consultable."
+        : "Elle quittera l’historique et reviendra dans la liste principale sans changer de statut."}</DialogContent>
+      <DialogActions>
+        <Button appearance="secondary" disabled={isUpdatingArchive} onClick={() => setArchiveAction(null)}>Annuler</Button>
+        <Button appearance="primary" disabled={isUpdatingArchive} onClick={() => void confirmArchiveChange()}>{archiveAction?.isArchived ? "Archiver" : "Restaurer"}</Button>
+      </DialogActions>
+    </DialogBody></DialogSurface>
+  </Dialog>;
 
   const loadProvisioningReferences = async () => {
     setIsLoadingProvisioning(true);
@@ -321,7 +547,8 @@ export function MachineRequestsView({
       !selectedRequest ||
       !selectedCompanyId ||
       !selectedMachineId ||
-      isUpdatingStatus
+      isUpdatingStatus ||
+      !getMachineRequestWorkflow(selectedRequest).actions.attach.enabled
     )
       return;
     setIsUpdatingStatus(true);
@@ -351,6 +578,7 @@ export function MachineRequestsView({
 
   const changeStatus = async (status: "treated" | "rejected") => {
     if (!selectedRequest || isUpdatingStatus) return;
+    if (status === "treated" && !getMachineRequestWorkflow(selectedRequest).actions.accept.enabled) return;
     if (
       status === "rejected" &&
       !window.confirm("Confirmer le refus de cette demande ?")
@@ -467,7 +695,7 @@ export function MachineRequestsView({
   };
 
   const prepareBilling = async () => {
-    if (!selectedRequest || isUpdatingStatus) return;
+    if (!selectedRequest || isUpdatingStatus || !getMachineRequestWorkflow(selectedRequest).actions.prepareBilling.enabled) return;
     setIsUpdatingStatus(true);
     setActionError(null);
     const result = await linkMachineRequestCustomer(
@@ -489,7 +717,7 @@ export function MachineRequestsView({
   };
 
   const configureSubscription = async () => {
-    if (!selectedRequest || isUpdatingStatus) return;
+    if (!selectedRequest || isUpdatingStatus || !getMachineRequestWorkflow(selectedRequest).actions.configureSubscription.enabled) return;
     setIsUpdatingStatus(true);
     setActionError(null);
     const result = await configureMachineRequestSubscription(
@@ -509,7 +737,7 @@ export function MachineRequestsView({
   };
 
   const activateMachine = async () => {
-    if (!selectedRequest || isUpdatingStatus) return;
+    if (!selectedRequest || isUpdatingStatus || !getMachineRequestWorkflow(selectedRequest).actions.activate.enabled) return;
     setIsUpdatingStatus(true);
     setActionError(null);
     const result = await activateMachineRequest(
@@ -529,7 +757,7 @@ export function MachineRequestsView({
   };
 
   const markReady = async () => {
-    if (!selectedRequest || isUpdatingStatus) return;
+    if (!selectedRequest || isUpdatingStatus || !getMachineRequestWorkflow(selectedRequest).actions.markReady.enabled) return;
     const documents = selectedRequest.requestKind === "additionalDocuments";
     const confirmed = window.confirm(documents
       ? "Confirmer que ces documents sont intégrés ?\nLe client recevra un email lui indiquant qu’ils sont disponibles dans DiagLink."
@@ -551,11 +779,36 @@ export function MachineRequestsView({
   if (selectedRequest) {
     const request = selectedRequest;
     const requestKind = request.requestKind ?? "initialMachine";
+    const workflow = getMachineRequestWorkflow(request);
+    const actionHint = (action: keyof typeof workflow.actions) => !workflow.actions[action].enabled && (
+      <Text size={200}>{workflow.actions[action].unavailableReason}</Text>
+    );
     return (
       <ViewRoot
         title="Détail de la demande"
         subtitle={`${request.client.company} · ${request.machine.machineName}`}
+        headerClassName={styles.detailHeader}
         headerAction={
+          request.isArchived ? (
+            <Button
+              appearance="secondary"
+              disabled={isUpdatingArchive}
+              onClick={() => setArchiveAction({ requestId: request.requestId, isArchived: false })}
+            >
+              Restaurer la demande
+            </Button>
+          ) : isArchivable(request.status) ? (
+            <Button
+              appearance="subtle"
+              disabled={isUpdatingArchive}
+              onClick={() => setArchiveAction({ requestId: request.requestId, isArchived: true })}
+            >
+              Archiver la demande
+            </Button>
+          ) : undefined
+        }
+      >
+        <div className={styles.detailBackRow}>
           <Button
             appearance="subtle"
             icon={<ArrowLeft20Regular />}
@@ -566,8 +819,8 @@ export function MachineRequestsView({
           >
             Retour aux demandes
           </Button>
-        }
-      >
+        </div>
+        <MachineRequestWorkflowStepper workflow={workflow} />
         <div className={styles.detailGrid}>
           <Card className={styles.detailCard}>
             <Text className={styles.cardTitle}>
@@ -757,11 +1010,12 @@ export function MachineRequestsView({
                     ? "À utiliser uniquement lorsque les nouveaux documents ont été intégrés."
                     : "À utiliser uniquement lorsque la préparation et l’intégration documentaire sont terminées."}
                 </Text>
-                <Button appearance="primary" disabled={isUpdatingStatus} onClick={() => void markReady()}>
+                <Button appearance="primary" disabled={isUpdatingStatus || !workflow.actions.markReady.enabled} onClick={() => void markReady()}>
                   {request.requestKind === "additionalDocuments"
                     ? "Marquer les documents comme intégrés"
                     : "Marquer la machine comme prête"}
                 </Button>
+                {actionHint("markReady")}
               </Card>
             )}
           {request.requestKind === "additionalDocuments" &&
@@ -788,11 +1042,12 @@ export function MachineRequestsView({
                 <Text>Étape : BusinessEntitiesCreated</Text>
                 <Button
                   appearance="primary"
-                  disabled={isUpdatingStatus}
+                  disabled={isUpdatingStatus || !workflow.actions.prepareBilling.enabled}
                   onClick={() => void prepareBilling()}
                 >
                   Configurer l’abonnement
                 </Button>
+                {actionHint("prepareBilling")}
               </Card>
             )}
           {requestKind === "initialMachine" &&
@@ -861,7 +1116,8 @@ export function MachineRequestsView({
                         !selectedCompanyId ||
                         !selectedMachineId ||
                         isLoadingProvisioning ||
-                        isUpdatingStatus
+                        isUpdatingStatus ||
+                        !workflow.actions.attach.enabled
                       }
                       onClick={() => void attachBusinessEntities()}
                     >
@@ -902,11 +1158,12 @@ export function MachineRequestsView({
                 </Text>
                 <Button
                   appearance="primary"
-                  disabled={isUpdatingStatus}
+                  disabled={isUpdatingStatus || !workflow.actions.prepareBilling.enabled}
                   onClick={() => void prepareBilling()}
                 >
                   Préparer la facturation
                 </Button>
+                {actionHint("prepareBilling")}
               </Card>
             )}
           {request.requestKind !== "additionalDocuments" &&
@@ -936,11 +1193,12 @@ export function MachineRequestsView({
                 </Text>
                 <Button
                   appearance="primary"
-                  disabled={isUpdatingStatus}
+                  disabled={isUpdatingStatus || !workflow.actions.configureSubscription.enabled}
                   onClick={() => void configureSubscription()}
                 >
                   Configurer l’abonnement
                 </Button>
+                {actionHint("configureSubscription")}
               </Card>
             )}
           {request.requestKind !== "additionalDocuments" &&
@@ -969,7 +1227,7 @@ export function MachineRequestsView({
                 </Text>
                 <Button
                   appearance="primary"
-                  disabled={isUpdatingStatus}
+                  disabled={isUpdatingStatus || !workflow.actions.activate.enabled}
                   onClick={() => void activateMachine()}
                 >
                   {isUpdatingStatus
@@ -978,6 +1236,7 @@ export function MachineRequestsView({
                       ? "Finaliser l’activation"
                       : "Activer la machine"}
                 </Button>
+                {actionHint("activate")}
               </Card>
             )}
           {request.requestKind !== "additionalDocuments" &&
@@ -996,7 +1255,7 @@ export function MachineRequestsView({
                 </Text>
                 <Button
                   appearance="primary"
-                  disabled={isUpdatingStatus}
+                  disabled={isUpdatingStatus || !workflow.actions.activate.enabled}
                   onClick={() => void activateMachine()}
                 >
                   {isUpdatingStatus
@@ -1005,6 +1264,7 @@ export function MachineRequestsView({
                       ? "Finaliser l’activation"
                       : "Activer la machine"}
                 </Button>
+                {actionHint("activate")}
               </Card>
             )}
           {request.requestKind !== "additionalDocuments" &&
@@ -1044,7 +1304,7 @@ export function MachineRequestsView({
             <Button
               appearance="primary"
               disabled={
-                isUpdatingStatus || request.payment?.authorizationInsufficient
+                isUpdatingStatus || !workflow.actions.accept.enabled
               }
               onClick={() => void changeStatus("treated")}
             >
@@ -1054,9 +1314,31 @@ export function MachineRequestsView({
             </Button>
           </div>
         )}
+        {archiveDialog}
       </ViewRoot>
     );
   }
+
+  const renderRequestList = (items: MachineRequestListItem[]) => <>
+    <div className={mergeClasses(styles.listHeader, styles.requestTableGrid)}>
+      <Text>Date</Text><Text>Entreprise</Text><Text>Demandeur</Text><Text>Machine</Text>
+      <Text>PDF</Text><Text>Pages</Text><Text>Préparation</Text><Text>Statut</Text>
+    </div>
+    <div className={styles.list}>
+      {items.map(request => <Card key={request.requestId} className={mergeClasses(styles.requestRow, styles.requestTableGrid, request.status === "pending" && styles.waitingRow)}>
+        <span className={`${styles.cell} ${styles.dateCell}`}><span data-mobile-field="date"><span className={styles.mobileLabel}>Date :</span>{date.format(new Date(request.createdAt))}</span><span className={styles.requestType} data-mobile-field="type"><span className={styles.compactOnlyLabel}>Type de demande :</span><Text size={200}>{requestKindLabel(request.requestKind)}</Text></span></span>
+        <span className={`${styles.cell} ${styles.companyCell}`} data-mobile-field="company"><span className={styles.mobileLabel}>Entreprise :</span>{request.company}</span>
+        <span className={`${styles.cell} ${styles.desktopOnly}`}><span className={styles.mobileLabel}>Demandeur :</span>{request.firstName} {request.lastName}<br/><Text size={200}>{request.email}<br/>{request.phone}</Text></span>
+        <span className={`${styles.cell} ${styles.desktopOnly}`}><span className={styles.mobileLabel}>Machine :</span>{request.machineName}<br/>{request.requestKind !== "additionalDocuments" && <Text size={200}>{request.manufacturer} · {request.model}</Text>}</span>
+        <span className={`${styles.cell} ${styles.desktopOnly}`}><span className={styles.mobileLabel}>PDF :</span>{request.documentCount}</span>
+        <span className={`${styles.cell} ${styles.desktopOnly}`}><span className={styles.mobileLabel}>Pages :</span>{request.totalPages}</span>
+        <span className={`${styles.cell} ${styles.desktopOnly}`}><span className={styles.mobileLabel}>Préparation :</span>{currency.format(request.preparationTotal)} HT</span>
+        <span className={`${styles.cell} ${styles.rowActions}`}><span data-mobile-field="status"><StatusBadge status={request.status}/></span>
+          <span className={styles.compactAction} data-mobile-field="action"><Button appearance="subtle" size="small" onClick={() => void openRequest(request.requestId)}>Voir la demande</Button></span>
+        </span>
+      </Card>)}
+    </div>
+  </>;
 
   return (
     <ViewRoot
@@ -1095,95 +1377,21 @@ export function MachineRequestsView({
             <Button onClick={() => void onRetry()}>Réessayer</Button>
           </div>
         </div>
-      ) : requests.length === 0 ? (
-        <div className={styles.state}>
-          <div>
-            <Text weight="semibold">Aucune nouvelle demande.</Text>
-            <br />
-            <Text size={200}>
-              Les nouvelles demandes transmises depuis le formulaire DiagLink
-              apparaîtront ici.
-            </Text>
-          </div>
-        </div>
       ) : (
         <>
-          <div className={styles.listHeader}>
-            <Text>Date</Text>
-            <Text>Entreprise</Text>
-            <Text>Demandeur</Text>
-            <Text>Machine</Text>
-            <Text>PDF</Text>
-            <Text>Pages</Text>
-            <Text>Préparation</Text>
-            <Text>Statut</Text>
-          </div>
-          <div className={styles.list}>
-            {requests.map((request) => (
-              <Card
-                key={request.requestId}
-                className={`${styles.requestRow} ${request.status === "pending" ? styles.waitingRow : ""}`}
-              >
-                <span className={styles.cell}>
-                  <span className={styles.mobileLabel}>Date :</span>
-                  {date.format(new Date(request.createdAt))}
-                  <br />
-                  <Text size={200}>
-                    {requestKindLabel(request.requestKind)}
-                  </Text>
-                </span>
-                <span className={styles.cell}>
-                  <span className={styles.mobileLabel}>Entreprise :</span>
-                  {request.company}
-                </span>
-                <span className={styles.cell}>
-                  <span className={styles.mobileLabel}>Demandeur :</span>
-                  {request.firstName} {request.lastName}
-                  <br />
-                  <Text size={200}>
-                    {request.email}
-                    <br />
-                    {request.phone}
-                  </Text>
-                </span>
-                <span className={styles.cell}>
-                  <span className={styles.mobileLabel}>Machine :</span>
-                  {request.machineName}
-                  <br />
-                  {request.requestKind !== "additionalDocuments" && (
-                    <Text size={200}>
-                      {request.manufacturer} · {request.model}
-                    </Text>
-                  )}
-                </span>
-                <span className={styles.cell}>
-                  <span className={styles.mobileLabel}>PDF :</span>
-                  {request.documentCount}
-                </span>
-                <span className={styles.cell}>
-                  <span className={styles.mobileLabel}>Pages :</span>
-                  {request.totalPages}
-                </span>
-                <span className={styles.cell}>
-                  <span className={styles.mobileLabel}>Préparation :</span>
-                  {currency.format(request.preparationTotal)} HT
-                </span>
-                <span className={styles.cell}>
-                  <StatusBadge status={request.status} />
-                  <br />
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    onClick={() => void openRequest(request.requestId)}
-                  >
-                    Voir la demande
-                  </Button>
-                </span>
-              </Card>
-            ))}
-          </div>
+          {activeRequests.length === 0 ? <div className={styles.state}><div><Text weight="semibold">Aucune nouvelle demande.</Text><br/><Text size={200}>Les nouvelles demandes transmises depuis le formulaire DiagLink apparaîtront ici.</Text></div></div> : renderRequestList(activeRequests)}
+          <details className={styles.history} onToggle={handleHistoryToggle}>
+            <summary ref={historySummaryRef} className={styles.historySummary}>Historique des demandes ({archivedRequests.length})</summary>
+            <div className={styles.historyContent}>
+              <Input className={styles.historySearch} aria-label="Rechercher dans l’historique" placeholder="Rechercher dans l’historique..." value={historySearch} onChange={(_event, data) => setHistorySearch(data.value)}/>
+              {historyError ? <Text className={styles.error} role="alert">Impossible de charger l’historique des demandes.</Text>
+                : filteredArchivedRequests.length === 0 ? <Text>Aucune demande trouvée dans l’historique.</Text>
+                  : renderRequestList(filteredArchivedRequests)}
+            </div>
+          </details>
         </>
       )}
+      {archiveDialog}
     </ViewRoot>
   );
 }

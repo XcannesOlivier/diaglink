@@ -57,6 +57,10 @@ public static class StripeAdminEndpoints
     public record MachineStatusRequest(bool Active, Guid RequestId);
     public static async Task<IResult> SetMachineStatusAsync(Guid companyId, Guid machineId, MachineStatusRequest request,
         [Microsoft.AspNetCore.Mvc.FromServices] StripeMachineStatusService service, StripeBillingOptions settings, CancellationToken ct)
+        => await ExecuteMachineStatusAsync(companyId, machineId, request, service, settings, ct);
+
+    public static async Task<IResult> ExecuteMachineStatusAsync(Guid companyId, Guid machineId, MachineStatusRequest request,
+        StripeMachineStatusService service, StripeBillingOptions settings, CancellationToken ct)
     {
         if(!TestActionsEnabled(settings)) return Results.Conflict(new {error="Stripe test requis."});
         try { return Results.Ok(new {status=await service.SetActiveAsync(companyId,machineId,request.Active,request.RequestId,ct)}); }

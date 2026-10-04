@@ -33,6 +33,7 @@ public class MachineRequestAdminEndpointsTests
         var endpoint = ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints)
             .Cast<RouteEndpoint>()
             .Single(route => !route.RoutePattern.RawText!.Contains('{')
+                && !route.RoutePattern.RawText.EndsWith("/history", StringComparison.Ordinal)
                 && route.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Contains("GET"));
         Assert.IsTrue(endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(item => item.Policy == "SuperAdminOnly"));
         Assert.IsNull(endpoint.Metadata.GetMetadata<IAllowAnonymous>());
@@ -55,6 +56,14 @@ public class MachineRequestAdminEndpointsTests
         Assert.IsTrue(readyEndpoint.Metadata.GetOrderedMetadata<IAuthorizeData>()
             .Any(item => item.Policy == "SuperAdminOnly"));
         Assert.IsNull(readyEndpoint.Metadata.GetMetadata<IAllowAnonymous>());
+
+        foreach (var route in ((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints)
+            .Cast<RouteEndpoint>().Where(route => route.RoutePattern.RawText!.Contains("history", StringComparison.Ordinal)
+                || route.RoutePattern.RawText.EndsWith("/{requestId}/archive", StringComparison.Ordinal)))
+        {
+            Assert.IsTrue(route.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(item => item.Policy == "SuperAdminOnly"));
+            Assert.IsNull(route.Metadata.GetMetadata<IAllowAnonymous>());
+        }
     }
 
     [TestMethod]
@@ -161,6 +170,47 @@ public class MachineRequestAdminEndpointsTests
             new(MachineRequestStatuses.Treated), storage, payments, CancellationToken.None);
         Assert.AreEqual(MachineRequestStatuses.Treated,
             ((MachineRequestDetail)((IValueHttpResult)afterCapture).Value!).Status);
+    }
+
+    [TestMethod]
+    public async Task ArchiveRequiresTerminalStatusAndHistoryCanRestoreWithoutDeletingDocuments()
+    {
+        var setup = await CreateStoredRequestsAsync();
+        await setup.Service.UpdateStatusAsync(setup.First.RequestId, MachineRequestStatuses.Treated);
+        var documentUploadsBefore = setup.Blobs.DocumentUploadCount;
+        var userId = Guid.NewGuid();
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(DiagLinkClaimTypes.UserId, userId.ToString())], "test"))
+        };
+
+        var pending = await MachineRequestAdminEndpoints.UpdateArchiveAsync(setup.Second.RequestId,
+            new(true), httpContext, setup.Service, setup.PaymentService, CancellationToken.None);
+        Assert.AreEqual(StatusCodes.Status409Conflict, ((IStatusCodeHttpResult)pending).StatusCode);
+
+        var archived = await MachineRequestAdminEndpoints.UpdateArchiveAsync(setup.First.RequestId,
+            new(true), httpContext, setup.Service, setup.PaymentService, CancellationToken.None);
+        var archivedDetail = (MachineRequestDetail)((IValueHttpResult)archived).Value!;
+        Assert.IsTrue(archivedDetail.IsArchived);
+        Assert.AreEqual(MachineRequestStatuses.Treated, archivedDetail.Status);
+        Assert.AreEqual(userId, archivedDetail.ArchivedByUserId);
+
+        var active = ((IEnumerable<MachineRequestListItem>)((IValueHttpResult)await MachineRequestAdminEndpoints.ListAsync(
+            setup.Service, setup.PaymentService, CancellationToken.None)).Value!).ToList();
+        var history = ((IEnumerable<MachineRequestListItem>)((IValueHttpResult)await MachineRequestAdminEndpoints.ListArchivedAsync(
+            setup.Service, setup.PaymentService, CancellationToken.None)).Value!).ToList();
+        Assert.IsFalse(active.Any(item => item.RequestId == setup.First.RequestId));
+        Assert.AreEqual(setup.First.RequestId, history.Single().RequestId);
+        Assert.AreEqual(MachineRequestStatuses.Treated, history.Single().Status);
+
+        var restored = await MachineRequestAdminEndpoints.UpdateArchiveAsync(setup.First.RequestId,
+            new(false), httpContext, setup.Service, setup.PaymentService, CancellationToken.None);
+        var restoredDetail = (MachineRequestDetail)((IValueHttpResult)restored).Value!;
+        Assert.IsFalse(restoredDetail.IsArchived);
+        Assert.AreEqual(MachineRequestStatuses.Treated, restoredDetail.Status);
+        Assert.AreEqual(documentUploadsBefore, setup.Blobs.DocumentUploadCount);
+        Assert.HasCount(2, setup.Blobs.Names.Where(name => name.Contains("/documents/", StringComparison.Ordinal)).ToList());
     }
 
     private static ClaimsPrincipal User(string role) =>

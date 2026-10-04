@@ -8,6 +8,7 @@ public record StreamChunk
 {
     public VisionUsageCapture? VisionUsage { get; init; }
     public AiResponseUsage? Usage { get; init; }
+    public List<TechnicalVisualReference>? Visuals { get; init; }
 
     /// <summary>
     /// Text content chunk (delta). Null if this chunk contains annotations or approval request.
@@ -53,6 +54,9 @@ public record StreamChunk
     /// Creates a tool-use indicator chunk.
     /// </summary>
     public static StreamChunk ToolUse(string toolName) => new() { IsToolUse = true, ToolName = toolName };
+
+    public static StreamChunk WithVisuals(IReadOnlyList<TechnicalVisualReference> visuals) =>
+        new() { Visuals = visuals.ToList() };
     
     /// <summary>
     /// Whether this chunk contains text content.
@@ -63,6 +67,8 @@ public record StreamChunk
     /// Whether this chunk contains annotations.
     /// </summary>
     public bool HasAnnotations => Annotations != null && Annotations.Count > 0;
+
+    public bool HasVisuals => Visuals != null && Visuals.Count > 0;
     
     /// <summary>
     /// Whether this chunk contains an MCP approval request.

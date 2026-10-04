@@ -21,6 +21,7 @@ import { StripeCompanyPanel } from './StripeCompanyPanel';
 import { getApiAuthHeaders } from '../../utils/apiAuth';
 import type { CompanyUserDto } from '../../types/company';
 import type { CompanyDto } from '../../types/company';
+import { DialogCloseButton } from '../core/DialogCloseButton';
 
 const useStyles = makeStyles({
   list: {
@@ -421,7 +422,7 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({ getAccessToken, on
 
       <Dialog open={dialogOpen} onOpenChange={(_e, data) => setDialogOpen(data.open)}>
         <DialogSurface className={styles.dialogSurface}>
-            <DialogTitle>Ajouter une entreprise</DialogTitle>
+            <DialogTitle action={<DialogCloseButton disabled={submitting} onClick={() => setDialogOpen(false)} />}>Ajouter une entreprise</DialogTitle>
             <DialogBody>
               <DialogContent className={styles.dialogContentScroll}>
                 <div className={styles.form}>

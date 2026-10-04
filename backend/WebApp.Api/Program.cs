@@ -172,8 +172,15 @@ builder.Services.AddAuthorization(options =>
 // Register Foundry Agent Service (v2 Agents API)
 // Uses Azure.AI.Projects SDK which works with v2 Agents API (/agents/ endpoint with human-readable IDs).
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient(ClaudeDirectChatService.HttpClientName);
+builder.Services.Configure<ClaudeDirectChatOptions>(
+    builder.Configuration.GetSection(ClaudeDirectChatOptions.SectionName));
+builder.Services.AddSingleton<Azure.Core.TokenCredential>(_ => new Azure.Identity.DefaultAzureCredential());
+builder.Services.AddSingleton<ITechnicalAssistantPromptProvider, TechnicalAssistantPromptProvider>();
 builder.Services.AddScoped<AgentFrameworkService>();
 builder.Services.AddScoped<AiPricingIdentityResolver>();
+builder.Services.AddSingleton<IAiChatRuntimeSelector, AiChatRuntimeSelector>();
+builder.Services.AddSingleton<MachineAssistantReadiness>();
 
 // Conversation-history persistence — isolated 'chat' schema in the shared 'diaglink' Azure SQL database.
 builder.Services.AddDbContext<DiagLinkDbContext>(options =>
@@ -241,6 +248,7 @@ builder.Services.AddSingleton<OtpRateLimiter>();
 builder.Services.AddSingleton<ContactSubmissionRateLimiter>();
 builder.Services.AddScoped<UserIdentityService>();
 builder.Services.AddScoped<MachineAccessService>();
+builder.Services.AddScoped<TechnicalVisualAccessService>();
 builder.Services.AddScoped<MachineAssistantResolutionService>();
 builder.Services.AddScoped<CompanyDirectoryService>();
 builder.Services.AddScoped<CompanyOnboardingService>();
@@ -255,6 +263,13 @@ builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationH
     {
         builder.Services.AddSingleton(new Azure.Storage.Blobs.BlobServiceClient(storageConn));
         builder.Services.AddScoped<WebApp.Api.Services.BlobStorageService>();
+        builder.Services.AddScoped<WebApp.Api.Services.ITechnicalVisualBlobReader>(services =>
+            services.GetRequiredService<WebApp.Api.Services.BlobStorageService>());
+        builder.Services.AddScoped<WebApp.Api.Services.IClaudeDirectChatService, WebApp.Api.Services.ClaudeDirectChatService>();
+        builder.Services.AddScoped<WebApp.Api.Services.IClaudeDirectToolboxMarkerReader, WebApp.Api.Services.AzureClaudeDirectToolboxMarkerReader>();
+        builder.Services.AddScoped<WebApp.Api.Services.IClaudeDirectMachineConfigurationResolver, WebApp.Api.Services.ClaudeDirectMachineConfigurationResolver>();
+        builder.Services.AddScoped<WebApp.Api.Services.IClaudeDirectChatRequestFactory, WebApp.Api.Services.ClaudeDirectChatRequestFactory>();
+        builder.Services.AddScoped<WebApp.Api.Services.IClaudeDirectChatRuntime, WebApp.Api.Services.ClaudeDirectChatRuntime>();
         builder.Services.AddScoped<WebApp.Api.Services.IMachineRequestBlobClient, WebApp.Api.Services.AzureMachineRequestBlobClient>();
         builder.Services.AddScoped<WebApp.Api.Services.MachineRequestStorageService>();
         builder.Services.AddScoped<WebApp.Api.Services.RequestReceivedNotificationService>();
@@ -299,6 +314,7 @@ app.MapCompanyFinance();
 app.MapPublicMachineRequests();
 app.MapPublicContact();
 app.MapSupportContact();
+app.MapTechnicalVisualEndpoints(ScopePolicyName);
 app.MapAdditionalMachineRequests();
 app.MapAdditionalDocumentsRequests();
 app.MapAdminMachineRequests();
@@ -557,7 +573,7 @@ app.MapPost("/api/auth/verify-code", async (
         .Where(u =>
             u.Email.ToLower() == normalizedEmail.ToLower() &&
             u.Status.ToLower() == "active")
-        .Select(u => new { u.Id })
+        .Select(u => new { u.Id, u.Role })
         .FirstOrDefaultAsync(cancellationToken);
 
     if (user is null)
@@ -599,7 +615,7 @@ app.MapPost("/api/auth/verify-code", async (
         return Results.Ok(new VerifyCodeResponse { Success = false });
     }
 
-    // Session DiagLink 24h : token opaque aléatoire, seul son hash est persisté.
+    // Session DiagLink : durée selon le rôle, token opaque aléatoire, seul son hash est persisté.
     var sessionTokenBytes = RandomNumberGenerator.GetBytes(32);
     var sessionToken = Convert.ToBase64String(sessionTokenBytes)
         .TrimEnd('=')
@@ -610,7 +626,7 @@ app.MapPost("/api/auth/verify-code", async (
     var sessionTokenHash = Convert.ToHexString(
         sessionHmac.ComputeHash(Encoding.UTF8.GetBytes(sessionToken)));
 
-    var expiresAtUtc = now.AddHours(24);
+    var expiresAtUtc = DiagLinkSessionLifetime.GetExpiresAtUtc(now, user.Role);
 
     db.UserSessions.Add(new UserSession
     {
@@ -714,7 +730,8 @@ app.MapGet("/api/auth/me", async (
         Role = role,
         Email = user.Email,
         FirstName = user.FirstName,
-        LastName = user.LastName
+        LastName = user.LastName,
+        PhoneNumber = user.PhoneNumber
     });
 })
 .RequireAuthorization("TechnicianOrAbove")
@@ -811,6 +828,19 @@ app.MapPost("/api/company/users", async (CreateTechnicianRequest request, HttpCo
 .RequireAuthorization("CompanyAdminOnly")
 .WithName("CreateCompanyUser");
 
+app.MapPatch("/api/company/users/{userId:guid}", async (Guid userId, UpdateUserProfileRequest request, HttpContext httpContext, UserProvisioningService userProvisioningService, CancellationToken cancellationToken) =>
+{
+    if (!TryGetCompanyIdClaim(httpContext.User, out var companyId))
+    {
+        return Results.Forbid();
+    }
+
+    var outcome = await userProvisioningService.UpdateUserProfileAsync(companyId, userId, request, cancellationToken);
+    return outcome.Success ? Results.Ok(outcome.User) : MapUserProfileUpdateError(outcome.ErrorKind!.Value, outcome.ErrorMessage!);
+})
+.RequireAuthorization("CompanyAdminOnly")
+.WithName("UpdateCompanyUserProfile");
+
 app.MapPost("/api/companies/{companyId:guid}/users", async (Guid companyId, CreateTechnicianRequest request, UserProvisioningService userProvisioningService, CancellationToken cancellationToken) =>
 {
     var outcome = await userProvisioningService.CreateTechnicianForCompanyAsync(companyId, request, cancellationToken);
@@ -820,6 +850,14 @@ app.MapPost("/api/companies/{companyId:guid}/users", async (Guid companyId, Crea
 })
 .RequireAuthorization("SuperAdminOnly")
 .WithName("CreateCompanyTechnicianForCompany");
+
+app.MapPatch("/api/companies/{companyId:guid}/users/{userId:guid}", async (Guid companyId, Guid userId, UpdateUserProfileRequest request, UserProvisioningService userProvisioningService, CancellationToken cancellationToken) =>
+{
+    var outcome = await userProvisioningService.UpdateUserProfileAsync(companyId, userId, request, cancellationToken);
+    return outcome.Success ? Results.Ok(outcome.User) : MapUserProfileUpdateError(outcome.ErrorKind!.Value, outcome.ErrorMessage!);
+})
+.RequireAuthorization("SuperAdminOnly")
+.WithName("UpdateCompanyUserProfileForCompany");
 
 // DELETE /api/company/users/{userId} — company_admin only, soft-deletes (Status -> inactive) a user
 // in the caller's OWN company. Never reachable for diaglink_super_admin targets or self.
@@ -991,19 +1029,19 @@ app.MapPut("/api/companies/{companyId:guid}/users/{userId:guid}/machines", async
 .WithName("ReplaceCompanyUserMachinesForCompany");
 
 // GET /api/machines — role-scoped list (see MachineAccessService); never filtered by anything the client sends.
-app.MapGet("/api/machines", async (HttpContext httpContext, MachineAccessService machineAccessService, DiagLinkDbContext db, CancellationToken cancellationToken) =>
+app.MapGet("/api/machines", async (HttpContext httpContext, MachineAccessService machineAccessService, MachineAssistantReadiness assistantReadiness, DiagLinkDbContext db, CancellationToken cancellationToken) =>
 {
     var machines = await machineAccessService.GetAccessibleMachinesAsync(httpContext.User, cancellationToken);
     var machineIds = machines.Select(m => m.Machine.Id).ToList();
-    // Consider a machine as having an assistant configured if the legacy dbo.Machines row
-    // contains a non-empty FoundryAgentId and Status == 'active'. We intentionally no longer
-    // depend on chat.MachineAssistantConfigurations for this flag in this migration step.
-    var configuredMachineIds = await MachineEntitlements.Eligible(db, DateTime.UtcNow)
+    var eligibleMachineIds = await MachineEntitlements.Eligible(db, DateTime.UtcNow)
         .AsNoTracking()
-        .Where(m => machineIds.Contains(m.Id) && !string.IsNullOrEmpty(m.FoundryAgentId) && !string.IsNullOrEmpty(m.ProjectEndpoint))
+        .Where(m => machineIds.Contains(m.Id))
         .Select(m => m.Id)
         .ToHashSetAsync(cancellationToken);
-    return Results.Ok(machines.Select(m => ToMachineDto(m.Machine, configuredMachineIds.Contains(m.Machine.Id), m.IsAccessible)));
+    return Results.Ok(machines.Select(m => ToMachineDto(
+        m.Machine,
+        assistantReadiness.IsAssistantConfigured(m.Machine, eligibleMachineIds.Contains(m.Machine.Id)),
+        m.IsAccessible)));
 })
 .RequireAuthorization("TechnicianOrAbove")
 .WithName("GetMachines");
@@ -1043,7 +1081,7 @@ app.MapGet("/api/machines/{machineId:guid}/documents/{documentId}", async (Guid 
 .RequireAuthorization("TechnicianOrAbove")
 .WithName("OpenMachineDocument");
 
-app.MapGet("/api/machines/{id:guid}", async (Guid id, HttpContext httpContext, MachineAccessService machineAccessService, DiagLinkDbContext db, CancellationToken cancellationToken) =>
+app.MapGet("/api/machines/{id:guid}", async (Guid id, HttpContext httpContext, MachineAccessService machineAccessService, MachineAssistantReadiness assistantReadiness, DiagLinkDbContext db, CancellationToken cancellationToken) =>
 {
     if (!await machineAccessService.CanAccessMachineAsync(httpContext.User, id, cancellationToken))
     {
@@ -1056,9 +1094,10 @@ app.MapGet("/api/machines/{id:guid}", async (Guid id, HttpContext httpContext, M
         return Results.NotFound();
     }
 
-    var hasAssistantConfigured = await MachineEntitlements.Eligible(db, DateTime.UtcNow)
+    var eligible = await MachineEntitlements.Eligible(db, DateTime.UtcNow)
         .AsNoTracking()
-        .AnyAsync(m => m.Id == id && !string.IsNullOrEmpty(m.FoundryAgentId) && !string.IsNullOrEmpty(m.ProjectEndpoint), cancellationToken);
+        .AnyAsync(m => m.Id == id, cancellationToken);
+    var hasAssistantConfigured = assistantReadiness.IsAssistantConfigured(machine, eligible);
     return Results.Ok(ToMachineDto(machine, hasAssistantConfigured, true));
 })
 .RequireAuthorization("TechnicianOrAbove")
@@ -1118,6 +1157,7 @@ app.MapPost("/api/chat/stream", async (
     ConversationHistoryRepository historyRepository,
     ConversationSummaryService conversationSummaryService,
     MachineAssistantResolutionService assistantResolutionService,
+    IAiChatRuntimeSelector runtimeSelector,
     UserIdentityService userIdentityService,
     HttpContext httpContext,
     IHostEnvironment environment,
@@ -1130,6 +1170,7 @@ app.MapPost("/api/chat/stream", async (
     // only for legacy pre-machine-scoping conversations, in which case AgentFrameworkService falls back
     // to the globally-configured (env var) agent.
     ResolvedAssistantConfiguration? resolvedConfig = null;
+    WebApp.Api.Models.Entities.Machine? resolvedMachine = null;
     Guid? boundMachineId = null;
     var isNewConversation = request.ConversationId is null;
     var measurements = new Dictionary<Guid, AiUsageMeasurement>();
@@ -1141,14 +1182,14 @@ app.MapPost("/api/chat/stream", async (
             return Results.BadRequest(new { error = "machine_id_required", message = "machineId is required to start a new conversation." });
         }
 
-        var resolution = await assistantResolutionService.ResolveAsync(httpContext.User, request.MachineId.Value, cancellationToken);
-        var earlyExit = MapResolutionFailure(resolution);
+        var resolution = await assistantResolutionService.ResolveMachineAsync(httpContext.User, request.MachineId.Value, cancellationToken);
+        var earlyExit = MapMachineResolutionFailure(resolution);
         if (earlyExit is not null)
         {
             return earlyExit;
         }
 
-        resolvedConfig = resolution.Configuration;
+        resolvedMachine = resolution.Machine;
         boundMachineId = request.MachineId;
     }
     else
@@ -1174,14 +1215,14 @@ app.MapPost("/api/chat/stream", async (
 
             // Re-verified on every message, not just at creation — access revoked mid-conversation must
             // refuse immediately rather than keep streaming against a machine the user can no longer see.
-            var resolution = await assistantResolutionService.ResolveAsync(httpContext.User, ownership.MachineId.Value, cancellationToken);
-            var earlyExit = MapResolutionFailure(resolution);
+            var resolution = await assistantResolutionService.ResolveMachineAsync(httpContext.User, ownership.MachineId.Value, cancellationToken);
+            var earlyExit = MapMachineResolutionFailure(resolution);
             if (earlyExit is not null)
             {
                 return earlyExit;
             }
 
-            resolvedConfig = resolution.Configuration;
+            resolvedMachine = resolution.Machine;
             boundMachineId = ownership.MachineId;
         }
     }
@@ -1191,6 +1232,26 @@ app.MapPost("/api/chat/stream", async (
     if (!admission.Allowed)
         return Results.Json(new { status = admission.Status, code = admission.Status, message = admission.Message }, statusCode: 402);
 
+    // Runtime choice is made only from the server-resolved machine, after access, entitlement and
+    // credit admission. The request contract contains no runtime selector.
+    var selectedRuntime = runtimeSelector.Select(resolvedMachine);
+    logger.LogInformation(
+        "Chat runtime selected. Runtime={Runtime}, MachineId={MachineId}",
+        selectedRuntime,
+        boundMachineId);
+
+    if (selectedRuntime == AiChatRuntime.HostedAgent && resolvedMachine is not null)
+    {
+        var hostedResolution = assistantResolutionService.ResolveHostedAgent(resolvedMachine);
+        var earlyExit = MapResolutionFailure(hostedResolution);
+        if (earlyExit is not null)
+        {
+            return earlyExit;
+        }
+
+        resolvedConfig = hostedResolution.Configuration;
+    }
+
     try
     {
         httpContext.Response.Headers.Append("Content-Type", "text/event-stream");
@@ -1198,7 +1259,9 @@ app.MapPost("/api/chat/stream", async (
         httpContext.Response.Headers.Append("Connection", "keep-alive");
 
         var conversationId = request.ConversationId
-            ?? await agentService.CreateConversationAsync(request.Message, resolvedConfig?.ProjectEndpoint, cancellationToken);
+            ?? (selectedRuntime == AiChatRuntime.ClaudeDirect
+                ? $"claude-direct-{Guid.NewGuid():N}"
+                : await agentService.CreateConversationAsync(request.Message, resolvedConfig?.ProjectEndpoint, cancellationToken));
 
         await WriteConversationIdEvent(httpContext.Response, conversationId, cancellationToken);
 
@@ -1208,7 +1271,9 @@ app.MapPost("/api/chat/stream", async (
             {
                 if (!string.IsNullOrEmpty(userObjectId))
                 {
-                    var agentName = (await agentService.GetAgentMetadataAsync(resolvedConfig, cancellationToken)).Name;
+                    var agentName = selectedRuntime == AiChatRuntime.ClaudeDirect
+                        ? "Claude Direct"
+                        : (await agentService.GetAgentMetadataAsync(resolvedConfig, cancellationToken)).Name;
                     await historyRepository.CreateConversationAsync(conversationId, userObjectId, agentName, boundMachineId, cancellationToken);
                 }
                 else
@@ -1257,9 +1322,10 @@ app.MapPost("/api/chat/stream", async (
 
         var startTime = DateTime.UtcNow;
         var assistantText = new StringBuilder();
+        var assistantVisuals = new TechnicalVisualAccumulator();
         Guid? sqlConversationId = null;
         // Captured from the authorized machine, never the caller's company claim.
-        var machineCompanyId = resolvedConfig?.CompanyId;
+        var machineCompanyId = resolvedMachine?.CompanyId;
         var sqlUserId = Guid.TryParse(httpContext.User.FindFirst(DiagLinkClaimTypes.UserId)?.Value, out var parsedUserId)
             ? (Guid?)parsedUserId : null;
         try
@@ -1278,15 +1344,26 @@ app.MapPost("/api/chat/stream", async (
         measurements[measurement.EventId] = measurement;
         httpContext.Items[typeof(AiUsageMeasurement)] = measurements;
 
-        await foreach (var chunk in agentService.StreamMessageAsync(
-            conversationId,
-            messageForModel,
-            request.ImageDataUris,
-            request.FileDataUris,
-            request.PreviousResponseId,
-            request.McpApproval,
-            resolvedConfig,
-            cancellationToken))
+        var runtimeChunks = AiChatRuntimeDispatch.SelectStream(
+            selectedRuntime,
+            () => agentService.StreamMessageAsync(
+                conversationId,
+                messageForModel,
+                request.ImageDataUris,
+                request.FileDataUris,
+                request.PreviousResponseId,
+                request.McpApproval,
+                resolvedConfig,
+                cancellationToken),
+            () => httpContext.RequestServices
+                .GetRequiredService<IClaudeDirectChatRuntime>()
+                .StreamMessageAsync(
+                    resolvedMachine ?? throw new InvalidOperationException(
+                        "Claude Direct requires a server-resolved machine."),
+                    messageForModel,
+                    cancellationToken));
+
+        await foreach (var chunk in runtimeChunks)
         {
             if (chunk.VisionUsage is { } vision)
             {
@@ -1296,6 +1373,10 @@ app.MapPost("/api/chat/stream", async (
             {
                 measurement = measurement with { Response = chunk.Usage };
                 measurements[measurement.EventId] = measurement;
+            }
+            else if (chunk.HasVisuals && chunk.Visuals != null)
+            {
+                assistantVisuals.AddRange(chunk.Visuals);
             }
             else if (chunk.IsText && chunk.TextDelta != null)
             {
@@ -1316,12 +1397,19 @@ app.MapPost("/api/chat/stream", async (
             }
         }
 
+        ConversationMessagePersistenceResult? persistedAssistantMessage = null;
         if (!string.IsNullOrEmpty(userObjectId))
         {
             try
             {
-                var assistantMessageId = await historyRepository.AddMessageAsync(conversationId, userObjectId, "assistant", assistantText.ToString(), cancellationToken);
-                measurement = measurement with { AssistantMessageId = assistantMessageId };
+                persistedAssistantMessage = await historyRepository.AddMessageAsync(
+                    conversationId,
+                    userObjectId,
+                    "assistant",
+                    assistantText.ToString(),
+                    assistantVisuals.Items,
+                    cancellationToken);
+                measurement = measurement with { AssistantMessageId = persistedAssistantMessage?.MessageId };
                 measurements[measurement.EventId] = measurement;
             }
             catch (Exception ex)
@@ -1360,7 +1448,11 @@ app.MapPost("/api/chat/stream", async (
             measurement.Response,
             cancellationToken);
 
-        await WriteDoneEvent(httpContext.Response, cancellationToken);
+        await TechnicalVisualSseWriter.WriteBeforeDoneAsync(
+            httpContext.Response,
+            persistedAssistantMessage?.Visuals ?? [],
+            cancellationToken,
+            WriteDoneEvent);
     }
     catch (ArgumentException ex) when (ex.Message.Contains("Invalid") && (ex.Message.Contains("attachments") || ex.Message.Contains("image") || ex.Message.Contains("file")))
     {
@@ -1405,6 +1497,14 @@ app.MapPost("/api/chat/stream", async (
     {
         MachineAssistantResolutionKind.MachineNotAccessible => Results.NotFound(),
         MachineAssistantResolutionKind.AssistantNotConfigured or MachineAssistantResolutionKind.AssistantDisabled =>
+            Results.Json(new { error = "assistant_not_configured", message = "No assistant is configured for this machine yet." }, statusCode: 409),
+        _ => null,
+    };
+
+    static IResult? MapMachineResolutionFailure(MachineResolution resolution) => resolution.Kind switch
+    {
+        MachineResolutionKind.MachineNotAccessible => Results.NotFound(),
+        MachineResolutionKind.MachineDisabled =>
             Results.Json(new { error = "assistant_not_configured", message = "No assistant is configured for this machine yet." }, statusCode: 409),
         _ => null,
     };
@@ -1596,6 +1696,7 @@ app.MapGet("/api/conversations", async (
     HttpContext httpContext,
     IHostEnvironment environment,
     int? limit,
+    Guid? machineId,
     CancellationToken cancellationToken) =>
 {
     try
@@ -1608,7 +1709,7 @@ app.MapGet("/api/conversations", async (
         }
 
         var pageSize = Math.Clamp(limit ?? 20, 1, 100);
-        var allConversations = await historyRepository.ListConversationsForUserAsync(userObjectId, cancellationToken);
+        var allConversations = await historyRepository.ListConversationsForUserAsync(userObjectId, machineId, cancellationToken);
         var hasMore = allConversations.Count > pageSize;
         var conversations = hasMore ? allConversations.Take(pageSize).ToList() : allConversations;
         return Results.Ok(new { conversations, hasMore });
@@ -1929,6 +2030,12 @@ static IResult MapUserProvisioningError(UserProvisioningErrorKind kind, string m
 {
     UserProvisioningErrorKind.CompanyNotFound => Results.NotFound(new { error = message }),
     UserProvisioningErrorKind.DuplicateEmail => Results.Conflict(new { error = message }),
+    _ => Results.BadRequest(new { error = message }),
+};
+
+static IResult MapUserProfileUpdateError(UserProfileUpdateErrorKind kind, string message) => kind switch
+{
+    UserProfileUpdateErrorKind.UserNotFound => Results.NotFound(new { error = message }),
     _ => Results.BadRequest(new { error = message }),
 };
 

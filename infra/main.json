@@ -75,7 +75,7 @@
     },
     "senderAddress": {
       "type": "string",
-      "defaultValue": "DoNotReply@60976bb3-7a7c-4471-818d-5d3fe79e4503.azurecomm.net",
+      "defaultValue": "DoNotReply@diaglink.com",
       "metadata": {
         "description": "ACS Email sender address on the Azure-managed domain (known only after first ACS deployment)"
       }

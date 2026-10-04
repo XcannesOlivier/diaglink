@@ -4,6 +4,7 @@ import { CopilotMessage } from '@fluentui-copilot/react-copilot-chat';
 import { DocumentRegular, GlobeRegular, FolderRegular, OpenRegular, ArrowSyncRegular } from '@fluentui/react-icons';
 import { Markdown } from '../core/Markdown';
 import { MessageActions } from './MessageActions';
+import { TechnicalVisualGallery } from './TechnicalVisualGallery';
 import { useFormatTimestamp } from '../../hooks/useFormatTimestamp';
 import { parseContentWithCitations } from '../../utils/citationParser';
 import { extractTrailingQuestions } from '../../utils/extractTrailingQuestions';
@@ -31,6 +32,7 @@ interface AssistantMessageProps {
   onRegenerate?: () => void;
   onFeedback?: (messageId: string, rating: 'positive' | 'negative') => void;
   onDownloadFile?: (fileId: string, fileName: string, containerId?: string) => void;
+  onLoadTechnicalVisual?: (visualId: number, signal?: AbortSignal) => Promise<Blob>;
   onSuggestedPromptClick?: (prompt: string) => void;
 }
 
@@ -40,8 +42,8 @@ function AssistantMessageComponent({
   isStreaming = false,
   disabled = false,
   onRegenerate,
-  onFeedback,
   onDownloadFile,
+  onLoadTechnicalVisual,
   onSuggestedPromptClick,
 }: AssistantMessageProps) {
   const formatTimestamp = useFormatTimestamp();
@@ -95,10 +97,6 @@ function AssistantMessageComponent({
     return [];
   }, [parsedContent, message.annotations]);
   
-  const handleFeedback = useCallback((rating: 'positive' | 'negative') => {
-    onFeedback?.(message.id, rating);
-  }, [message.id, onFeedback]);
-
   // Handle citation click - scroll to footnote or open URL
   const handleCitationClick = useCallback((index: number, annotation?: IAnnotation) => {
     if (annotation?.type === 'uri_citation' && annotation.url) {
@@ -208,7 +206,6 @@ function AssistantMessageComponent({
               <MessageActions
                 content={message.content}
                 onRegenerate={onRegenerate}
-                onFeedback={handleFeedback}
               />
             )}
           </div>
@@ -251,6 +248,9 @@ function AssistantMessageComponent({
               <Text size={200}>{getToolUseLabel(message.activeToolUse)}</Text>
             </div>
           )}
+          {message.visuals && message.visuals.length > 0 && onLoadTechnicalVisual && (
+            <TechnicalVisualGallery visuals={message.visuals} loadVisual={onLoadTechnicalVisual} />
+          )}
           {suggestedPrompts.length > 0 && onSuggestedPromptClick && (
             <div className={styles.suggestedPrompts}>
               {suggestedPrompts.map((prompt, index) => (
@@ -280,6 +280,8 @@ export const AssistantMessage = memo(AssistantMessageComponent, (prev, next) => 
     prev.disabled === next.disabled &&
     prev.message.more?.usage === next.message.more?.usage &&
     prev.message.annotations?.length === next.message.annotations?.length &&
+    prev.message.visuals === next.message.visuals &&
+    prev.onLoadTechnicalVisual === next.onLoadTechnicalVisual &&
     prev.message.retryAttempt === next.message.retryAttempt &&
     prev.message.activeToolUse === next.message.activeToolUse
   );

@@ -9,7 +9,7 @@ export function HeroSection({ loginTarget }: { loginTarget: string }) {
       <div className={`${styles.container} ${styles.heroGrid}`}>
         <div className={styles.heroCopy}>
           <p className={styles.eyebrow}>Maintenance industrielle</p>
-          <h1>La documentation<br />de vos machines<br />devient <span>interactive.</span></h1>
+          <h1>La documentation de vos machines devient{' '}<span>interactive.</span></h1>
           <p className={styles.lead}>Posez votre problème. DiagLink analyse la documentation technique de votre machine et vous guide dans le diagnostic, étape par étape.</p>
           <div className={styles.heroActions}>
             <Link className={styles.primaryButton} to="/demonstration">Voir une démonstration</Link>

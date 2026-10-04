@@ -1,0 +1,4 @@
+.introText { margin:26px 0 0; color:#52677a; font-size:1.1rem; line-height:1.75; }
+.updated { margin:18px 0 0; color:#6e818e; font-size:.88rem; font-weight:600; }
+.compactIntro { margin-bottom:36px; }
+.compactIntro .introText { margin-top:0; }

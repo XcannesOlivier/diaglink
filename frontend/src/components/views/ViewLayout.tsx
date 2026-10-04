@@ -50,15 +50,16 @@ interface ViewRootProps {
   title: string;
   subtitle?: string;
   headerAction?: React.ReactNode;
+  headerClassName?: string;
   children?: React.ReactNode;
 }
 
 /** Shared header + scroll container for the real (non-placeholder) DiagLink views. */
-export const ViewRoot: React.FC<ViewRootProps> = ({ title, subtitle, headerAction, children }) => {
+export const ViewRoot: React.FC<ViewRootProps> = ({ title, subtitle, headerAction, headerClassName, children }) => {
   const styles = useStyles();
   return (
     <div className={styles.root}>
-      <div className={mergeClasses(styles.header, !!headerAction && styles.headerWithAction)}>
+      <div className={mergeClasses(styles.header, !!headerAction && styles.headerWithAction, headerClassName)}>
         <div>
         <Text className={styles.title}>{title}</Text>
         {subtitle && <Text className={styles.subtitle}>{subtitle}</Text>}

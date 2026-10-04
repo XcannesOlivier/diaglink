@@ -33,16 +33,6 @@
   overflow: hidden;
 }
 
-/* .mainContent is a row flex container by default, so its lone extra child (the
-   confirmation panel) gets stretched to the container's full height/width by align-items:
-   stretch — this class swaps it to column (desktop + mobile) so the panel only takes its
-   content size, centered on top, and the chat fills the rest below it. Only applied while
-   the panel is shown. */
-.mainContentWithPanel {
-  flex-direction: column;
-  overflow-y: auto;
-}
-
 .machineBanner {
   position: absolute;
   top: 14px;
@@ -58,34 +48,21 @@
 }
 
 .machineConfirmationCard {
-  width: 100%;
+  width: fit-content;
   max-width: 680px;
-  margin: 0 auto 8px;
-  padding: 16px 24px;
+  margin: 0 auto;
+  padding: 12px;
   border: 1px solid var(--colorNeutralStroke2, #e0e0e0);
   border-radius: 12px;
   background: var(--colorNeutralBackground2, #f5f5f5);
   box-sizing: border-box;
 }
 
-/* Desktop: text on the left, actions on the right, single horizontal bar. */
-.machineConfirmationContent {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.machineConfirmationText {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
 .machineConfirmationActions {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
-  flex-shrink: 0;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -117,10 +94,9 @@
     border-right: none;
   }
 
-  .machineConfirmationContent {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
+  .machineConfirmationCard {
+    width: 100%;
+    max-width: 480px;
   }
 
   .machineConfirmationActions {

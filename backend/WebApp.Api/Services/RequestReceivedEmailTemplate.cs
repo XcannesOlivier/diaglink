@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net;
 using System.Text.Json;
 using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
@@ -35,28 +34,18 @@ public static class RequestReceivedEmailTemplate
             ? $"Votre demande d’ajout de documents pour \"{payload.MachineName}\" a bien été prise en compte."
             : $"Votre demande concernant la machine \"{payload.MachineName}\" a bien été prise en compte.";
         var amount = (payload.AuthorizedAmountCents / 100m).ToString("N2", CultureInfo.GetCultureInfo("fr-FR"));
-        var text = $"""
-            {greeting}
-
-            {subjectLine}
-
-            Une autorisation de {amount} € a été enregistrée pour cette demande.
-            Cette somme est actuellement réservée ; aucun débit n’a encore été effectué.
-
-            Nous allons maintenant vérifier votre demande et préparer sa prise en charge.
-            Vous recevrez un nouvel email lorsque votre demande aura été acceptée.
-
-            L’équipe DiagLink
-            """;
-        var html = $"""
-            <p>{WebUtility.HtmlEncode(greeting)}</p>
-            <p>{WebUtility.HtmlEncode(subjectLine)}</p>
-            <p>Une autorisation de <strong>{WebUtility.HtmlEncode(amount)} €</strong> a été enregistrée pour cette demande.<br>
-            Cette somme est actuellement réservée ; aucun débit n’a encore été effectué.</p>
-            <p>Nous allons maintenant vérifier votre demande et préparer sa prise en charge.<br>
-            Vous recevrez un nouvel email lorsque votre demande aura été acceptée.</p>
-            <p>L’équipe DiagLink</p>
-            """;
+        string[] paragraphs =
+        [
+            subjectLine,
+            "Une autorisation a été enregistrée pour cette demande.",
+            "Cette somme est actuellement réservée ; aucun débit n’a encore été effectué.",
+            "Nous allons maintenant vérifier votre demande et préparer sa prise en charge.",
+            "Vous recevrez un nouvel email lorsque votre demande aura été acceptée."
+        ];
+        var highlight = $"Autorisation enregistrée : {amount} €";
+        var text = DiagLinkTransactionalEmailLayout.BuildPlainText(greeting, paragraphs, highlight);
+        var html = DiagLinkTransactionalEmailLayout.BuildHtml("Votre demande a bien été reçue", greeting,
+            paragraphs, highlight);
         return new(Subject, text, html);
     }
 
@@ -68,14 +57,17 @@ public static class RequestReceivedEmailTemplate
         var requestLine = payload.RequestKind == MachineRequestKind.AdditionalDocuments
             ? $"Votre demande d’ajout de documents pour la machine \"{payload.MachineName}\" a été acceptée."
             : $"Votre demande concernant la machine \"{payload.MachineName}\" a été acceptée.";
-        var nextLine = payload.RequestKind == MachineRequestKind.AdditionalDocuments
-            ? "Nous allons maintenant préparer et intégrer ces nouveaux documents.\n\nVous recevrez un nouvel email lorsqu’ils seront disponibles dans DiagLink."
-            : "Nous allons maintenant préparer votre machine et sa documentation.\n\nVous recevrez un nouvel email lorsque votre machine sera prête dans DiagLink.";
+        string[] nextSteps = payload.RequestKind == MachineRequestKind.AdditionalDocuments
+            ? ["Nous allons maintenant préparer et intégrer ces nouveaux documents.",
+                "Vous recevrez un nouvel email lorsqu’ils seront disponibles dans DiagLink."]
+            : ["Nous allons maintenant préparer votre machine et sa documentation.",
+                "Vous recevrez un nouvel email lorsque votre machine sera prête dans DiagLink."];
         var amount = Euros(payload.CapturedAmountCents);
-        var text = $"{greeting}\n\n{requestLine}\n\nLe montant de {amount} € a été encaissé.\n\n{nextLine}\n\nL’équipe DiagLink";
-        var html = $"<p>{Encode(greeting)}</p><p>{Encode(requestLine)}</p>"
-            + $"<p>Le montant de <strong>{Encode(amount)} €</strong> a été encaissé.</p>"
-            + $"<p>{Encode(nextLine).Replace("\n\n", "<br><br>", StringComparison.Ordinal)}</p><p>L’équipe DiagLink</p>";
+        var paragraphs = new[] { requestLine }.Concat(nextSteps).ToArray();
+        var highlight = $"Montant encaissé : {amount} €";
+        var text = DiagLinkTransactionalEmailLayout.BuildPlainText(greeting, paragraphs, highlight);
+        var html = DiagLinkTransactionalEmailLayout.BuildHtml("Votre demande a été acceptée", greeting,
+            paragraphs, highlight);
         return new("DiagLink — Votre demande a été acceptée", text, html);
     }
 
@@ -87,10 +79,16 @@ public static class RequestReceivedEmailTemplate
         var requestLine = payload.RequestKind == MachineRequestKind.AdditionalDocuments
             ? $"Votre demande d’ajout de documents pour la machine \"{payload.MachineName}\" n’a pas été acceptée."
             : $"Votre demande concernant la machine \"{payload.MachineName}\" n’a pas été acceptée.";
-        var text = $"{greeting}\n\n{requestLine}\n\nL’autorisation de paiement associée à cette demande a été annulée.\nAucun montant n’a été encaissé.\n\nL’équipe DiagLink";
-        var html = $"<p>{Encode(greeting)}</p><p>{Encode(requestLine)}</p>"
-            + "<p>L’autorisation de paiement associée à cette demande a été annulée.<br>Aucun montant n’a été encaissé.</p>"
-            + "<p>L’équipe DiagLink</p>";
+        string[] paragraphs =
+        [
+            requestLine,
+            "L’autorisation de paiement associée à cette demande a été annulée.",
+            "Aucun montant n’a été encaissé."
+        ];
+        var text = DiagLinkTransactionalEmailLayout.BuildPlainText(greeting, paragraphs,
+            "Autorisation de paiement annulée");
+        var html = DiagLinkTransactionalEmailLayout.BuildHtml("Mise à jour de votre demande", greeting,
+            paragraphs, "Autorisation de paiement annulée");
         return new("DiagLink — Mise à jour de votre demande", text, html);
     }
 
@@ -101,11 +99,16 @@ public static class RequestReceivedEmailTemplate
         if (documents != (payload.RequestKind == MachineRequestKind.AdditionalDocuments))
             throw new InvalidDataException("The Ready payload does not match its notification type.");
         var greeting = Greeting(payload.FirstName);
-        var body = documents
-            ? $"Les nouveaux documents ajoutés pour la machine \"{payload.MachineName}\" ont été intégrés.\n\nIls sont maintenant disponibles dans DiagLink et peuvent être utilisés par votre assistant technique."
-            : $"La préparation de votre machine \"{payload.MachineName}\" est terminée.\n\nVotre machine et sa documentation sont maintenant disponibles dans DiagLink.\n\nVous pouvez vous connecter à DiagLink pour utiliser votre assistant technique.";
-        var text = $"{greeting}\n\n{body}\n\nL’équipe DiagLink";
-        var html = $"<p>{Encode(greeting)}</p><p>{Encode(body).Replace("\n\n", "</p><p>", StringComparison.Ordinal)}</p><p>L’équipe DiagLink</p>";
+        string[] paragraphs = documents
+            ? [$"Les nouveaux documents ajoutés pour la machine \"{payload.MachineName}\" ont été intégrés.",
+                "Ils sont maintenant disponibles dans DiagLink et peuvent être utilisés par votre assistant technique."]
+            : [$"La préparation de votre machine \"{payload.MachineName}\" est terminée.",
+                "Votre machine et sa documentation sont maintenant disponibles dans DiagLink.",
+                "Vous pouvez vous connecter à DiagLink pour utiliser votre assistant technique."];
+        var title = documents ? "Vos nouveaux documents sont disponibles" : "Votre machine est prête";
+        var highlight = documents ? "Documents disponibles" : "Machine prête";
+        var text = DiagLinkTransactionalEmailLayout.BuildPlainText(greeting, paragraphs, highlight);
+        var html = DiagLinkTransactionalEmailLayout.BuildHtml(title, greeting, paragraphs, highlight);
         return new(documents
             ? "DiagLink — Vos nouveaux documents sont disponibles"
             : "DiagLink — Votre machine est prête", text, html);
@@ -115,5 +118,4 @@ public static class RequestReceivedEmailTemplate
         string.IsNullOrWhiteSpace(firstName) ? "Bonjour," : $"Bonjour {firstName.Trim()},";
     private static string Euros(long cents) =>
         (cents / 100m).ToString("N2", CultureInfo.GetCultureInfo("fr-FR"));
-    private static string Encode(string value) => WebUtility.HtmlEncode(value);
 }

@@ -17,7 +17,7 @@ public static class DiagLinkAuthenticationDefaults
 /// Registered as an additional scheme alongside the existing Microsoft Identity Web (JWT bearer) scheme.
 /// See DiagLinkSessionService for the opaque-token lookup (unchanged) and DiagLinkUserLookupService for
 /// the dbo.Users Role/CompanyId/Status resolution re-run on every request — a session token surviving
-/// its 24h lifetime must not outlive the user's active status, role, or company assignment.
+/// its role-based lifetime must not outlive the user's active status, role, or company assignment.
 /// </summary>
 public class DiagLinkSessionAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {

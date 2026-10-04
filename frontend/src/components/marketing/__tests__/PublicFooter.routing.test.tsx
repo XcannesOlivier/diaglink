@@ -88,4 +88,32 @@ describe('PublicFooter routing', () => {
 
     expect(container.textContent).toContain('Mentions légales');
   });
+
+  it('opens the service conditions page from the Conditions générales de service link', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={['/']}>
+          <Routes>
+            <Route path="/" element={<PublicFooter loginTarget="/login" />} />
+            <Route path="/conditions" element={<h1>Conditions générales de service</h1>} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const conditionsLink = Array.from(container.querySelectorAll('a'))
+      .find(link => link.textContent === 'Conditions générales de service');
+
+    expect(conditionsLink?.getAttribute('href')).toBe('/conditions');
+
+    await act(async () => {
+      conditionsLink?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(container.textContent).toContain('Conditions générales de service');
+  });
 });

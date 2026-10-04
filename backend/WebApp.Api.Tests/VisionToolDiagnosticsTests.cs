@@ -96,6 +96,167 @@ public class VisionToolDiagnosticsTests
                 System.Text.Json.JsonSerializer.Serialize(new { response = payload })
         })))!;
 
+    private static VisionToolDiagnostics ObservePayload(string payload, Capture? logger = null)
+    {
+        var probe = new VisionToolDiagnostics(logger ?? new Capture());
+        probe.Observe(Vision("visual", true, payload), "done", "parent");
+        return probe;
+    }
+
+    private const string FullVisual = """
+        {"document_id":"manual","page":71,"asset_type":"full","tile":null,
+         "name":"manual_page-00071-full.png","asset_key":"manual/page-00071/manual_page-00071-full.png"}
+        """;
+
+    private const string TileVisual = """
+        {"document_id":"manual","page":71,"asset_type":"tile","tile":"r02-c01",
+         "name":"manual_page-00071-tile-r02-c01.png","asset_key":"manual/page-00071/manual_page-00071-tile-r02-c01.png"}
+        """;
+
+    [TestMethod]
+    public void Visuals_ExtractsValidFull()
+    {
+        var visual = ObservePayload($$"""{"visuals":[{{FullVisual}}]}""").Visuals.Single();
+        Assert.AreEqual("manual", visual.DocumentId);
+        Assert.AreEqual(71, visual.Page);
+        Assert.AreEqual("full", visual.AssetType);
+        Assert.IsNull(visual.Tile);
+        Assert.AreEqual("manual_page-00071-full.png", visual.Name);
+        Assert.AreEqual("manual/page-00071/manual_page-00071-full.png", visual.AssetKey);
+    }
+
+    [TestMethod]
+    public void Visuals_ExtractsValidTile()
+    {
+        var visual = ObservePayload($$"""{"visuals":[{{TileVisual}}]}""").Visuals.Single();
+        Assert.AreEqual("tile", visual.AssetType);
+        Assert.AreEqual("r02-c01", visual.Tile);
+    }
+
+    [TestMethod]
+    public void Visuals_PreservesValidInputOrder()
+    {
+        var visuals = ObservePayload($$"""{"visuals":[{{TileVisual}},{{FullVisual}}]}""").Visuals;
+        Assert.HasCount(2, visuals);
+        Assert.AreEqual("tile", visuals[0].AssetType);
+        Assert.AreEqual("full", visuals[1].AssetType);
+    }
+
+    [TestMethod]
+    public void Visuals_AbsentLeavesCollectionEmpty() =>
+        Assert.HasCount(0, ObservePayload("{}").Visuals);
+
+    [TestMethod]
+    public void Visuals_EmptyArrayLeavesCollectionEmpty() =>
+        Assert.HasCount(0, ObservePayload("""{"visuals":[]}""").Visuals);
+
+    [TestMethod]
+    public void Visuals_MalformedEntryIsIgnored() =>
+        Assert.HasCount(0, ObservePayload("""{"visuals":["invalid",{"page":71}]}""").Visuals);
+
+    [TestMethod]
+    public void Visuals_UnknownAssetTypeIsIgnored() =>
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":71,"asset_type":"preview","tile":null,"name":"preview.png","asset_key":"manual/page-00071/preview.png"}]}""").Visuals);
+
+    [TestMethod]
+    public void Visuals_InvalidTileIsIgnored() =>
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":71,"asset_type":"tile","tile":"r2-c1","name":"tile.png","asset_key":"manual/page-00071/tile.png"}]}""").Visuals);
+
+    [TestMethod]
+    public void Visuals_FullWithTileIsIgnored() =>
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":71,"asset_type":"full","tile":"r02-c01","name":"full.png","asset_key":"manual/page-00071/full.png"}]}""").Visuals);
+
+    [TestMethod]
+    public void Visuals_MissingRequiredValuesAndNonPngNamesAreIgnored()
+    {
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"","page":71,"asset_type":"full","tile":null,"name":"full.png","asset_key":"manual/full.png"}]}""").Visuals);
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":71,"asset_type":"full","tile":null,"name":"full.jpg","asset_key":"manual/full.jpg"}]}""").Visuals);
+    }
+
+    [TestMethod]
+    public void Visuals_NonPositivePageIsIgnored()
+    {
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":0,"asset_type":"full","tile":null,"name":"full.png","asset_key":"manual/page-00000/full.png"}]}""").Visuals);
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":-1,"asset_type":"full","tile":null,"name":"full.png","asset_key":"manual/page-00001/full.png"}]}""").Visuals);
+    }
+
+    [TestMethod]
+    public void Visuals_ParentTraversalAssetKeyIsIgnored() =>
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":71,"asset_type":"full","tile":null,"name":"full.png","asset_key":"manual/../full.png"}]}""").Visuals);
+
+    [TestMethod]
+    public void Visuals_AbsoluteAssetKeyIsIgnored()
+    {
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":71,"asset_type":"full","tile":null,"name":"full.png","asset_key":"/manual/full.png"}]}""").Visuals);
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":71,"asset_type":"full","tile":null,"name":"full.png","asset_key":"\\manual\\full.png"}]}""").Visuals);
+    }
+
+    [TestMethod]
+    public void Visuals_UrlAssetKeyIsIgnored() =>
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":71,"asset_type":"full","tile":null,"name":"full.png","asset_key":"https://storage.test/manual/full.png"}]}""").Visuals);
+
+    [TestMethod]
+    public void Visuals_UrlsInOtherStringFieldsAreIgnored()
+    {
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"https://storage.test/manual","page":71,"asset_type":"full","tile":null,"name":"full.png","asset_key":"manual/full.png"}]}""").Visuals);
+        Assert.HasCount(0, ObservePayload("""{"visuals":[{"document_id":"manual","page":71,"asset_type":"full","tile":null,"name":"https://storage.test/full.png","asset_key":"manual/full.png"}]}""").Visuals);
+    }
+
+    [TestMethod]
+    public void Visuals_PreserveExistingUsageAndTechnicalMetadataExtraction()
+    {
+        var probe = ObservePayload($$"""
+            {"visuals":[{{FullVisual}}],"usage":{"input_tokens":4,"output_tokens":2},
+             "model":"vision","provider":"azure","deployment":"vision-prod"}
+            """);
+        var usage = probe.Measurements.Single().Usage;
+        Assert.AreEqual(4, usage.InputTokens);
+        Assert.AreEqual(2, usage.OutputTokens);
+        Assert.AreEqual(6, usage.TotalTokens);
+        Assert.AreEqual("vision", usage.Model);
+        Assert.AreEqual("azure", usage.Provider);
+        Assert.AreEqual("vision-prod", usage.Deployment);
+        Assert.HasCount(1, probe.Visuals);
+    }
+
+    [TestMethod]
+    public void Visuals_ExtractThroughSupportedNestedJsonEnvelopes()
+    {
+        var payload = $$"""{"visuals":[{{TileVisual}}]}""";
+        var encoded = System.Text.Json.JsonSerializer.Serialize(payload);
+        var wrapped = System.Text.Json.JsonSerializer.Serialize(new { response = encoded });
+        Assert.AreEqual("r02-c01", ObservePayload(wrapped).Visuals.Single().Tile);
+    }
+
+    [TestMethod]
+    public void Visuals_AreNeverWrittenToLogs()
+    {
+        var logger = new Capture();
+        ObservePayload("""
+            {"visuals":[{"document_id":"PRIVATE_DOCUMENT_ID","page":71,"asset_type":"tile","tile":"r02-c01",
+             "name":"PRIVATE_NAME.png","asset_key":"PRIVATE/KEY/PRIVATE_NAME.png"}]}
+            """, logger);
+        var logs = string.Join("\n", logger.Lines);
+        foreach (var sensitive in new[] { "PRIVATE_DOCUMENT_ID", "PRIVATE_NAME", "PRIVATE/KEY" })
+            Assert.IsFalse(logs.Contains(sensitive));
+    }
+
+    [TestMethod]
+    public void Visuals_DeltaContainsOnlyNewAssetKeysAndIsDrainedAfterRead()
+    {
+        var probe = new VisionToolDiagnostics(new Capture());
+        probe.Observe(Vision("first", true, $$"""{"visuals":[{{FullVisual}}]}"""), "done", "parent");
+        Assert.AreEqual(
+            "manual/page-00071/manual_page-00071-full.png",
+            probe.TakeNewVisuals().Single().AssetKey);
+        Assert.HasCount(0, probe.TakeNewVisuals());
+
+        probe.Observe(Vision("second", true, $$"""{"visuals":[{{FullVisual}},{{TileVisual}}]}"""), "done", "parent");
+        var delta = probe.TakeNewVisuals();
+        Assert.HasCount(1, delta);
+        Assert.AreEqual("manual/page-00071/manual_page-00071-tile-r02-c01.png", delta[0].AssetKey);
+    }
+
     [TestMethod]
     public void ZeroOneAndThreeCallsAreDistinctAndRepeatedEventsAreDeduplicated()
     {

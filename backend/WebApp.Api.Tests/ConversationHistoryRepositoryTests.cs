@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using WebApp.Api.Data;
+using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
 using WebApp.Api.Repositories;
 
@@ -20,6 +21,37 @@ public class ConversationHistoryRepositoryTests
 
     private static ConversationHistoryRepository CreateRepository(DiagLinkDbContext context)
         => new(context, NullLogger<ConversationHistoryRepository>.Instance);
+
+    [TestMethod]
+    public async Task ListConversationsForUserAsync_FiltersByOwnerAndMachine()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var machineA = Guid.NewGuid();
+        var machineB = Guid.NewGuid();
+
+        await using (var seedContext = CreateContext(dbName))
+        {
+            var repository = CreateRepository(seedContext);
+            await repository.CreateConversationAsync("user-a-machine-a-1", "user-A", null, machineA, CancellationToken.None);
+            await repository.CreateConversationAsync("user-a-machine-a-2", "user-A", null, machineA, CancellationToken.None);
+            await repository.CreateConversationAsync("user-a-machine-b", "user-A", null, machineB, CancellationToken.None);
+            await repository.CreateConversationAsync("user-b-machine-a", "user-B", null, machineA, CancellationToken.None);
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var repositoryUnderTest = CreateRepository(readContext);
+
+        var conversationsA = await repositoryUnderTest.ListConversationsForUserAsync("user-A", machineA, CancellationToken.None);
+        var conversationsB = await repositoryUnderTest.ListConversationsForUserAsync("user-A", machineB, CancellationToken.None);
+        var allUserConversations = await repositoryUnderTest.ListConversationsForUserAsync("user-A", null, CancellationToken.None);
+
+        CollectionAssert.AreEquivalent(
+            new[] { "user-a-machine-a-1", "user-a-machine-a-2" },
+            conversationsA.Select(conversation => conversation.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "user-a-machine-b" }, conversationsB.Select(conversation => conversation.Id).ToArray());
+        Assert.AreEqual(3, allUserConversations.Count);
+        Assert.IsFalse(allUserConversations.Any(conversation => conversation.Id == "user-b-machine-a"));
+    }
 
     [TestMethod]
     public async Task AddMessageAsync_OtherUsersConversationId_DoesNotPersistMessage()
@@ -291,6 +323,244 @@ public class ConversationHistoryRepositoryTests
         }
 
         Assert.IsTrue(afterSave.Any(m => m.Content == "current question"));
+    }
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_WithoutVisuals_PersistsEmptyCollection()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-no-visual", "user-A");
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            await CreateRepository(writeContext).AddMessageAsync(
+                "conv-no-visual", "user-A", "assistant", "answer", [], CancellationToken.None);
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var message = await readContext.ConversationMessages.Include(m => m.Visuals).SingleAsync();
+        Assert.AreEqual("assistant", message.Role);
+        Assert.HasCount(0, message.Visuals);
+    }
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_PersistsFullVisual()
+    {
+        var visual = FullVisual();
+        var message = await PersistAssistantWithVisualsAsync([visual]);
+
+        var persisted = message.Visuals.Single();
+        Assert.AreEqual(visual.DocumentId, persisted.DocumentId);
+        Assert.AreEqual(visual.Page, persisted.Page);
+        Assert.AreEqual("full", persisted.AssetType);
+        Assert.IsNull(persisted.Tile);
+        Assert.AreEqual(visual.Name, persisted.Name);
+        Assert.AreEqual(visual.AssetKey, persisted.AssetKey);
+        Assert.AreEqual(0, persisted.DisplayOrder);
+    }
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_PersistsTileVisual()
+    {
+        var visual = TileVisual();
+        var message = await PersistAssistantWithVisualsAsync([visual]);
+
+        var persisted = message.Visuals.Single();
+        Assert.AreEqual("tile", persisted.AssetType);
+        Assert.AreEqual("r02-c01", persisted.Tile);
+    }
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_PreservesVisualOrder()
+    {
+        var message = await PersistAssistantWithVisualsAsync([TileVisual(), FullVisual()]);
+
+        var visuals = message.Visuals.OrderBy(v => v.DisplayOrder).ToList();
+        CollectionAssert.AreEqual(new[] { "tile", "full" }, visuals.Select(v => v.AssetType).ToArray());
+        CollectionAssert.AreEqual(new[] { 0, 1 }, visuals.Select(v => v.DisplayOrder).ToArray());
+    }
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_ReturnsPersistedSqlIdsAndHistoryDtos()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-persisted-result", "user-A");
+        ConversationMessagePersistenceResult result;
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            result = (await CreateRepository(writeContext).AddMessageAsync(
+                "conv-persisted-result",
+                "user-A",
+                "assistant",
+                "answer",
+                [TileVisual(), FullVisual()],
+                CancellationToken.None))!;
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var persistedIds = await readContext.ConversationMessageVisuals
+            .OrderBy(visual => visual.DisplayOrder)
+            .Select(visual => visual.Id)
+            .ToListAsync();
+        var history = await CreateRepository(readContext)
+            .GetConversationMessagesAsync("conv-persisted-result", "user-A", CancellationToken.None);
+
+        Assert.IsTrue(result.MessageId > 0);
+        CollectionAssert.AreEqual(persistedIds, result.Visuals.Select(visual => visual.Id).ToList());
+        CollectionAssert.AreEqual(result.Visuals.ToList(), history!.Single().Visuals.ToList());
+    }
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_DuplicateAssetKeyPersistsFirstOccurrenceOnly()
+    {
+        var first = FullVisual();
+        var duplicate = first with { DocumentId = "replacement", Name = "replacement.png" };
+        var message = await PersistAssistantWithVisualsAsync([first, duplicate]);
+
+        Assert.HasCount(1, message.Visuals);
+        Assert.AreEqual(first.DocumentId, message.Visuals.Single().DocumentId);
+        Assert.AreEqual(first.Name, message.Visuals.Single().Name);
+    }
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_DifferentMessagesMayUseSameAssetKey()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-shared-visual", "user-A");
+        var visual = FullVisual();
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            var repository = CreateRepository(writeContext);
+            await repository.AddMessageAsync("conv-shared-visual", "user-A", "assistant", "first", [visual], CancellationToken.None);
+            await repository.AddMessageAsync("conv-shared-visual", "user-A", "assistant", "second", [visual], CancellationToken.None);
+        }
+
+        await using var readContext = CreateContext(dbName);
+        Assert.AreEqual(2, await readContext.ConversationMessageVisuals.CountAsync());
+        Assert.AreEqual(2, await readContext.ConversationMessageVisuals.Select(v => v.ConversationMessageId).Distinct().CountAsync());
+    }
+
+    [TestMethod]
+    public async Task AddMessageAsync_UserOverloadRemainsWithoutVisuals()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-user", "user-A");
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            await CreateRepository(writeContext).AddMessageAsync(
+                "conv-user", "user-A", "user", "question", CancellationToken.None);
+        }
+
+        await using var readContext = CreateContext(dbName);
+        Assert.AreEqual(1, await readContext.ConversationMessages.CountAsync());
+        Assert.AreEqual(0, await readContext.ConversationMessageVisuals.CountAsync());
+    }
+
+    [TestMethod]
+    public async Task GetConversationMessagesAsync_ReturnsVisualsInDisplayOrderWithoutAssetKey()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-history", "user-A");
+        await using (var writeContext = CreateContext(dbName))
+        {
+            await CreateRepository(writeContext).AddMessageAsync(
+                "conv-history", "user-A", "assistant", "answer", [TileVisual(), FullVisual()], CancellationToken.None);
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var messages = await CreateRepository(readContext)
+            .GetConversationMessagesAsync("conv-history", "user-A", CancellationToken.None);
+
+        var message = messages!.Single();
+        Assert.HasCount(2, message.Visuals);
+        CollectionAssert.AreEqual(new[] { "tile", "full" }, message.Visuals.Select(v => v.AssetType).ToArray());
+        Assert.IsTrue(message.Visuals.All(v => v.Id > 0));
+        Assert.IsNull(typeof(ConversationMessageVisualInfo).GetProperty("AssetKey"));
+        var json = System.Text.Json.JsonSerializer.Serialize(message, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.IsFalse(json.Contains("assetKey", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public async Task GetConversationMessagesAsync_LegacyMessageReturnsEmptyVisuals()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedConversationWithMessagesAsync(dbName, "conv-legacy", "user-A", count: 1);
+
+        await using var readContext = CreateContext(dbName);
+        var messages = await CreateRepository(readContext)
+            .GetConversationMessagesAsync("conv-legacy", "user-A", CancellationToken.None);
+
+        Assert.HasCount(0, messages!.Single().Visuals);
+    }
+
+    [TestMethod]
+    public async Task GetConversationMessagesAsync_OtherUserCannotReadVisuals()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-private-visual", "user-A");
+        await using (var writeContext = CreateContext(dbName))
+        {
+            await CreateRepository(writeContext).AddMessageAsync(
+                "conv-private-visual", "user-A", "assistant", "answer", [FullVisual()], CancellationToken.None);
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var messages = await CreateRepository(readContext)
+            .GetConversationMessagesAsync("conv-private-visual", "user-B", CancellationToken.None);
+
+        Assert.IsNull(messages);
+    }
+
+    [TestMethod]
+    public async Task RemovingMessage_CascadesToVisuals()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var message = await PersistAssistantWithVisualsAsync([FullVisual()], dbName);
+
+        await using (var deleteContext = CreateContext(dbName))
+        {
+            var tracked = await deleteContext.ConversationMessages.Include(m => m.Visuals).SingleAsync(m => m.Id == message.Id);
+            deleteContext.ConversationMessages.Remove(tracked);
+            await deleteContext.SaveChangesAsync();
+        }
+
+        await using var verifyContext = CreateContext(dbName);
+        Assert.AreEqual(0, await verifyContext.ConversationMessageVisuals.CountAsync());
+        var foreignKey = verifyContext.Model.FindEntityType(typeof(ConversationMessageVisual))!
+            .GetForeignKeys().Single(fk => fk.PrincipalEntityType.ClrType == typeof(ConversationMessage));
+        Assert.AreEqual(DeleteBehavior.Cascade, foreignKey.DeleteBehavior);
+    }
+
+    private static TechnicalVisualReference FullVisual() => new(
+        "manual", 71, "full", null, "manual_page-00071-full.png", "manual/page-00071/manual_page-00071-full.png");
+
+    private static TechnicalVisualReference TileVisual() => new(
+        "manual", 71, "tile", "r02-c01", "manual_page-00071-tile-r02-c01.png", "manual/page-00071/manual_page-00071-tile-r02-c01.png");
+
+    private static async Task SeedEmptyConversationAsync(string dbName, string conversationId, string userObjectId)
+    {
+        await using var context = CreateContext(dbName);
+        await CreateRepository(context).CreateConversationAsync(
+            conversationId, userObjectId, agentName: null, machineId: null, cancellationToken: CancellationToken.None);
+    }
+
+    private static async Task<ConversationMessage> PersistAssistantWithVisualsAsync(
+        IReadOnlyList<TechnicalVisualReference> visuals,
+        string? dbName = null)
+    {
+        dbName ??= Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-visuals", "user-A");
+        await using (var writeContext = CreateContext(dbName))
+        {
+            await CreateRepository(writeContext).AddMessageAsync(
+                "conv-visuals", "user-A", "assistant", "answer", visuals, CancellationToken.None);
+        }
+
+        await using var readContext = CreateContext(dbName);
+        return await readContext.ConversationMessages.Include(m => m.Visuals).SingleAsync();
     }
 }
 

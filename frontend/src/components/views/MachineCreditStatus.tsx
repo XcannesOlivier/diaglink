@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { getApiAuthHeaders } from '../../utils/apiAuth';
 
+const hiddenAvailableBudgetMessage = 'Budget IA inclus disponible.';
+
 export function MachineCreditStatus({ machineId, getAccessToken }: { machineId: string; getAccessToken: () => Promise<string | null> }) {
   const [message, setMessage] = useState('');
   useEffect(() => {
@@ -12,7 +14,7 @@ export function MachineCreditStatus({ machineId, getAccessToken }: { machineId: 
         const response = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/machines/${encodeURIComponent(machineId)}/ai-credit`, { headers, signal: controller.signal });
         if (!response.ok) throw new Error();
         const data = await response.json();
-        if (!controller.signal.aborted) setMessage(data.message);
+        if (!controller.signal.aborted) setMessage(data.message === hiddenAvailableBudgetMessage ? '' : data.message);
       } catch {
         if (!controller.signal.aborted) setMessage('');
       }

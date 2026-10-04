@@ -42,6 +42,50 @@ public sealed class OtpAtomicConsumptionTests
     }
 
     [TestMethod]
+    [DataRow(DiagLinkRoles.SuperAdmin, true)]
+    [DataRow(DiagLinkRoles.CompanyAdmin, true)]
+    [DataRow(DiagLinkRoles.Technician, false)]
+    [DataRow("unexpected_role", false)]
+    public async Task VerifyCode_SessionLifetimeDependsOnRole(string role, bool usesMonthlyLifetime)
+    {
+        await using var factory = await OtpRelationalApplicationFactory.CreateAsync();
+        var email = $"{role}@example.test";
+        var userId = await factory.SeedOtpAsync(email, ValidCode, DateTime.UtcNow.AddMinutes(10), role);
+        var startedAtUtc = DateTime.UtcNow;
+
+        var response = await VerifyAsync(factory, email, ValidCode);
+
+        var completedAtUtc = DateTime.UtcNow;
+        Assert.IsTrue(response.Success);
+        Assert.IsNotNull(response.ExpiresAtUtc);
+        var storedExpiry = await factory.GetSessionExpiryAsync(userId);
+        Assert.AreEqual(response.ExpiresAtUtc.Value, storedExpiry);
+
+        var earliestExpected = usesMonthlyLifetime
+            ? startedAtUtc.AddMonths(1)
+            : startedAtUtc.AddHours(24);
+        var latestExpected = usesMonthlyLifetime
+            ? completedAtUtc.AddMonths(1)
+            : completedAtUtc.AddHours(24);
+        Assert.IsTrue(storedExpiry >= earliestExpected && storedExpiry <= latestExpected);
+    }
+
+    [TestMethod]
+    public async Task ValidateSession_ExpiredSessionRemainsInvalid()
+    {
+        await using var factory = await OtpRelationalApplicationFactory.CreateAsync();
+        var userId = await factory.SeedOtpAsync("expired-session@example.test", ValidCode, DateTime.UtcNow.AddMinutes(10));
+        var login = await VerifyAsync(factory, "expired-session@example.test", ValidCode);
+        Assert.IsTrue(login.Success);
+        Assert.IsNotNull(login.SessionToken);
+        await factory.ExpireSessionsAsync(userId);
+
+        var validation = await ValidateSessionAsync(factory, login.SessionToken);
+
+        Assert.IsFalse(validation.Valid);
+    }
+
+    [TestMethod]
     public async Task VerifyCode_ReusedOtp_ReturnsGenericFailure()
     {
         await using var factory = await OtpRelationalApplicationFactory.CreateAsync();
@@ -114,6 +158,21 @@ public sealed class OtpAtomicConsumptionTests
         return body;
     }
 
+    private static async Task<ValidateSessionResponse> ValidateSessionAsync(
+        OtpRelationalApplicationFactory factory,
+        string sessionToken)
+    {
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var response = await client.PostAsJsonAsync("/api/auth/validate-session", new ValidateSessionRequest
+        {
+            SessionToken = sessionToken,
+        });
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ValidateSessionResponse>();
+        Assert.IsNotNull(body);
+        return body;
+    }
+
     private sealed class OtpRelationalApplicationFactory : WebApplicationFactory<BlobStorageService>
     {
         private readonly string connectionString;
@@ -144,7 +203,11 @@ public sealed class OtpAtomicConsumptionTests
             }
         }
 
-        public async Task<Guid> SeedOtpAsync(string email, string code, DateTime expiresAtUtc)
+        public async Task<Guid> SeedOtpAsync(
+            string email,
+            string code,
+            DateTime expiresAtUtc,
+            string role = DiagLinkRoles.Technician)
         {
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DiagLinkDbContext>();
@@ -155,7 +218,7 @@ public sealed class OtpAtomicConsumptionTests
                 Id = userId,
                 CompanyId = Guid.NewGuid(),
                 Email = email,
-                Role = DiagLinkRoles.Technician,
+                Role = role,
                 Status = "active",
                 CreatedAt = now,
                 UpdatedAt = now,
@@ -178,6 +241,25 @@ public sealed class OtpAtomicConsumptionTests
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<DiagLinkDbContext>();
             return await db.UserSessions.CountAsync(session => session.UserId == userId);
+        }
+
+        public async Task<DateTime> GetSessionExpiryAsync(Guid userId)
+        {
+            using var scope = Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DiagLinkDbContext>();
+            return await db.UserSessions
+                .Where(session => session.UserId == userId)
+                .Select(session => session.ExpiresAtUtc)
+                .SingleAsync();
+        }
+
+        public async Task ExpireSessionsAsync(Guid userId)
+        {
+            using var scope = Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DiagLinkDbContext>();
+            var sessions = await db.UserSessions.Where(session => session.UserId == userId).ToListAsync();
+            foreach (var session in sessions) session.ExpiresAtUtc = DateTime.UtcNow.AddMinutes(-1);
+            await db.SaveChangesAsync();
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

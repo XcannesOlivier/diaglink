@@ -21,6 +21,13 @@ public sealed class EmailOutboxStore(DiagLinkDbContext db, TimeProvider timeProv
     private static readonly JsonSerializerOptions PayloadOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan MaximumRetryDelay = TimeSpan.FromHours(1);
 
+    internal static FormattableString BuildSqlServerClaimQuery(int batchSize, DateTime now) => $@"
+                    SELECT TOP ({batchSize}) * FROM [dbo].[EmailOutbox] WITH (UPDLOCK, READPAST, ROWLOCK, READCOMMITTEDLOCK)
+                    WHERE [Status] = {(int)EmailOutboxStatus.Pending}
+                      AND [NextAttemptAtUtc] <= {now}
+                      AND ([LockedUntilUtc] IS NULL OR [LockedUntilUtc] <= {now})
+                    ORDER BY [CreatedAtUtc], [Id]";
+
     public async Task<EmailOutbox> EnqueueAsync(EmailOutboxEnqueue request, CancellationToken ct = default)
     {
         var entry = CreatePending(request, timeProvider.GetUtcNow().UtcDateTime);
@@ -77,16 +84,11 @@ public sealed class EmailOutboxStore(DiagLinkDbContext db, TimeProvider timeProv
             var provider = db.Database.ProviderName ?? "";
 
             await using var transaction = db.Database.IsRelational()
-                ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, token)
+                ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.ReadCommitted, token)
                 : null;
             IQueryable<EmailOutbox> query = db.EmailOutbox;
             if (provider.Contains("SqlServer", StringComparison.OrdinalIgnoreCase))
-                query = db.EmailOutbox.FromSqlInterpolated($@"
-                    SELECT TOP ({batchSize}) * FROM [dbo].[EmailOutbox] WITH (UPDLOCK, READPAST, ROWLOCK)
-                    WHERE [Status] = {(int)EmailOutboxStatus.Pending}
-                      AND [NextAttemptAtUtc] <= {now}
-                      AND ([LockedUntilUtc] IS NULL OR [LockedUntilUtc] <= {now})
-                    ORDER BY [CreatedAtUtc], [Id]");
+                query = db.EmailOutbox.FromSqlInterpolated(BuildSqlServerClaimQuery(batchSize, now));
             else
                 query = query.Where(item => item.Status == EmailOutboxStatus.Pending
                         && item.NextAttemptAtUtc <= now

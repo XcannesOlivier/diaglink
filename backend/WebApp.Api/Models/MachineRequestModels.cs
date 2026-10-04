@@ -71,7 +71,10 @@ public sealed record MachineRequestRecord(
     MachineRequestKind RequestKind = MachineRequestKind.InitialMachine,
     Guid? CompanyId = null,
     Guid? RequestedByUserId = null,
-    Guid? TargetMachineId = null);
+    Guid? TargetMachineId = null,
+    bool IsArchived = false,
+    DateTimeOffset? ArchivedAtUtc = null,
+    Guid? ArchivedByUserId = null);
 
 public sealed record MachineRequestDraft(
     MachineRequestClient Client,

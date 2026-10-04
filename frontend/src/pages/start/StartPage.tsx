@@ -11,6 +11,7 @@ import { MachineRequestSubmissionError, submitMachineRequest, type MachineReques
 import { createMachineRequestPayment, MachineRequestPaymentTerminalError, waitForMachineRequestAuthorization } from '../../services/machineRequestPaymentApi';
 import { authorizationConfirmedMessage, checkoutReturnedMessage, checkoutWindowName, isCheckoutReturnWindow, isTrustedCheckoutMessage, requestSubmittedMessage } from './checkoutPopup';
 import { formatFileSize, inspectPdfFiles, type SelectedPdf } from './pdfSelection';
+import { ConditionsDialog } from './ConditionsDialog';
 
 const steps = ['Coordonnées', 'Machine', 'Documents', 'Récapitulatif'];
 const euroFormatter = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
@@ -76,13 +77,17 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
   const [submissionPhase, setSubmissionPhase] = useState<SubmissionPhase>('idle');
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<MachineRequestResponse | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsAcceptanceAttempted, setTermsAcceptanceAttempted] = useState(false);
+  const [conditionsOpen, setConditionsOpen] = useState(false);
   const totalPages = useMemo(() => selectedPdfs.reduce((total, pdf) => total + pdf.pageCount, 0), [selectedPdfs]);
   // Estimation d'interface uniquement : pages et tarif devront obligatoirement être
   // recalculés et validés côté serveur avant toute facturation.
   const preparationPrice = useMemo(() => calculatePreparationPrice(totalPages), [totalPages]);
   const maximumAuthorizationPrice = useMemo(() => calculateMaximumAuthorizationPrice(totalPages), [totalPages]);
   const formErrors = useMemo(() => validateStartForm(formValues, selectedPdfs.length), [formValues, selectedPdfs.length]);
-  const isFormComplete = Object.keys(formErrors).length === 0 && !isReadingFiles && fileErrors.length === 0 && !isSubmitting;
+  const isFormReady = Object.keys(formErrors).length === 0 && !isReadingFiles && fileErrors.length === 0 && !isSubmitting;
+  const isFormComplete = isFormReady && termsAccepted;
 
   useEffect(() => {
     if (isCheckoutReturn) {
@@ -179,7 +184,8 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
     setFormValues(trimmedValues);
     setTouchedFields({ firstName: true, lastName: true, company: true, email: true, phone: true, machineName: true, manufacturer: true, model: true });
     setDocumentsTouched(true);
-    if (Object.keys(finalErrors).length > 0 || isReadingFiles || fileErrors.length > 0) return;
+    setTermsAcceptanceAttempted(!termsAccepted);
+    if (Object.keys(finalErrors).length > 0 || isReadingFiles || fileErrors.length > 0 || !isFormComplete) return;
 
     submissionLock.current = true;
     setIsSubmitting(true);
@@ -366,11 +372,34 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
           </section>
 
           <div className={styles.submitArea}>
-            <button type="submit" disabled={!isFormComplete}>{isSubmitting
+            <div className={styles.termsAcceptance}>
+              <div className={styles.termsRow}>
+                <input
+                  id="terms-accepted"
+                  name="termsAccepted"
+                  type="checkbox"
+                  checked={termsAccepted}
+                  disabled={isSubmitting}
+                  aria-invalid={termsAcceptanceAttempted && !termsAccepted}
+                  aria-describedby={termsAcceptanceAttempted && !termsAccepted ? 'terms-acceptance-error' : undefined}
+                  onChange={event => {
+                    setTermsAccepted(event.target.checked);
+                    if (event.target.checked) setTermsAcceptanceAttempted(false);
+                  }}
+                />
+                <span className={styles.termsText}>
+                  <label htmlFor="terms-accepted">J’ai lu et j’accepte les </label>
+                  <button type="button" className={styles.termsLink} onClick={() => setConditionsOpen(true)}>Conditions générales de service</button>
+                  <label htmlFor="terms-accepted"> de DiagLink.</label>
+                </span>
+              </div>
+              {termsAcceptanceAttempted && !termsAccepted && <p className={styles.termsError} id="terms-acceptance-error" role="alert">Vous devez accepter les Conditions générales de service pour continuer.</p>}
+            </div>
+            <button className={styles.submitButton} type="submit" disabled={!isFormComplete}>{isSubmitting
               ? submissionPhase === 'preparing' ? 'Préparation du paiement…'
                 : submissionPhase === 'waiting' ? 'Autorisation en attente…'
                   : 'Transmission de vos documents…'
-              : isFormComplete
+              : isFormReady
                 ? `Autoriser ${formatCents(maximumAuthorizationPrice)} et transmettre ma demande`
                 : 'Ajouter vos documents pour continuer'}</button>
             {isSubmitting && <p className={styles.submissionStatus}>{submissionPhase === 'preparing'
@@ -384,6 +413,7 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
           </div>
         </form>}
       </main>
+      <ConditionsDialog open={conditionsOpen} onClose={() => setConditionsOpen(false)} />
       <PublicFooter loginTarget={loginTarget} />
     </div>
   );

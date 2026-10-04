@@ -72,7 +72,7 @@ public class EmailOutboxStoreTests
     }
 
     [TestMethod]
-    public async Task ClaimRunsSerializableTransactionInsideRetryStrategy()
+    public async Task ClaimRunsReadCommittedTransactionInsideRetryStrategy()
     {
         await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -92,7 +92,18 @@ public class EmailOutboxStoreTests
 
         Assert.AreEqual(1, claimed.Count);
         Assert.AreEqual(1, probe.TransactionCount);
-        Assert.AreEqual(IsolationLevel.Serializable, probe.IsolationLevel);
+        Assert.AreEqual(IsolationLevel.ReadCommitted, probe.RequestedIsolationLevel);
+    }
+
+    [TestMethod]
+    public void SqlServerClaimUsesAtomicLocksCompatibleWithReadCommittedSnapshot()
+    {
+        var query = EmailOutboxStore.BuildSqlServerClaimQuery(10, DateTime.UtcNow).Format;
+
+        StringAssert.Contains(query, "WITH (UPDLOCK, READPAST, ROWLOCK, READCOMMITTEDLOCK)");
+        StringAssert.Contains(query, "[Status] =");
+        StringAssert.Contains(query, "[NextAttemptAtUtc] <=");
+        StringAssert.Contains(query, "[LockedUntilUtc] IS NULL OR [LockedUntilUtc] <=");
     }
 
     [TestMethod]
@@ -193,9 +204,17 @@ public class EmailOutboxStoreTests
         private bool enabled;
         public int TransactionCount { get; private set; }
         public int CommitFailures { get; private set; }
-        public IsolationLevel? IsolationLevel { get; private set; }
+        public IsolationLevel? RequestedIsolationLevel { get; private set; }
 
         public void Enable() => enabled = true;
+
+        public override ValueTask<InterceptionResult<DbTransaction>> TransactionStartingAsync(
+            DbConnection connection, TransactionStartingEventData eventData,
+            InterceptionResult<DbTransaction> result, CancellationToken cancellationToken = default)
+        {
+            if (enabled) RequestedIsolationLevel = eventData.IsolationLevel;
+            return ValueTask.FromResult(result);
+        }
 
         public override ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection,
             TransactionEndEventData eventData, DbTransaction result, CancellationToken cancellationToken = default)
@@ -203,7 +222,6 @@ public class EmailOutboxStoreTests
             if (!enabled) return ValueTask.FromResult(result);
             Assert.IsInstanceOfType<SqlServerRetryingExecutionStrategy>(ExecutionStrategy.Current);
             TransactionCount++;
-            IsolationLevel = result.IsolationLevel;
             return ValueTask.FromResult(result);
         }
 

@@ -1,6 +1,11 @@
+using System.Data.Common;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using WebApp.Api.Data;
@@ -39,12 +44,70 @@ public sealed class MachineRequestReadyTests
         var second = await fixture.MarkReadyAsync();
 
         Assert.AreEqual(MachineRequestPreparationStatus.Ready, first.PreparationStatus);
+        Assert.IsNotNull(first.ReadyAtUtc);
         Assert.AreEqual(first.ReadyAtUtc, second.ReadyAtUtc);
         Assert.AreEqual(fixture.AdminId, first.ReadyByUserId);
+        Assert.AreEqual("captured", first.Status);
+        Assert.AreEqual(9990, first.AmountCents);
         var message = await fixture.Db.EmailOutbox.SingleAsync();
         Assert.AreEqual(expected, message.NotificationType);
         Assert.AreNotEqual(kind == MachineRequestKind.AdditionalDocuments
             ? EmailNotificationType.MachineReady : EmailNotificationType.DocumentsReady, message.NotificationType);
+    }
+
+    [TestMethod]
+    public async Task MarkReadyRunsTransactionInsideSqlServerRetryingExecutionStrategy()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var probe = new ReadyTransactionProbe();
+        var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
+            .UseSqlite(connection)
+            .ReplaceService<IExecutionStrategyFactory, FinancialExecutionStrategyTests.RetryFactory>()
+            .AddInterceptors(probe)
+            .Options;
+        await using var db = new ReadyDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Companies (Id TEXT PRIMARY KEY);");
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Machines (Id TEXT PRIMARY KEY);");
+        var paymentId = Guid.NewGuid();
+        var adminId = Guid.NewGuid();
+        var requestId = paymentId.ToString("N");
+        var now = DateTime.UtcNow;
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO MachineRequestPayments
+            (Id, RequestKind, Status, EstimatedTotalPages, AmountCents, Currency, Email,
+             StripePaymentIntentId, AuthorizationEventId, MachineRequestId, CreatedAtUtc,
+             UpdatedAtUtc, AuthorizedAtUtc, CapturedAtUtc, RequestLinkedAtUtc,
+             FinalCaptureAmountCents, ProvisioningStage, PreparationStatus, RowVersion)
+            VALUES ({paymentId}, {(int)MachineRequestKind.InitialMachine},
+             {(int)MachineRequestPaymentStatus.Captured}, {10}, {9990L}, {"EUR"},
+             {"client@example.test"}, {"pi_test"}, {"evt_test"}, {requestId}, {now}, {now},
+             {now}, {now}, {now}, {7000L}, {(int)MachineRequestProvisioningStage.AwaitingAcceptance},
+             {(int)MachineRequestPreparationStatus.Pending}, {new byte[] { 1 }})
+            """);
+        var request = new MachineRequestRecord(requestId, DateTimeOffset.UtcNow,
+            MachineRequestStatuses.Treated,
+            new("Alice", "Martin", "Garage", "client@example.test", "+331"),
+            new("Machine A", "Maker", "Model", null, null), [],
+            new(10, 400, 0, 99.9m, .27m, 99.9m, 29.9m),
+            new(paymentId, 10, 9990, "EUR", 10, 9990, 0, 0, false));
+        var store = new MachineRequestPaymentStore(db);
+        var payment = await store.GetAsync(paymentId, default);
+
+        var first = await store.MarkReadyAsync(payment!, request, adminId, default);
+        var second = await store.MarkReadyAsync(first, request, adminId, default);
+
+        Assert.IsTrue(probe.ObservedRetryingStrategy);
+        Assert.AreEqual(MachineRequestPreparationStatus.Ready, first.PreparationStatus);
+        Assert.IsNotNull(first.ReadyAtUtc);
+        Assert.AreEqual(first.ReadyAtUtc, second.ReadyAtUtc);
+        Assert.AreEqual(adminId, first.ReadyByUserId);
+        var persisted = await db.MachineRequestPayments.AsNoTracking().SingleAsync();
+        Assert.AreEqual(MachineRequestPaymentStatus.Captured, persisted.Status);
+        Assert.AreEqual(9990, persisted.AmountCents);
+        Assert.AreEqual(7000, persisted.FinalCaptureAmountCents);
+        Assert.AreEqual(1, await db.EmailOutbox.CountAsync());
     }
 
     [TestMethod]
@@ -238,5 +301,29 @@ public sealed class MachineRequestReadyTests
         public Task<string?> SendAsync(string recipientEmail, string subject, string textBody,
             string? htmlBody, CancellationToken cancellationToken,
             string? replyToEmail = null, string? replyToName = null) => Task.FromResult<string?>("acs-ready");
+    }
+
+    private sealed class ReadyTransactionProbe : DbTransactionInterceptor
+    {
+        public bool ObservedRetryingStrategy { get; private set; }
+
+        public override ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection,
+            TransactionEndEventData eventData, DbTransaction result, CancellationToken cancellationToken = default)
+        {
+            ObservedRetryingStrategy = ExecutionStrategy.Current is SqlServerRetryingExecutionStrategy;
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class ReadyDbContext(DbContextOptions<DiagLinkDbContext> options) : DiagLinkDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            var rowVersion = modelBuilder.Entity<EmailOutbox>().Property(item => item.RowVersion)
+                .ValueGeneratedNever().Metadata;
+            rowVersion.SetBeforeSaveBehavior(PropertySaveBehavior.Save);
+            rowVersion.SetAfterSaveBehavior(PropertySaveBehavior.Save);
+        }
     }
 }

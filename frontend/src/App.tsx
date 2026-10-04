@@ -6,6 +6,7 @@ import { LandingPage } from './pages/landing/LandingPage';
 import { ContactPage } from './pages/contact/ContactPage';
 import { PrivacyPage } from './pages/privacy/PrivacyPage';
 import { LegalNoticePage } from './pages/legal/LegalNoticePage';
+import { ConditionsPage } from './pages/conditions/ConditionsPage';
 import { DemonstrationPage } from './pages/demonstration/DemonstrationPage';
 import { StartPage } from './pages/start/StartPage';
 import { CheckoutReturnPage } from './pages/checkout-return/CheckoutReturnPage';
@@ -27,6 +28,7 @@ function App() {
         <Route path="/contact" element={<ContactPage isAuthenticated={authentication.isAuthenticated} />} />
         <Route path="/confidentialite" element={<PrivacyPage isAuthenticated={authentication.isAuthenticated} />} />
         <Route path="/mentions-legales" element={<LegalNoticePage isAuthenticated={authentication.isAuthenticated} />} />
+        <Route path="/conditions" element={<ConditionsPage isAuthenticated={authentication.isAuthenticated} />} />
         <Route path="/demonstration" element={<DemonstrationPage isAuthenticated={authentication.isAuthenticated} />} />
         <Route path="/commencer" element={<StartPage isAuthenticated={authentication.isAuthenticated} />} />
         <Route path="/app/checkout-return" element={<CheckoutReturnPage />} />

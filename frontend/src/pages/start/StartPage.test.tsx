@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MachineRequestSubmissionError } from '../../services/machineRequestApi';
 import { MachineRequestPaymentTerminalError } from '../../services/machineRequestPaymentApi';
@@ -39,7 +39,16 @@ async function renderPage() {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => root.render(<MemoryRouter><StartPage isAuthenticated={false} /></MemoryRouter>));
+  await act(async () => root.render(
+    <MemoryRouter initialEntries={['/commencer']}>
+      <LocationProbe />
+      <StartPage isAuthenticated={false} />
+    </MemoryRouter>,
+  ));
+}
+
+function LocationProbe() {
+  return <output data-testid="current-path">{useLocation().pathname}</output>;
 }
 
 function setValue(name: string, value: string) {
@@ -48,7 +57,7 @@ function setValue(name: string, value: string) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-async function completeForm() {
+async function completeForm(acceptTerms = true) {
   await act(async () => {
     setValue('firstName', 'Claire');
     setValue('lastName', 'Martin');
@@ -65,6 +74,11 @@ async function completeForm() {
   const input = host.querySelector('input[type="file"]') as HTMLInputElement;
   Object.defineProperty(input, 'files', { configurable: true, value: [file] });
   await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+
+  if (acceptTerms) {
+    const terms = host.querySelector<HTMLInputElement>('input[name="termsAccepted"]')!;
+    await act(async () => terms.click());
+  }
 }
 
 async function submitTwice() {
@@ -103,6 +117,69 @@ afterEach(async () => {
 });
 
 describe('/commencer submission', () => {
+  it('renders the required service conditions acceptance unchecked by default', async () => {
+    await renderPage();
+
+    const terms = host.querySelector<HTMLInputElement>('input[name="termsAccepted"]');
+    expect(terms).not.toBeNull();
+    expect(terms?.checked).toBe(false);
+    expect(host.textContent).toContain('J’ai lu et j’accepte les Conditions générales de service de DiagLink.');
+  });
+
+  it('keeps submission disabled without acceptance', async () => {
+    await renderPage();
+    await completeForm(false);
+
+    const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    expect(button.disabled).toBe(true);
+    await act(async () => button.click());
+
+    expect(mocks.createPayment).not.toHaveBeenCalled();
+    expect(mocks.submitMachineRequest).not.toHaveBeenCalled();
+  });
+
+  it('enables submission only while the conditions are accepted', async () => {
+    await renderPage();
+    await completeForm(false);
+
+    const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    const terms = host.querySelector<HTMLInputElement>('input[name="termsAccepted"]')!;
+    expect(button.disabled).toBe(true);
+
+    await act(async () => terms.click());
+    expect(button.disabled).toBe(false);
+
+    await act(async () => terms.click());
+    expect(button.disabled).toBe(true);
+  });
+
+  it('opens and closes the conditions dialog without navigation or form state loss', async () => {
+    await renderPage();
+    await act(async () => {
+      setValue('firstName', 'Claire');
+      host.querySelector<HTMLInputElement>('input[name="termsAccepted"]')!.click();
+    });
+
+    const conditionsLink = [...host.querySelectorAll('button')]
+      .find(button => button.textContent === 'Conditions générales de service')!;
+    await act(async () => conditionsLink.click());
+
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.textContent).toContain('Clients professionnels');
+    expect(dialog?.textContent).toContain('1. Objet et clients concernés');
+    expect(dialog?.textContent).toContain('14. Litiges et contact');
+    expect(host.querySelector('[data-testid="current-path"]')?.textContent).toBe('/commencer');
+
+    const closeButton = [...document.querySelectorAll('button')]
+      .find(button => button.textContent === 'Fermer')!;
+    await act(async () => closeButton.click());
+
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect((host.querySelector('[name="firstName"]') as HTMLInputElement).value).toBe('Claire');
+    expect(host.querySelector<HTMLInputElement>('input[name="termsAccepted"]')?.checked).toBe(true);
+  });
+
   it('keeps the submit button disabled with a document-first label until the form is complete', async () => {
     await renderPage();
 

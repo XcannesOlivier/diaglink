@@ -11,10 +11,20 @@ namespace WebApp.Api.Services;
 public sealed class VisionToolDiagnostics(ILogger logger)
 {
     private const string Tool = "blob_page_images_analyze_page";
+    private static readonly Regex TilePattern = new(@"\Ar\d{2}-c\d{2}\z", RegexOptions.CultureInvariant);
+    private static readonly Regex SchemePattern = new(@"\A[a-zA-Z][a-zA-Z0-9+.-]*:", RegexOptions.CultureInvariant);
     private readonly HashSet<(string Parent, string Call)> observedCalls = [];
     private readonly Dictionary<(string Parent, string Call), VisionUsageCapture> calls = [];
+    private readonly Dictionary<(string Parent, string Call), IReadOnlyList<TechnicalVisualReference>> visualsByCall = [];
+    private readonly List<(string Parent, string Call)> visualCallOrder = [];
+    private readonly HashSet<string> discoveredVisualAssetKeys = new(StringComparer.Ordinal);
+    private readonly List<TechnicalVisualReference> pendingVisuals = [];
     public IReadOnlyCollection<VisionUsageCapture> Measurements => calls.Values;
+    public IReadOnlyList<TechnicalVisualReference> Visuals => visualCallOrder
+        .SelectMany(key => visualsByCall[key])
+        .ToArray();
     private AiResponseUsage? parsedUsage;
+    private List<TechnicalVisualReference>? parsedVisuals;
     public bool Observed { get; private set; }
 
     private static string? Identifier(JsonElement element, string key, int maxLength = 200)
@@ -56,7 +66,22 @@ public sealed class VisionToolDiagnostics(ILogger logger)
                 null, null, null, null, null, null, DateTimeOffset.UtcNow)
                 { CallId = call, ParentResponseId = parent };
             parsedUsage = usage;
+            parsedVisuals = [];
             if (final && root.TryGetProperty("output", out var output)) InspectOutput(output, parent, call);
+            foreach (var visual in parsedVisuals)
+            {
+                if (discoveredVisualAssetKeys.Add(visual.AssetKey))
+                    pendingVisuals.Add(visual);
+            }
+            if (!visualsByCall.ContainsKey(key))
+            {
+                visualCallOrder.Add(key);
+                visualsByCall[key] = parsedVisuals;
+            }
+            else if (parsedVisuals.Count > 0)
+            {
+                visualsByCall[key] = parsedVisuals;
+            }
             var capture = new VisionUsageCapture(previous?.EventId ?? Guid.NewGuid(), parsedUsage ?? usage);
             // Late added/invalid outputs must not regress an already completed unknown capture.
             if (previous?.Usage.Completed == true && !capture.Usage.Available) return previous;
@@ -70,6 +95,14 @@ public sealed class VisionToolDiagnostics(ILogger logger)
             logger.LogDebug("VisionProbe Diagnostic=UnreadableItem");
             return null;
         }
+    }
+
+    internal IReadOnlyList<TechnicalVisualReference> TakeNewVisuals()
+    {
+        if (pendingVisuals.Count == 0) return Array.Empty<TechnicalVisualReference>();
+        var result = pendingVisuals.ToArray();
+        pendingVisuals.Clear();
+        return result;
     }
 
     // Inspect presence only, with the same bounded JSON decoding budget (Output + three levels).
@@ -124,6 +157,82 @@ public sealed class VisionToolDiagnostics(ILogger logger)
         };
     }
 
+    private void ExtractVisuals(JsonElement output)
+    {
+        if (parsedVisuals is null ||
+            !output.TryGetProperty("visuals", out var visuals) ||
+            visuals.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var visual in visuals.EnumerateArray())
+        {
+            if (TryParseVisual(visual, out var reference))
+            {
+                parsedVisuals.Add(reference);
+            }
+        }
+    }
+
+    private static bool TryParseVisual(JsonElement visual, out TechnicalVisualReference reference)
+    {
+        reference = null!;
+        if (visual.ValueKind != JsonValueKind.Object ||
+            !RequiredString(visual, "document_id", out var documentId) ||
+            !visual.TryGetProperty("page", out var pageValue) ||
+            !pageValue.TryGetInt32(out var page) || page <= 0 ||
+            !RequiredString(visual, "asset_type", out var assetType) ||
+            assetType is not ("full" or "tile") ||
+            !RequiredString(visual, "name", out var name) ||
+            !name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+            !RequiredString(visual, "asset_key", out var assetKey) ||
+            !IsSafeRelativeAssetKey(assetKey))
+        {
+            return false;
+        }
+
+        string? tile = null;
+        if (visual.TryGetProperty("tile", out var tileValue) && tileValue.ValueKind != JsonValueKind.Null)
+        {
+            if (tileValue.ValueKind != JsonValueKind.String) return false;
+            tile = tileValue.GetString();
+        }
+
+        if ((assetType == "full" && tile is not null) ||
+            (assetType == "tile" && (tile is null || !TilePattern.IsMatch(tile))) ||
+            ContainsHttpScheme(documentId) || ContainsHttpScheme(name) ||
+            (tile is not null && ContainsHttpScheme(tile)))
+        {
+            return false;
+        }
+
+        reference = new TechnicalVisualReference(documentId, page, assetType, tile, name, assetKey);
+        return true;
+    }
+
+    private static bool RequiredString(JsonElement element, string propertyName, out string value)
+    {
+        value = string.Empty;
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+            return false;
+        value = property.GetString() ?? string.Empty;
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static bool IsSafeRelativeAssetKey(string assetKey) =>
+        !assetKey.StartsWith('/') &&
+        !assetKey.StartsWith('\\') &&
+        !assetKey.Contains('\\') &&
+        !assetKey.Contains("..", StringComparison.Ordinal) &&
+        !ContainsHttpScheme(assetKey) &&
+        !SchemePattern.IsMatch(assetKey) &&
+        !Uri.TryCreate(assetKey, UriKind.Absolute, out _);
+
+    private static bool ContainsHttpScheme(string value) =>
+        value.Contains("http://", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("https://", StringComparison.OrdinalIgnoreCase);
+
     private void InspectOutput(JsonElement output, string? parent, string? call)
     {
         JsonDocument? decoded = null;
@@ -140,6 +249,7 @@ public sealed class VisionToolDiagnostics(ILogger logger)
                 return;
             }
             ExtractUsage(output);
+            ExtractVisuals(output);
             // Only property names and kinds; arbitrary names are restricted and capped.
             var shape = string.Join(",", output.EnumerateObject().Take(40).Select(p =>
                 (Regex.IsMatch(p.Name, @"\A[a-zA-Z_][a-zA-Z0-9_]{0,63}\z") ? p.Name : "[redacted]") + ":" + p.Value.ValueKind));
@@ -189,6 +299,7 @@ public sealed class VisionToolDiagnostics(ILogger logger)
                 if (nested.ValueKind == JsonValueKind.Object)
                 {
                     ExtractUsage(nested);
+                    ExtractVisuals(nested);
                     var shape = string.Join(",", nested.EnumerateObject().Take(40).Select(p =>
                         Regex.IsMatch(p.Name, @"\A[a-zA-Z_][a-zA-Z0-9_]{0,63}\z") ? p.Name : "[redacted]"));
                     var hasUsage = nested.TryGetProperty("usage", out var usage);

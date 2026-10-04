@@ -44,6 +44,15 @@ public class RolePolicyTests
     }
 
     [TestMethod]
+    public async Task CompanyAdminOnly_RejectsUnauthenticatedPrincipal()
+    {
+        var requirement = new RolesAuthorizationRequirement([DiagLinkRoles.CompanyAdmin]);
+        var context = new AuthorizationHandlerContext([requirement], new ClaimsPrincipal(new ClaimsIdentity()), resource: null);
+        await requirement.HandleAsync(context);
+        Assert.IsFalse(context.HasSucceeded);
+    }
+
+    [TestMethod]
     public async Task CompanyAdminOrAbove_RejectsTechnician()
         => Assert.IsFalse(await EvaluateAsync(CompanyAdminOrAboveRoles, DiagLinkRoles.Technician));
 

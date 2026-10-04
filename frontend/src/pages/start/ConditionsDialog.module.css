@@ -1,0 +1,7 @@
+.surface { width:min(960px,calc(100vw - 32px)); max-width:960px; max-height:calc(100vh - 40px); padding:0; overflow:hidden; }
+.body { max-height:calc(100vh - 40px); grid-template-rows:auto minmax(0,1fr) auto; padding:24px; }
+.titleBlock { display:grid; gap:4px; color:#0b2742; }
+.titleBlock small { color:#00719f; font-size:.72rem; font-weight:750; letter-spacing:.1em; text-transform:uppercase; }
+.content { min-height:0; overflow-y:auto; overflow-x:hidden; padding-right:12px; }
+.article { width:100%; }
+@media (max-width:600px) { .surface { width:calc(100vw - 16px); max-height:calc(100vh - 16px); }.body { max-height:calc(100vh - 16px); padding:16px; }.content { padding-right:6px; } }

@@ -1,5 +1,7 @@
 namespace WebApp.Api.Models;
 
+using WebApp.Api.Models.Entities;
+
 /// <summary>
 /// Server-resolved Foundry agent configuration for a specific machine. Built exclusively from SQL
 /// (<c>MachineAssistantConfiguration</c>) by <see cref="WebApp.Api.Services.MachineAssistantResolutionService"/>
@@ -12,6 +14,25 @@ public record ResolvedAssistantConfiguration
     public required string AgentId { get; init; }
     public string? AgentVersion { get; init; }
     public string? AgentName { get; init; }
+}
+
+/// <summary>Outcome of the runtime-neutral machine access and entitlement checks.</summary>
+public enum MachineResolutionKind
+{
+    MachineNotAccessible,
+    MachineDisabled,
+    Resolved,
+}
+
+/// <summary>Authorized machine context used before selecting an AI chat runtime.</summary>
+public record MachineResolution
+{
+    public required MachineResolutionKind Kind { get; init; }
+    public Machine? Machine { get; init; }
+
+    public static MachineResolution NotAccessible() => new() { Kind = MachineResolutionKind.MachineNotAccessible };
+    public static MachineResolution Disabled() => new() { Kind = MachineResolutionKind.MachineDisabled };
+    public static MachineResolution Ok(Machine machine) => new() { Kind = MachineResolutionKind.Resolved, Machine = machine };
 }
 
 /// <summary>Outcome of resolving a machine's assistant configuration, distinguishing every failure mode.</summary>
@@ -32,10 +53,11 @@ public record MachineAssistantResolution
 {
     public required MachineAssistantResolutionKind Kind { get; init; }
     public ResolvedAssistantConfiguration? Configuration { get; init; }
+    public Machine? Machine { get; init; }
 
     public static MachineAssistantResolution NotAccessible() => new() { Kind = MachineAssistantResolutionKind.MachineNotAccessible };
     public static MachineAssistantResolution NotConfigured() => new() { Kind = MachineAssistantResolutionKind.AssistantNotConfigured };
     public static MachineAssistantResolution Disabled() => new() { Kind = MachineAssistantResolutionKind.AssistantDisabled };
-    public static MachineAssistantResolution Ok(ResolvedAssistantConfiguration configuration) =>
-        new() { Kind = MachineAssistantResolutionKind.Configured, Configuration = configuration };
+    public static MachineAssistantResolution Ok(ResolvedAssistantConfiguration configuration, Machine machine) =>
+        new() { Kind = MachineAssistantResolutionKind.Configured, Configuration = configuration, Machine = machine };
 }

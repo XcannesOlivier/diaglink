@@ -18,12 +18,17 @@ export interface MachineRequestListItem {
   machineName: string;
   manufacturer: string;
   model: string;
+  serialNumber?: string | null;
+  description?: string | null;
   documentCount: number;
   totalPages: number;
   preparationTotal: number;
   requestKind?: 'initialMachine' | 'additionalMachine' | 'additionalDocuments';
   companyId?: string | null;
   requestedByUserId?: string | null;
+  isArchived?: boolean;
+  archivedAtUtc?: string | null;
+  archivedByUserId?: string | null;
 }
 
 export interface MachineRequestDetail {
@@ -48,6 +53,9 @@ export interface MachineRequestDetail {
   preparationStatus?: 'pending' | 'ready';
   readyAtUtc?: string | null;
   readyByUserId?: string | null;
+  isArchived?: boolean;
+  archivedAtUtc?: string | null;
+  archivedByUserId?: string | null;
   payment: {
     paymentRequestId: string;
     status: 'pending' | 'authorized' | 'captured' | 'cancelled' | 'abandoned' | 'unknown';
@@ -89,6 +97,32 @@ export async function listMachineRequests(getAccessToken: () => Promise<string |
   try {
     const { headers, mode } = await getApiAuthHeaders(getAccessToken);
     return await parseApiResult<MachineRequestListItem[]>(await fetch(`${getApiUrl()}/admin/machine-requests`, { headers }), mode);
+  } catch {
+    return { kind: 'error' };
+  }
+}
+
+export async function listArchivedMachineRequests(getAccessToken: () => Promise<string | null>): Promise<ApiResult<MachineRequestListItem[]>> {
+  try {
+    const { headers, mode } = await getApiAuthHeaders(getAccessToken);
+    return await parseApiResult<MachineRequestListItem[]>(await fetch(`${getApiUrl()}/admin/machine-requests/history`, { headers }), mode);
+  } catch {
+    return { kind: 'error' };
+  }
+}
+
+export async function updateMachineRequestArchive(
+  getAccessToken: () => Promise<string | null>,
+  requestId: string,
+  isArchived: boolean,
+): Promise<ApiWriteResult<MachineRequestDetail>> {
+  try {
+    const { headers, mode } = await getApiAuthHeaders(getAccessToken);
+    return await parseApiWriteResult<MachineRequestDetail>(await fetch(`${getApiUrl()}/admin/machine-requests/${encodeURIComponent(requestId)}/archive`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isArchived }),
+    }), mode);
   } catch {
     return { kind: 'error' };
   }

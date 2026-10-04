@@ -1,12 +1,12 @@
 import {CompanySummaryBanner} from './CompanySummaryBanner';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@fluentui/react-components';
 import { stripeCompanyRequest, type StripeCompanySummary } from '../../services/stripeAdminService';
 import { StripeMachineAdditionsPanel } from './StripeMachineAdditionsPanel';
 import { WalletTopUpPanel } from './WalletTopUpPanel';
-import { StripeMachineStatusPanel } from './StripeMachineStatusPanel';
 import { AdminFinanceOverview } from './AdminFinanceOverview';
 import { getAdminAccordionProps, type AdminAccordionControl } from './adminAccordion';
+import type { GlobalFinanceIntervention, MachineFinanceIntervention } from './financeInterventions';
 import styles from './CompanyFinancePanel.module.css';
 
 interface Props {
@@ -14,82 +14,85 @@ interface Props {
   getAccessToken: () => Promise<string | null>;
   onDiagLinkSessionExpired?: () => void;
   accordion?: AdminAccordionControl;
+  refreshRevision?: number;
+  onRefreshComplete?: (revision:number) => void;
+  onRefreshRequest?: () => void;
 }
 const euro = (cents: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(cents / 100);
-const subscriptionLabel = (status: string | null, cancelAtPeriodEnd?: boolean) => {
-  const labels: Record<string, string> = {
-    active: 'Actif', trialing: 'Période d’essai', past_due: 'Paiement en retard', unpaid: 'Impayé',
-    canceled: 'Résilié', incomplete: 'Activation en attente', incomplete_expired: 'Activation expirée', paused: 'En pause'
-  };
-  const value = status ? labels[status] ?? status : 'Aucun abonnement enregistré';
-  return cancelAtPeriodEnd ? `${value} · Résiliation prévue à échéance` : value;
-};
+const refreshSources=['company','summary','global','machines','wallet'] as const;
+type RefreshSource=typeof refreshSources[number];
 
-export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessionExpired, accordion }: Props) {
+export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessionExpired, accordion, refreshRevision=0, onRefreshComplete, onRefreshRequest }: Props) {
   const [technicalTarget, setTechnicalTarget] = useState<HTMLDivElement | null>(null);
   const [repairTarget, setRepairTarget] = useState<HTMLDivElement | null>(null);
-  const [walletInterventions, setWalletInterventions] = useState<string[]>([]);
-  const [machineInterventions, setMachineInterventions] = useState<string[]>([]);
+  const [walletInterventions, setWalletInterventions] = useState<GlobalFinanceIntervention[]>([]);
+  const [machineInterventions, setMachineInterventions] = useState<MachineFinanceIntervention[]>([]);
+  const [globalInterventionsOpen, setGlobalInterventionsOpen] = useState(false);
   const [data, setData] = useState<StripeCompanySummary | null>(null);
   const [message, setMessage] = useState('');
-  const [revision, setRevision] = useState(0);
   const repairDetails = useRef<HTMLDetailsElement>(null);
+  const globalInterventionsId = useId();
   const generation = useRef(0);
-  const updateWalletInterventions = useCallback((values: string[]) => setWalletInterventions(values), []);
-  const updateMachineInterventions = useCallback((values: string[]) => setMachineInterventions(values), []);
+  const dataRef = useRef<StripeCompanySummary|null>(null);
+  const refreshState=useRef({revision:refreshRevision,pending:new Set<RefreshSource>(),reported:true});
+  if(refreshState.current.revision!==refreshRevision){
+    refreshState.current={revision:refreshRevision,pending:new Set(refreshSources),reported:refreshRevision===0};
+  }
+  dataRef.current=data;
+  const finishRefresh=useCallback((source:RefreshSource)=>{
+    const state=refreshState.current;
+    if(state.revision!==refreshRevision||state.reported)return;
+    state.pending.delete(source);
+    if(state.pending.size===0){state.reported=true;onRefreshComplete?.(refreshRevision);}
+  },[onRefreshComplete,refreshRevision]);
+  const finishSummary=useCallback(()=>finishRefresh('summary'),[finishRefresh]);
+  const finishConsumption=useCallback((view:'global'|'machines')=>finishRefresh(view),[finishRefresh]);
+  const finishWallet=useCallback(()=>finishRefresh('wallet'),[finishRefresh]);
+  const updateWalletInterventions = useCallback((values: GlobalFinanceIntervention[]) => setWalletInterventions(values), []);
+  const updateMachineInterventions = useCallback((values: MachineFinanceIntervention[]) => setMachineInterventions(values), []);
   useEffect(() => {
     const current = ++generation.current;
-    setData(null); setMessage('Chargement des données enregistrées…');
-    setWalletInterventions([]); setMachineInterventions([]);
+    setMessage('Chargement des données enregistrées…');
+    setWalletInterventions([]); setMachineInterventions([]); setGlobalInterventionsOpen(false);
     stripeCompanyRequest(getAccessToken, companyId).then(result => {
       if (generation.current !== current) return;
       if (result.kind === 'success') { setData(result.data); setMessage(''); }
       else {
         setMessage(result.kind === 'forbidden' ? 'Accès Super Admin requis.' : 'Impossible de charger Stripe.');
         if (result.kind === 'unauthorized' && result.diagLinkSessionExpired) onDiagLinkSessionExpired?.();
+        if(!dataRef.current){finishRefresh('global');finishRefresh('machines');finishRefresh('wallet');}
       }
+      finishRefresh('company');
     });
     return () => { generation.current++; };
-  }, [companyId, getAccessToken, onDiagLinkSessionExpired, revision]);
+  }, [companyId, getAccessToken, onDiagLinkSessionExpired, refreshRevision, finishRefresh]);
   const interventions = [...walletInterventions, ...machineInterventions];
-  const billableMachines = data?.machines?.filter(machine => machine.billable).length ?? data?.activeMachineCount ?? 0;
   const amountRemaining = data?.amountRemainingCents ?? 0;
+  const examineInterventions = useCallback(() => {
+    if (accordion) accordion.onSectionToggle('repairs', true);
+    else if (repairDetails.current) repairDetails.current.open = true;
+    requestAnimationFrame(() => repairTarget?.focus());
+  }, [accordion, repairTarget]);
 
   return <section aria-label="Finances et consommation">
-    <CompanySummaryBanner key={companyId} companyId={companyId} account={data} token={getAccessToken} revision={revision}/>
+    <CompanySummaryBanner key={companyId} companyId={companyId} account={data} token={getAccessToken} revision={refreshRevision} onLoadComplete={finishSummary}/>
     {data && <>
-      <AdminFinanceOverview companyId={companyId} account={data} token={getAccessToken} revision={revision} accordion={accordion} machineContent={<WalletTopUpPanel key={companyId} companyId={companyId} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired}
-        technicalTarget={technicalTarget} repairTarget={repairTarget} onInterventionsChange={updateWalletInterventions} />}>
-      <details className={`${styles.technical} ${styles.billingState}`} {...getAdminAccordionProps(accordion, 'billing')}>
-      <summary><span className={styles.billingTitle}>État de facturation</span>
-        <span className={styles.billingInlineState}>{subscriptionLabel(data.subscriptionStatus, data.cancelAtPeriodEnd)} · {data.activeMachineCount}/{billableMachines} machines · {amountRemaining > 0 ? `${euro(amountRemaining)} impayés` : 'Aucun impayé'} · <span className={interventions.length > 0 ? styles.interventionState : undefined}>{interventions.length > 0 ? `⚠ ${interventions.length} intervention${interventions.length > 1 ? 's' : ''}` : 'Aucune intervention'}</span></span>
-      </summary>
-      <div className={styles.billingBody}>
-      <div className={styles.billingHeader}><p>Dernier état enregistré dans DiagLink.</p>
-        <Button appearance="subtle" size="small" onClick={() => setRevision(value => value + 1)}>Actualiser les données enregistrées</Button></div>
-      <dl className={styles.billingSummary}>
-        <div><dt>Abonnement</dt><dd>{subscriptionLabel(data.subscriptionStatus, data.cancelAtPeriodEnd)}</dd></div>
-        <div><dt>Machines actives / facturables</dt><dd>{data.activeMachineCount} / {billableMachines}</dd></div>
-        <div><dt>Montant en attente</dt><dd>{amountRemaining > 0 ? euro(amountRemaining) : 'Aucun'}</dd></div>
-        <div><dt>Opérations nécessitant une intervention</dt><dd>{interventions.length || 'Aucune'}</dd></div>
-      </dl>
-      {interventions.length > 0 && <div className={styles.billingAlert} role="alert"><strong>Intervention requise</strong>
-        <ul>{interventions.map(value => <li key={value}>{value}</li>)}</ul>
-        <Button onClick={() => {
-          if (accordion) accordion.onSectionToggle('repairs', true);
-          else if (repairDetails.current) repairDetails.current.open = true;
-          requestAnimationFrame(() => repairTarget?.focus());
-        }}>Examiner / reprendre</Button>
-      </div>}
-      <details className={`${styles.technical} ${styles.billingManagement}`}>
-        <summary>Machines facturables ({billableMachines})</summary>
-        <StripeMachineStatusPanel key={`status-${companyId}`} companyId={companyId} account={data} token={getAccessToken} refresh={() => setRevision(value => value + 1)} />
-      </details>
+      <AdminFinanceOverview companyId={companyId} token={getAccessToken} revision={refreshRevision} accordion={accordion}
+        onConsumptionLoadComplete={finishConsumption} machineInterventions={machineInterventions} onExamineInterventions={examineInterventions}
+        machineActionsEnabled={data.testActionsEnabled} onMachineSubscriptionChanged={onRefreshRequest} onDiagLinkSessionExpired={onDiagLinkSessionExpired} globalContent={<>
+        <WalletTopUpPanel key={companyId} companyId={companyId} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+          technicalTarget={technicalTarget} repairTarget={repairTarget} onInterventionsChange={updateWalletInterventions}
+          revision={refreshRevision} onLoadComplete={finishWallet} />
+        <article className={styles.consumptionSummaryCard} aria-label="Montant en attente"><h4>Montant en attente</h4><strong>{amountRemaining > 0 ? euro(amountRemaining) : 'Aucun'}</strong></article>
+        <article className={`${styles.consumptionSummaryCard} ${styles.globalInterventionCard}`} aria-label="Opérations nécessitant une intervention"><h4>Opérations nécessitant une intervention</h4><strong>{interventions.length || 'Aucune'}</strong>
+          {walletInterventions.length>0&&<button type="button" className={styles.machineToggle} aria-expanded={globalInterventionsOpen} aria-controls={globalInterventionsId} onClick={()=>setGlobalInterventionsOpen(open=>!open)}>{globalInterventionsOpen?'Masquer les interventions globales':'Voir les interventions globales'}</button>}
+        </article>
+        {globalInterventionsOpen&&walletInterventions.length>0&&<section id={globalInterventionsId} className={styles.topUpHistoryDetail} aria-label="Détail des interventions globales"><h4>Interventions globales</h4><ul>{walletInterventions.map(intervention=><li key={intervention.id}>{intervention.label}</li>)}</ul><Button onClick={examineInterventions}>Examiner / reprendre</Button></section>}
+        </>} />
       <StripeMachineAdditionsPanel companyId={companyId} getAccessToken={getAccessToken} account={data}
+        revision={refreshRevision}
         onDiagLinkSessionExpired={onDiagLinkSessionExpired} technicalTarget={technicalTarget} repairTarget={repairTarget}
         onInterventionsChange={updateMachineInterventions} />
-      </div>
-      </details>
       <details className={styles.technical} {...getAdminAccordionProps(accordion, 'technical')}><summary>Détails techniques</summary>
       <section className={styles.diagnosticSubsection} aria-label="Données Stripe et abonnement enregistrées"><h4>Données Stripe et abonnement enregistrées</h4><dl className={styles.diagnosticSummary}>
         <dt>BillingAccount</dt><dd>{data.billingAccountId ?? '—'}</dd>
@@ -111,7 +114,6 @@ export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessio
         {interventions.length === 0 && <p>Aucune opération ne nécessite d’intervention.</p>}
         <div ref={setRepairTarget} tabIndex={-1}/>
       </details>
-      </AdminFinanceOverview>
     </>}
     <p role="status">{message}</p>
   </section>;

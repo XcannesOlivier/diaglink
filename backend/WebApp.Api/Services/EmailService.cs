@@ -2,6 +2,7 @@ using Azure;
 using Azure.Communication.Email;
 using Azure.Core;
 using Azure.Identity;
+using System.Net;
 
 namespace WebApp.Api.Services;
 
@@ -85,16 +86,10 @@ public class EmailService : ITransactionalEmailSender
     /// </summary>
     public async Task SendLoginCodeAsync(string recipientEmail, string code, CancellationToken cancellationToken)
     {
-        var subject = "Votre code de connexion DiagLink";
-        var body =
-            $"Votre code de connexion DiagLink est : {code}\n\n" +
-            "Ce code est valable pendant 10 minutes.\n\n" +
-            "Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer ce message.";
-
         var emailMessage = new EmailMessage(
             senderAddress: _senderAddress,
             recipientAddress: recipientEmail,
-            content: new EmailContent(subject) { PlainText = body });
+            content: BuildLoginCodeContent(code));
 
         _logger.LogInformation(
             "OTP email send starting. Recipient={MaskedRecipient} AcsEndpoint={AcsEndpoint} Sender={Sender} Credential={CredentialKind} ManagedIdentityClientId={ManagedIdentityClientId} DevNoAcs={DevNoAcs}",
@@ -126,6 +121,59 @@ public class EmailService : ITransactionalEmailSender
             _logger.LogError(ex, "Failed to send login code email");
             throw;
         }
+    }
+
+    internal static EmailContent BuildLoginCodeContent(string code)
+    {
+        const string subject = "Votre code de connexion DiagLink";
+        const string logoUrl = "https://diaglink.com/assets/Logo%20DiagLink.png";
+        const string loginUrl = "https://app.diaglink.com/login";
+        var plainText =
+            $"Votre code de connexion DiagLink est : {code}\n\n" +
+            "Ce code est valable pendant 10 minutes.\n\n" +
+            $"Connexion : {loginUrl}\n\n" +
+            "Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer ce message.";
+        var encodedCode = WebUtility.HtmlEncode(code);
+        var html = $"""
+            <!doctype html>
+            <html lang="fr">
+              <body style="margin:0; padding:0; background-color:#f3f4f6; color:#1f2937; font-family:Arial,Helvetica,sans-serif;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; background-color:#f3f4f6;">
+                  <tr>
+                    <td align="center" style="padding:24px 16px;">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:560px; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px;">
+                        <tr>
+                          <td align="center" style="padding:32px 24px 12px;">
+                            <img src="{logoUrl}" alt="DiagLink" width="190" style="display:block; width:100%; max-width:190px; height:auto; border:0;" />
+                          </td>
+                        </tr>
+                        <tr>
+                          <td align="center" style="padding:12px 24px 32px;">
+                            <h1 style="margin:0 0 16px; color:#111827; font-size:24px; line-height:32px; font-weight:700;">Votre code de connexion</h1>
+                            <p style="margin:0 0 24px; color:#4b5563; font-size:16px; line-height:24px;">Utilisez le code ci-dessous pour vous connecter à DiagLink.</p>
+                            <div style="margin:0 auto 20px; padding:16px 12px; background-color:#f3f4f6; border:1px solid #d1d5db; border-radius:8px; color:#111827; font-size:34px; line-height:42px; font-weight:700; letter-spacing:6px; text-align:center; white-space:nowrap;">{encodedCode}</div>
+                            <p style="margin:0; color:#374151; font-size:15px; line-height:22px;">Ce code est valable pendant 10 minutes.</p>
+                            <div style="height:1px; margin:28px 0 20px; background-color:#e5e7eb; line-height:1px;">&nbsp;</div>
+                            <p style="margin:0; color:#6b7280; font-size:13px; line-height:20px;">Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet e-mail.</p>
+                            <a href="{loginUrl}" style="display:inline-block; margin-top:24px; padding:10px 18px; background-color:#1f4e79; border-radius:6px; color:#ffffff; font-size:14px; line-height:20px; font-weight:700; text-decoration:none;">Se connecter à DiagLink</a>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td align="center" style="padding:18px 24px; border-top:1px solid #e5e7eb; color:#6b7280; font-size:12px; line-height:18px;">DiagLink · Assistant Technique</td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </body>
+            </html>
+            """;
+
+        return new EmailContent(subject)
+        {
+            PlainText = plainText,
+            Html = html
+        };
     }
 
     public async Task<string?> SendAsync(string recipientEmail, string subject, string textBody,

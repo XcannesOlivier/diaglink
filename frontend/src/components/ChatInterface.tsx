@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useDeferredValue, useCallback } from "react";
+import { useRef, useEffect, useState, useDeferredValue, useCallback, type ReactNode } from "react";
 import { AssistantMessage } from "./chat/AssistantMessage";
 import { UserMessage } from "./chat/UserMessage";
 import { McpApprovalCard } from "./chat/McpApprovalCard";
@@ -8,7 +8,7 @@ import { DropZone } from "./chat/DropZone";
 import { Waves } from "./animations/Waves";
 import { ErrorMessage } from "./core/ErrorMessage";
 import { BuiltWithBadge } from "./core/BuiltWithBadge";
-import logoDiagLink from '../assets/Logo DiagLink.png';
+import { DiagLinkLogo } from './core/DiagLinkLogo';
 import type { IChatItem } from "../types/chat";
 import type { AppState } from "../types/appState";
 import type { AppError } from "../types/errors";
@@ -36,19 +36,21 @@ interface ChatInterfaceProps {
   isEditing?: boolean;
   onFeedback?: (messageId: string, rating: 'positive' | 'negative') => void;
   onDownloadFile?: (fileId: string, fileName: string, containerId?: string) => void;
+  onLoadTechnicalVisual?: (visualId: number, signal?: AbortSignal) => Promise<Blob>;
   hasMessages?: boolean;
   disabled: boolean;
   agentName?: string;
   agentDescription?: string;
   agentLogo?: string;
   starterPrompts?: string[];
+  starterAccessory?: ReactNode;
   conversationId?: string | null;
   onChangeMachine?: () => void;
   machineId?: string;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
-  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onMcpApproval, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onDownloadFile, hasMessages, disabled, agentName, agentDescription, agentLogo, starterPrompts, conversationId, onChangeMachine } = props;
+  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onMcpApproval, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onDownloadFile, onLoadTechnicalVisual, hasMessages, disabled, agentName, agentDescription, agentLogo, starterPrompts, starterAccessory, conversationId, onChangeMachine } = props;
   const deferredMessages = useDeferredValue(messages);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [liveRegionMessage, setLiveRegionMessage] = useState<string>('');
@@ -194,11 +196,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
         aria-busy={isStreaming}
       >
         <div className={styles.messagesWrapper}>
+          {messages.length > 0 && starterAccessory}
           {messages.length === 0 ? (
             <StarterMessages 
               agentName={agentName}
               agentDescription={agentDescription}
               starterPrompts={effectiveStarterPrompts}
+              accessory={starterAccessory}
               onPromptClick={handleStarterPromptClick}
             />
           ) : (
@@ -248,6 +252,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                     onRegenerate={onRegenerate}
                     onFeedback={onFeedback}
                     onDownloadFile={onDownloadFile}
+                    onLoadTechnicalVisual={onLoadTechnicalVisual}
                     onSuggestedPromptClick={handleStarterPromptClick}
                   />
                 );
@@ -276,6 +281,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                       typeof error === 'string' ? error :
                       error.originalError?.message || 
                       'Une erreur inattendue est survenue. Veuillez réessayer.'}
+              intent={error.code === 'AiCreditExhausted' ? 'warning' : 'error'}
               recoverable={error.recoverable}
               onRetry={error.action?.handler}
               onDismiss={onClearError}
@@ -311,8 +317,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
           machineId={props.machineId}
         />
         <div className={styles.poweredRow}>
-          <img src={logoDiagLink} alt="DiagLink" className={styles.diagLinkLogo} />
           <BuiltWithBadge className={styles.builtWithBadge} />
+          <DiagLinkLogo className={styles.diagLinkLogo} />
         </div>
       </div>
     </div>

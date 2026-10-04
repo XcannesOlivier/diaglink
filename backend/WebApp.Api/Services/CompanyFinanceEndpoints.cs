@@ -11,6 +11,10 @@ public record CompanyFinanceSummary(decimal? MachineCreditRemaining, decimal Wal
     public DateTime? MachineCreditResetUtc { get; init; }
 }
 public record ClientTopUp(Guid Id, decimal Amount, string Status, string? PaymentUrl);
+public record CompanyConsumptionUser(Guid? Id, string Name, decimal IncludedQuotaConsumed, decimal CommercialCredit);
+public record CompanyConsumptionMachine(Guid Id, string Name, bool Billable, bool HasPaidRights,
+    decimal IncludedQuotaBudget, DateTime? ResetUtc, decimal CommercialCredit, CompanyConsumptionUser[] Users);
+public record CompanyConsumptionReport(CompanyConsumptionMachine[] Machines);
 
 public static class CompanyFinanceEndpoints
 {
@@ -18,12 +22,51 @@ public static class CompanyFinanceEndpoints
     {
         var group=app.MapGroup("/api/company/finance").RequireAuthorization("CompanyAdminOnly");
         group.MapGet("", ReadAsync);
+        group.MapGet("/consumption", ReadConsumptionAsync);
         group.MapPost("/invoice-payment", InvoicePaymentAsync);
         group.MapGet("/topups", ReadTopUpsAsync);
         group.MapPost("/topups", StartAsync);
+        app.MapPost("/api/company/stripe/machines/{machineId:guid}/status", SetMachineStatusAsync)
+            .RequireAuthorization("CompanyAdminOnly");
     }
     // Claim enriched by the existing authentication middleware, never accepted from request JSON.
     private static Guid? Company(HttpContext context) => Guid.TryParse(context.User.FindFirst(DiagLinkClaimTypes.CompanyId)?.Value,out var id) ? id : null;
+    public static async Task<IResult> SetMachineStatusAsync(Guid machineId, StripeAdminEndpoints.MachineStatusRequest request,
+        HttpContext context, DiagLinkDbContext db,
+        [Microsoft.AspNetCore.Mvc.FromServices] StripeMachineStatusService service,
+        StripeBillingOptions settings, CancellationToken ct)
+    {
+        var company=Company(context);if(company==null)return Results.Forbid();
+        if(context.Request.Query.ContainsKey("companyId"))
+            return Results.BadRequest(new {error="Le périmètre entreprise est imposé par l’identité serveur."});
+        if(!await db.Machines.AsNoTracking().AnyAsync(machine=>machine.Id==machineId&&machine.CompanyId==company,ct))
+            return Results.NotFound();
+        return await StripeAdminEndpoints.ExecuteMachineStatusAsync(company.Value,machineId,request,service,settings,ct);
+    }
+    public static async Task<IResult> ReadConsumptionAsync(HttpContext context, string? from, string? to, string? usageType,
+        DiagLinkDbContext db, CancellationToken ct)
+    {
+        var company=Company(context);if(company==null)return Results.Forbid();
+        if(context.Request.Query.ContainsKey("companyId"))
+            return Results.BadRequest(new {error="Le périmètre entreprise est imposé par l’identité serveur."});
+        if(!AiUsageFilter.TryParse(from,to,usageType,out var filter))return Results.BadRequest();
+        var report=await AdminConsumptionReader.ReadReportAsync(company.Value,filter,db,ct);
+        if(report==null)return Results.NotFound();
+
+        var machineIds=await db.Machines.AsNoTracking().Where(machine=>machine.CompanyId==company)
+            .Select(machine=>machine.Id).ToHashSetAsync(ct);
+        var userIds=await db.Users.AsNoTracking().Where(user=>user.CompanyId==company)
+            .Select(user=>user.Id).ToHashSetAsync(ct);
+        var machines=report.Machines
+            .Where(machine=>machine.Id.HasValue&&machineIds.Contains(machine.Id.Value))
+            .Select(machine=>new CompanyConsumptionMachine(machine.Id!.Value,machine.Name,machine.Billable,machine.HasPaidRights,
+                machine.Budget,machine.ResetUtc,machine.Metrics.CommercialCredit,machine.Users
+                    .Where(user=>user.Id==null||userIds.Contains(user.Id.Value))
+                    .Select(user=>new CompanyConsumptionUser(user.Id,user.Name,user.Metrics.IncludedQuotaConsumed,
+                        user.Metrics.CommercialCredit)).ToArray()))
+            .ToArray();
+        return Results.Ok(new CompanyConsumptionReport(machines));
+    }
     public static async Task<IResult> InvoicePaymentAsync(HttpContext context, DiagLinkDbContext db,
         IStripeSubscriptionPaymentGateway gateway, CancellationToken ct)
     {

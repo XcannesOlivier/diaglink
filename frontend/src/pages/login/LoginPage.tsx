@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Button, Input, Spinner } from '@fluentui/react-components';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import logoDiagLink from '../../assets/Logo DiagLink.png';
 import { AIFoundryLogo } from '../../components/icons/AIFoundryLogo';
 import { InstallShortcutDialog } from '../../components/marketing/InstallShortcutDialog';
 import { detectShortcutPlatform, type ShortcutPlatform } from '../../utils/installShortcut';
 import { PUBLIC_ORIGIN } from '../../config/origins';
+import loginLogo from '../../assets/Logo DiagLink1.png';
 import authStyles from '../../App.module.css';
 
 interface LoginPageProps {
@@ -43,7 +43,7 @@ export function LoginPage({ isCheckingSession, email, setEmail, emailCheckMessag
   return (
     <div className={authStyles.authScreen}>
       <div className={authStyles.authCard}>
-        <img src={logoDiagLink} alt="DiagLink" className={authStyles.authLogo} />
+        <img src={loginLogo} alt="DiagLink" className={authStyles.authLogo} />
         <h1 className={authStyles.authTitle}>Assistant Technique</h1>
         <p className={authStyles.authSubtitle}>Votre support technique pour la maintenance industrielle</p>
         <p className={authStyles.authDescription}>Accédez rapidement aux informations de vos équipements et facilitez vos diagnostics.</p>

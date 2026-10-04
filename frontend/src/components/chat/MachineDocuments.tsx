@@ -37,6 +37,8 @@ export function MachineDocuments({ machineId }: { machineId?: string }) {
   const { getAccessToken } = useAuth();
   const [open, setOpen] = useState(false);
   const isCompact = useMediaQuery('(max-width: 1000px)');
+  const isMobile = useMediaQuery('(max-width: 480px)');
+  const suppressTooltip = useMediaQuery('(hover: none), (pointer: coarse), (any-pointer: coarse)');
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const [documents, setDocuments] = useState<MachineDocumentDto[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,21 +64,20 @@ export function MachineDocuments({ machineId }: { machineId?: string }) {
     });
   };
 
+  const documentsButton = <Button size="small" appearance="subtle" icon={<DocumentPdfRegular />} disabled={!machineId} aria-label="Documents de la machine">
+    <span className={styles.documentsLabel}>{isMobile ? 'Docs' : 'Doc Machines'}</span>
+  </Button>;
+
   return (
     <Popover positioning={isCompact ? { position: 'above', align: 'start', overflowBoundaryPadding: 12 } : 'above-start'} open={open} onOpenChange={(_, data) => {
+      setTooltipVisible(false);
       setDocuments([]);
       setError(null);
       setLoading(data.open);
       setOpen(data.open);
     }}>
       <PopoverTrigger disableButtonEnhancement>
-        <Tooltip content="Doc Machines" relationship="label" withArrow
-          visible={!isCompact && tooltipVisible}
-          onVisibleChange={(_, data) => setTooltipVisible(!isCompact && data.visible)}>
-          <Button size="small" appearance="subtle" icon={<DocumentPdfRegular />} disabled={!machineId} aria-label="Doc Machines">
-            <span className={styles.documentsLabel}>Doc Machines</span>
-          </Button>
-        </Tooltip>
+        {suppressTooltip ? documentsButton : <Tooltip content="Documents de la machine" relationship="label" withArrow visible={!open&&tooltipVisible} onVisibleChange={(_,data)=>setTooltipVisible(!open&&data.visible)}>{documentsButton}</Tooltip>}
       </PopoverTrigger>
       <PopoverSurface aria-label="Documents de la machine" className={popupStyles.surface}>
         <Text weight="semibold">Documents</Text>

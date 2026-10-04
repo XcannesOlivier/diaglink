@@ -1,15 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createRoot } from 'react-dom/client';
 import { act } from 'react';
 import { MachinesView } from '../MachinesView';
 import type { MachineDto } from '../../../types/machine';
 import type { ApiResult } from '../../../types/apiResult';
 
-const { getMachinesMock, getCompaniesMock, dispatchMock, inspectPdfFilesMock } = vi.hoisted(() => ({ getMachinesMock: vi.fn(), getCompaniesMock: vi.fn(), dispatchMock: vi.fn(), inspectPdfFilesMock: vi.fn() }));
+const { getMachinesMock, getCompaniesMock, dispatchMock, inspectPdfFilesMock, addMachineWithDocumentsMock } = vi.hoisted(() => ({
+  getMachinesMock: vi.fn(), getCompaniesMock: vi.fn(), dispatchMock: vi.fn(), inspectPdfFilesMock: vi.fn(), addMachineWithDocumentsMock: vi.fn(),
+}));
 
 vi.mock('../../../services/machineService', () => ({
   getMachines: getMachinesMock,
-  addMachineWithDocuments: vi.fn(),
+  addMachineWithDocuments: addMachineWithDocumentsMock,
 }));
 
 vi.mock('../../../services/companyService', () => ({ getCompanies: getCompaniesMock }));
@@ -61,7 +63,9 @@ describe('MachinesView', () => {
     getCompaniesMock.mockReset();
     dispatchMock.mockReset();
     inspectPdfFilesMock.mockReset();
+    addMachineWithDocumentsMock.mockReset();
   });
+  afterEach(() => vi.unstubAllGlobals());
 
   it('shows a loading state before the request resolves', () => {
     getMachinesMock.mockReturnValue(new Promise(() => {}));
@@ -116,6 +120,33 @@ describe('MachinesView', () => {
     expect(adminContainer.textContent).not.toContain('Demander l’ajout de documents');
   });
 
+  it('masque le budget disponible dans la fiche partagée pour les trois rôles sans changer les actions', async () => {
+    const machines: MachineDto[] = [{ id: 'm1', companyId: 'c1', name: 'Compresseur Test Alpha', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true }];
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({message:'Budget IA inclus disponible.'}))));
+    getMachinesMock.mockResolvedValue({kind:'success',data:machines});
+
+    for(const role of ['technician','company_admin'] as const){
+      const container=document.createElement('div');document.body.appendChild(container);const root=createRoot(container);
+      await act(async()=>root.render(<MachinesView currentUser={{userId:'u1',companyId:'c1',role}} getAccessToken={async()=> 'token'}/>));
+      await act(async()=>container.querySelector('[role="button"]')?.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+      expect(container.textContent).not.toContain('Budget IA inclus disponible.');expect(container.textContent).toContain('Statutactive');
+      expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Utiliser cette machine')).toBe(true);
+      expect(container.textContent).not.toContain('Ajouter des PDF');
+      expect(container.textContent.includes('Demander l’ajout de documents')).toBe(role==='company_admin');
+      await act(async()=>root.unmount());container.remove();
+    }
+
+    getCompaniesMock.mockResolvedValue({kind:'success',data:[{id:'c1',name:'Entreprise A',status:'active'}]});
+    const container=document.createElement('div');document.body.appendChild(container);const root=createRoot(container);
+    await act(async()=>root.render(<MachinesView currentUser={{userId:'sa',companyId:'root',role:'diaglink_super_admin'}} getAccessToken={async()=> 'token'}/>));
+    await act(async()=>[...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item=>item.textContent?.includes('Entreprise A'))!.click());
+    await act(async()=>[...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item=>item.textContent?.includes('Compresseur Test Alpha'))!.click());
+    expect(container.textContent).not.toContain('Budget IA inclus disponible.');expect(container.textContent).toContain('Statutactive');
+    expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Utiliser cette machine')).toBe(true);
+    expect(container.textContent).toContain('Ajouter des PDF');expect(container.textContent).not.toContain('Demander l’ajout de documents');
+    await act(async()=>root.unmount());container.remove();
+  });
+
   it('keeps the document request dialog open while clicking and selecting through its file picker', async () => {
     const machines: MachineDto[] = [{ id: 'm1', companyId: 'c1', name: 'Presse P1', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true }];
     getMachinesMock.mockResolvedValue({ kind: 'success', data: machines });
@@ -148,9 +179,60 @@ describe('MachinesView', () => {
     expect(document.body.textContent).toContain('12 pages');
     expect(document.body.textContent).toContain('Demander l’ajout de documents');
 
-    const close = [...document.body.querySelectorAll('button')].find(item => item.textContent === 'Fermer')!;
+    const close = document.body.querySelector('button[aria-label="Fermer"]') as HTMLButtonElement;
     await act(async () => close.click());
     expect(document.body.textContent).not.toContain('Déposez vos PDF');
+  });
+
+  it('keeps the Super Admin machine selected and submits the PDF from the dialog', async () => {
+    const machines: MachineDto[] = [{ id: 'm1', companyId: 'c1', name: 'Presse P1', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true }];
+    getMachinesMock.mockResolvedValue({ kind: 'success', data: machines });
+    getCompaniesMock.mockResolvedValue({ kind: 'success', data: [{ id: 'c1', name: 'Entreprise A', status: 'active' }] });
+    let finishUpload!: (value: { kind: 'success'; data: unknown }) => void;
+    addMachineWithDocumentsMock.mockReturnValue(new Promise(resolve => { finishUpload = resolve; }));
+    const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+    await act(async () => root.render(<MachinesView currentUser={{ userId: 'sa', companyId: 'root', role: 'diaglink_super_admin' }} getAccessToken={async () => 'token'} />));
+    await act(async () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Entreprise A'))!.click());
+    await act(async () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Presse P1'))!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Ajouter des PDF')!.click());
+
+    const input = document.body.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File(['%PDF-1.4'], 'manuel.pdf', { type: 'application/pdf' });
+    await act(async () => {
+      input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(document.body.textContent).toContain('Ajouter des PDF à Presse P1');
+    expect(document.body.textContent).toContain('manuel.pdf');
+
+    const submit = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Ajouter les PDF')!;
+    await act(async () => { submit.click(); await Promise.resolve(); });
+    expect(addMachineWithDocumentsMock).toHaveBeenCalledWith(expect.any(Function), 'Entreprise A', 'Presse P1', [file]);
+    expect(submit.disabled).toBe(true);
+    expect(submit.querySelector('[role="progressbar"]')).not.toBeNull();
+
+    await act(async () => finishUpload({ kind: 'success', data: {} }));
+    expect(document.body.textContent).not.toContain('Ajouter des PDF à Presse P1');
+    expect(container.textContent).toContain('Documents ajoutés.');
+    await act(async () => root.unmount()); container.remove();
+  });
+
+  it('shows an explicit error if the upload context loses its company', async () => {
+    const machines: MachineDto[] = [{ id: 'm1', companyId: 'c1', name: 'Presse P1', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true }];
+    getMachinesMock.mockResolvedValue({ kind: 'success', data: machines });
+    getCompaniesMock.mockResolvedValue({ kind: 'success', data: [{ id: 'c1', name: 'Entreprise A', status: 'active' }] });
+    const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+    await act(async () => root.render(<MachinesView currentUser={{ userId: 'sa', companyId: 'root', role: 'diaglink_super_admin' }} getAccessToken={async () => 'token'} />));
+    await act(async () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Entreprise A'))!.click());
+    await act(async () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Presse P1'))!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Ajouter des PDF')!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retour aux entreprises')!.click());
+    await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Ajouter les PDF')!.click());
+
+    expect(document.body.textContent).toContain('Impossible d’ajouter les documents : aucune société sélectionnée.');
+    expect(addMachineWithDocumentsMock).not.toHaveBeenCalled();
+    await act(async () => root.unmount()); container.remove();
   });
 
   it('renders the list of accessible machines', async () => {

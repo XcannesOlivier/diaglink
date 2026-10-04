@@ -15,6 +15,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { submitSupportContact } from '../../services/supportContactApi';
+import { DialogCloseButton } from './DialogCloseButton';
 
 const useStyles = makeStyles({
   content: {
@@ -105,7 +106,7 @@ export function SupportContactDialog({
       <DialogSurface>
         <form onSubmit={submit}>
           <DialogBody>
-            <DialogTitle>Contacter DiagLink</DialogTitle>
+            <DialogTitle action={<DialogCloseButton disabled={status === 'submitting'} onClick={close} />}>Contacter DiagLink</DialogTitle>
             <DialogContent className={styles.content}>
               <Text className={styles.help}>
                 Décrivez votre demande. Notre équipe vous répondra directement par e-mail.

@@ -12,7 +12,13 @@ const useStyles = makeStyles({
   },
   header: {
     marginBottom: tokens.spacingVerticalL,
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalM,
+    flexWrap: 'wrap',
   },
+  headerText: { minWidth: 0 },
   title: {
     fontSize: tokens.fontSizeBase600,
     fontWeight: tokens.fontWeightSemibold,
@@ -40,17 +46,21 @@ interface PlaceholderViewProps {
   subtitle?: string;
   emptyStateMessage?: string;
   children?: React.ReactNode;
+  headerAction?: React.ReactNode;
 }
 
 /** Shared sober/professional placeholder shell used by every "not yet implemented" DiagLink view. */
-export const PlaceholderView: React.FC<PlaceholderViewProps> = ({ title, subtitle, emptyStateMessage, children }) => {
+export const PlaceholderView: React.FC<PlaceholderViewProps> = ({ title, subtitle, emptyStateMessage, children, headerAction }) => {
   const styles = useStyles();
 
   return (
     <div className={styles.root}>
-      <div className={styles.header}>
-        <Text className={styles.title}>{title}</Text>
-        {subtitle && <Text className={styles.subtitle}>{subtitle}</Text>}
+      <div className={styles.header} data-page-header>
+        <div className={styles.headerText}>
+          <Text className={styles.title}>{title}</Text>
+          {subtitle && <Text className={styles.subtitle}>{subtitle}</Text>}
+        </div>
+        {headerAction}
       </div>
       {children}
       {emptyStateMessage && (

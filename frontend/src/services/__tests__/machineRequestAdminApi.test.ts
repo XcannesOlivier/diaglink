@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { activateMachineRequest, attachMachineRequestBusinessEntities, cancelMachineRequestPayment, captureMachineRequestPayment, configureMachineRequestSubscription, decideAdditionalDocumentsRequest, decideAdditionalMachineRequest, downloadMachineRequestDocument, getMachineRequest, linkMachineRequestCustomer, listMachineRequests, markMachineRequestReady, updateMachineRequestStatus } from '../machineRequestAdminApi';
+import { activateMachineRequest, attachMachineRequestBusinessEntities, cancelMachineRequestPayment, captureMachineRequestPayment, configureMachineRequestSubscription, decideAdditionalDocumentsRequest, decideAdditionalMachineRequest, downloadMachineRequestDocument, getMachineRequest, linkMachineRequestCustomer, listArchivedMachineRequests, listMachineRequests, markMachineRequestReady, updateMachineRequestArchive, updateMachineRequestStatus } from '../machineRequestAdminApi';
 
 const token = vi.fn().mockResolvedValue('access-token');
 
@@ -25,6 +25,17 @@ describe('machine request admin API', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/admin/machine-requests/req-1/status', expect.objectContaining({
       method: 'PATCH', body: JSON.stringify({ status: 'treated' }), headers: { Authorization: 'Bearer access-token', 'Content-Type': 'application/json' },
     }));
+  });
+
+  it('uses the Super Admin history and archive routes without changing business status', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ requestId: 'req-1', status: 'treated' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await listArchivedMachineRequests(token);
+    await updateMachineRequestArchive(token, 'req/1', true);
+    await updateMachineRequestArchive(token, 'req/1', false);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/admin/machine-requests/history', { headers: { Authorization: 'Bearer access-token' } });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/admin/machine-requests/req%2F1/archive', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ isArchived: true }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/admin/machine-requests/req%2F1/archive', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ isArchived: false }) }));
   });
 
   it('uses the existing authenticated capture and cancel routes', async () => {

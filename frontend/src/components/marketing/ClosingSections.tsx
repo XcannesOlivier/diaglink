@@ -1,6 +1,6 @@
 import { Checkmark20Regular } from '@fluentui/react-icons';
 import { Link } from 'react-router-dom';
-import logoDiagLink from '../../assets/Logo DiagLink.png';
+import { DiagLinkLogo } from '../core/DiagLinkLogo';
 import styles from '../../pages/landing/LandingPage.module.css';
 
 export function PricingSection() {
@@ -13,5 +13,5 @@ export function FinalCta() {
 }
 
 export function PublicFooter({ loginTarget }: { loginTarget: string }) {
-  return <footer className={styles.footer}><div className={styles.container}><img src={logoDiagLink} alt="DiagLink" /><nav aria-label="Liens de pied de page"><Link to="/mentions-legales">Mentions légales</Link><Link to="/confidentialite">Confidentialité</Link><Link to="/contact">Contact</Link><Link to={loginTarget} target="_blank" rel="noopener noreferrer">Connexion</Link></nav><small>© {new Date().getFullYear()} DiagLink</small></div></footer>;
+  return <footer className={styles.footer}><div className={styles.container}><DiagLinkLogo /><nav aria-label="Liens de pied de page"><Link to="/mentions-legales">Mentions légales</Link><Link to="/confidentialite">Confidentialité</Link><Link to="/conditions">Conditions générales de service</Link><Link to="/contact">Contact</Link><Link to={loginTarget} target="_blank" rel="noopener noreferrer">Connexion</Link></nav><small>© {new Date().getFullYear()} DiagLink</small></div></footer>;
 }

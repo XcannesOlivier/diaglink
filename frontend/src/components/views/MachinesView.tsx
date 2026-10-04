@@ -13,6 +13,7 @@ import type { MachineDto } from '../../types/machine';
 import { MachineCreditStatus } from './MachineCreditStatus';
 import { AdditionalMachineRequestDialog } from './AdditionalMachineRequestDialog';
 import { AdditionalDocumentsRequestDialog } from './AdditionalDocumentsRequestDialog';
+import { DialogCloseButton } from '../core/DialogCloseButton';
 
 const useStyles = makeStyles({
   layout: {
@@ -214,7 +215,7 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
   const companiesState = useApiResource(fetchCompanies, onDiagLinkSessionExpired, superAdmin);
 
   useEffect(() => {
-    if (!selectedMachine || documentsRequestDialogOpen) return;
+    if (!selectedMachine || documentsRequestDialogOpen || documentsDialogOpen) return;
 
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {
       if (
@@ -232,7 +233,7 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
     };
-  }, [selectedMachine, documentsRequestDialogOpen]);
+  }, [selectedMachine, documentsRequestDialogOpen, documentsDialogOpen]);
 
   const handleUseMachine = useCallback((machine: MachineDto) => {
     dispatch({
@@ -318,7 +319,17 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
   };
 
   const handleAddDocuments = async () => {
-    if (!selectedCompany || !selectedMachine || submittingDocuments) return;
+    if (submittingDocuments) return;
+
+    if (!selectedCompany) {
+      setDocumentsError("Impossible d’ajouter les documents : aucune société sélectionnée.");
+      return;
+    }
+
+    if (!selectedMachine) {
+      setDocumentsError("Impossible d’ajouter les documents : aucune machine sélectionnée.");
+      return;
+    }
 
     if (documentFiles.length === 0) {
       setDocumentsError('Au moins un fichier PDF est obligatoire.');
@@ -487,7 +498,7 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
       )}
       <Dialog open={dialogOpen} onOpenChange={(_event, data) => !submittingMachine && setDialogOpen(data.open)}>
         <DialogSurface>
-          <DialogTitle>Ajouter une machine</DialogTitle>
+          <DialogTitle action={<DialogCloseButton disabled={submittingMachine} onClick={() => setDialogOpen(false)} />}>Ajouter une machine</DialogTitle>
           <DialogBody>
             <DialogContent className={styles.form}>
               <Field label="Nom de la machine" required>
@@ -529,7 +540,7 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
         onOpenChange={setDocumentsRequestDialogOpen} machine={selectedMachine} getAccessToken={getAccessToken} />}
       <Dialog open={documentsDialogOpen} onOpenChange={(_event, data) => !submittingDocuments && setDocumentsDialogOpen(data.open)}>
         <DialogSurface>
-          <DialogTitle>Ajouter des PDF à {selectedMachine?.name}</DialogTitle>
+          <DialogTitle action={<DialogCloseButton disabled={submittingDocuments} onClick={() => setDocumentsDialogOpen(false)} />}>Ajouter des PDF à {selectedMachine?.name}</DialogTitle>
           <DialogBody>
             <DialogContent className={styles.form}>
               <Field label="Fichiers PDF" required>

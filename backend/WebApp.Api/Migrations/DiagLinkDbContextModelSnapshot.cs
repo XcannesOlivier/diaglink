@@ -378,6 +378,68 @@ namespace WebApp.Api.Migrations
                     b.ToTable("ConversationMessages", "chat");
                 });
 
+            modelBuilder.Entity("WebApp.Api.Models.Entities.ConversationMessageVisual", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AssetKey")
+                        .IsRequired()
+                        .HasMaxLength(768)
+                        .HasColumnType("nvarchar(768)");
+
+                    b.Property<string>("AssetType")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(4)");
+
+                    b.Property<long>("ConversationMessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DocumentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<int>("Page")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Tile")
+                        .HasMaxLength(7)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(7)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationMessageId");
+
+                    b.HasIndex("ConversationMessageId", "AssetKey")
+                        .IsUnique();
+
+                    b.ToTable("ConversationMessageVisuals", "chat", t =>
+                        {
+                            t.HasCheckConstraint("CK_ConversationMessageVisuals_AssetType", "[AssetType] IN ('full', 'tile')");
+
+                            t.HasCheckConstraint("CK_ConversationMessageVisuals_DisplayOrder", "[DisplayOrder] >= 0");
+
+                            t.HasCheckConstraint("CK_ConversationMessageVisuals_Page", "[Page] > 0");
+
+                            t.HasCheckConstraint("CK_ConversationMessageVisuals_RequiredStrings", "LEN([DocumentId]) > 0 AND LEN([Name]) > 0 AND LEN([AssetKey]) > 0");
+                        });
+                });
+
             modelBuilder.Entity("WebApp.Api.Models.Entities.CreditLedgerEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1402,6 +1464,17 @@ namespace WebApp.Api.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("WebApp.Api.Models.Entities.ConversationMessageVisual", b =>
+                {
+                    b.HasOne("WebApp.Api.Models.Entities.ConversationMessage", "ConversationMessage")
+                        .WithMany("Visuals")
+                        .HasForeignKey("ConversationMessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ConversationMessage");
+                });
+
             modelBuilder.Entity("WebApp.Api.Models.Entities.CreditLedgerEntry", b =>
                 {
                     b.HasOne("WebApp.Api.Models.Entities.AiUsageRecord", null)
@@ -1536,6 +1609,11 @@ namespace WebApp.Api.Migrations
             modelBuilder.Entity("WebApp.Api.Models.Entities.Conversation", b =>
                 {
                     b.Navigation("Messages");
+                });
+
+            modelBuilder.Entity("WebApp.Api.Models.Entities.ConversationMessage", b =>
+                {
+                    b.Navigation("Visuals");
                 });
 #pragma warning restore 612, 618
         }

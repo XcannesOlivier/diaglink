@@ -578,6 +578,45 @@ describe('appReducer', () => {
     });
   });
 
+  describe('CHAT_STREAM_VISUALS', () => {
+    const visuals = [
+      { id: 2, documentId: 'manual', page: 72, assetType: 'full' as const, tile: null, name: 'page-72.png', displayOrder: 1 },
+      { id: 1, documentId: 'manual', page: 71, assetType: 'tile' as const, tile: 'r02-c01', name: 'tile.png', displayOrder: 0 },
+    ];
+
+    it('associates visuals only with the addressed assistant message', () => {
+      const state = createInitialState();
+      state.chat.messages = [
+        createMockMessage({ id: 'user', role: 'user' }),
+        createMockMessage({ id: 'assistant', role: 'assistant' }),
+        createMockMessage({ id: 'other', role: 'assistant' }),
+      ];
+
+      const result = appReducer(state, { type: 'CHAT_STREAM_VISUALS', messageId: 'assistant', visuals });
+
+      expect(result.chat.messages[0].visuals).toBeUndefined();
+      expect(result.chat.messages[1].visuals?.map(visual => visual.id)).toEqual([1, 2]);
+      expect(result.chat.messages[2].visuals).toBeUndefined();
+    });
+
+    it('does not attach visuals to a user message', () => {
+      const state = createInitialState();
+      state.chat.messages = [createMockMessage({ id: 'user', role: 'user' })];
+      expect(appReducer(state, { type: 'CHAT_STREAM_VISUALS', messageId: 'user', visuals })).toBe(state);
+    });
+
+    it('deduplicates by id while preserving display order', () => {
+      const state = createInitialState();
+      state.chat.messages = [createMockMessage({ id: 'assistant', role: 'assistant' })];
+      const result = appReducer(state, {
+        type: 'CHAT_STREAM_VISUALS', messageId: 'assistant',
+        visuals: [visuals[0], visuals[1], { ...visuals[1], name: 'duplicate.png' }],
+      });
+      expect(result.chat.messages[0].visuals?.map(visual => visual.id)).toEqual([1, 2]);
+      expect(result.chat.messages[0].visuals?.[0].name).toBe('tile.png');
+    });
+  });
+
   describe('CHAT_CANCEL_STREAM', () => {
     it('sets status to idle', () => {
       const state = createInitialState();
@@ -847,6 +886,29 @@ describe('appReducer', () => {
       expect(result.chat.error?.recoverable).toBe(true);
       expect(result.ui.chatInputEnabled).toBe(true);
       expect(result.chat.streamingMessageId).toBeUndefined();
+    });
+
+    it('preserves the exhausted-credit message while restoring the user input', () => {
+      const state = createInitialState();
+      state.chat.messages = [
+        createMockMessage({ id: 'user-1', role: 'user', content: 'Ma question' }),
+        createMockMessage({ id: 'assistant-1', role: 'assistant', content: '' }),
+      ];
+      const backendMessage = 'Crédit IA épuisé. Rechargez le portefeuille de votre entreprise pour continuer. L’historique reste accessible.';
+
+      const result = appReducer(state, {
+        type: 'CHAT_RECOVER_MESSAGE',
+        messageText: 'Ma question',
+        error: { code: 'AiCreditExhausted', message: backendMessage, recoverable: false },
+        retryCount: 0,
+      });
+
+      expect(result.chat.status).toBe('error');
+      expect(result.chat.error?.message).toBe(backendMessage);
+      expect(result.chat.error?.message).not.toContain('Failed to get a response');
+      expect(result.chat.error?.recoverable).toBe(false);
+      expect(result.chat.recoveredInput).toBe('Ma question');
+      expect(result.ui.chatInputEnabled).toBe(true);
     });
 
     it('uses singular "attempt" for retryCount of 1', () => {

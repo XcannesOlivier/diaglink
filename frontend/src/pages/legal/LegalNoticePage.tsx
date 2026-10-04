@@ -5,23 +5,8 @@ import { APP_LOGIN_URL } from '../../config/origins';
 import landingStyles from '../landing/LandingPage.module.css';
 import legalStyles from '../privacy/PrivacyPage.module.css';
 
-// TODO(juridique): remplacer les valeurs null ci-dessous par les informations légales validées.
-// Les champs non renseignés ne sont volontairement pas affichés sur la page publique.
-const publisherDetails: Array<{ label: string; value: string | null }> = [
-  { label: 'Forme juridique / nom de l’entreprise ou identité de l’entrepreneur', value: null },
-  { label: 'Adresse du siège ou adresse professionnelle', value: null },
-  { label: 'Numéro SIREN / SIRET', value: null },
-  { label: 'Numéro RCS, si applicable', value: null },
-  { label: 'Numéro de TVA intracommunautaire, si applicable', value: null },
-  { label: 'Adresse e-mail de contact', value: null },
-  { label: 'Directeur de la publication', value: null },
-];
-
 export function LegalNoticePage({ isAuthenticated }: { isAuthenticated: boolean }) {
   const loginTarget = APP_LOGIN_URL;
-  const completedPublisherDetails = publisherDetails.filter(
-    (detail): detail is { label: string; value: string } => detail.value !== null,
-  );
 
   return (
     <div className={landingStyles.page}>
@@ -35,27 +20,40 @@ export function LegalNoticePage({ isAuthenticated }: { isAuthenticated: boolean 
 
           <section>
             <h2>1. Éditeur du site</h2>
-            <p><strong>DiagLink</strong></p>
-            {completedPublisherDetails.length > 0 && (
-              <ul>
-                {completedPublisherDetails.map(detail => (
-                  <li key={detail.label}><strong>{detail.label} :</strong> {detail.value}</li>
-                ))}
-              </ul>
-            )}
+            <p>Le site et le service <strong>DiagLink</strong> sont édités par :</p>
+            <p>
+              <strong>XCANNES LLC</strong><br />
+              Limited Liability Company enregistrée dans l’État du Delaware, États-Unis<br />
+              <strong>Delaware File Number : 10157026</strong><br />
+              131 Continental Dr, Suite 305<br />
+              Newark, Delaware 19713<br />
+              United States
+            </p>
+            <p><strong>E-mail :</strong> <a href="mailto:contact@diaglink.com">contact@diaglink.com</a></p>
+            <p><strong>Téléphone :</strong> <a href="tel:+19179708191">+1 917 970 8191</a></p>
+            <p><strong>Directeur de la publication :</strong> Olivier Desruelle</p>
           </section>
           <section>
             <h2>2. Hébergement</h2>
-            <p>Le service DiagLink est hébergé sur l’infrastructure Microsoft Azure.</p>
+            <p>Le service DiagLink est hébergé sur l’infrastructure <strong>Microsoft Azure</strong>.</p>
+            <p>
+              <strong>Microsoft France SAS</strong><br />
+              37-45 Quai du Président Roosevelt<br />
+              92130 Issy-les-Moulineaux<br />
+              France
+            </p>
+            <p><strong>Téléphone :</strong> 09 70 01 90 90</p>
           </section>
           <section>
             <h2>3. Propriété intellectuelle</h2>
-            <p>Le site DiagLink, son identité visuelle, ses textes, ses interfaces et les éléments propres au service sont protégés par les règles applicables en matière de propriété intellectuelle.</p>
+            <p>Le site DiagLink, son identité visuelle, ses textes, ses interfaces, son logiciel et les éléments propres au service sont protégés par les règles applicables en matière de propriété intellectuelle.</p>
+            <p>Toute reproduction, représentation ou utilisation non autorisée de ces éléments est susceptible de constituer une atteinte aux droits de leurs titulaires.</p>
             <p>Les documentations techniques importées par les clients restent la propriété de leurs détenteurs respectifs.</p>
           </section>
           <section>
             <h2>4. Service DiagLink</h2>
-            <p>DiagLink est un service permettant d’exploiter et d’interroger la documentation technique associée à des machines afin d’aider les utilisateurs à retrouver les informations pertinentes. Les réponses de l’assistant constituent une aide et ne garantissent pas un diagnostic.</p>
+            <p>DiagLink est un service permettant d’exploiter et d’interroger la documentation technique associée à des machines afin d’aider les utilisateurs à retrouver les informations pertinentes.</p>
+            <p>Les réponses générées par l’assistant constituent une aide au diagnostic technique et ne garantissent pas l’exactitude d’un diagnostic.</p>
           </section>
           <section>
             <h2>5. Responsabilité</h2>
@@ -67,7 +65,9 @@ export function LegalNoticePage({ isAuthenticated }: { isAuthenticated: boolean 
           </section>
           <section>
             <h2>7. Contact</h2>
-            <p>Pour toute question concernant le site ou le service DiagLink, vous pouvez nous contacter depuis notre page <Link to="/contact">Contact</Link>.</p>
+            <p>Pour toute question concernant le site ou le service DiagLink, vous pouvez nous contacter à l’adresse suivante :</p>
+            <p><strong><a href="mailto:contact@diaglink.com">contact@diaglink.com</a></strong></p>
+            <p>Vous pouvez également utiliser notre <strong><Link to="/contact">page Contact</Link></strong>.</p>
           </section>
           <p className={legalStyles.updated}>Dernière mise à jour : septembre 2026</p>
         </article>

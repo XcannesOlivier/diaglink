@@ -21,12 +21,20 @@ public static class AdminFinanceReader
         var usageInPeriod=db.AiUsageRecords.AsNoTracking().Where(u=>u.CreatedAtUtc>=start&&u.CreatedAtUtc<end);
         var machinePeriods=db.MachineBillingPeriods.AsNoTracking().Where(p=>p.PeriodStartUtc<end&&p.PeriodEndUtc>start
             &&(p.Status=="Active"||p.Status=="Closed"));
+        var initialPaymentsInPeriod=db.MachineRequestPayments.AsNoTracking()
+            .Where(p=>p.Status==WebApp.Api.Models.Entities.MachineRequestPaymentStatus.Captured
+                &&p.CapturedAtUtc>=start&&p.CapturedAtUtc<end
+                &&p.RequestKind!=WebApp.Api.Models.MachineRequestKind.AdditionalDocuments
+                &&p.CompanyId!=null&&p.MachineId!=null&&p.ActivatedAtUtc!=null&&p.FirstPeriodEndUtc!=null
+                &&p.ServiceAmountCents!=null
+                &&p.ProvisioningStage>=WebApp.Api.Models.Entities.MachineRequestProvisioningStage.InitialPeriodCreated);
         var machines=await machinePeriods.Select(p=>p.MachineId).Distinct().CountAsync(ct);
         var users=await usageInPeriod.Where(u=>u.UserId!=null).Select(u=>u.UserId).Distinct().CountAsync(ct);
         var companyIds=await usageInPeriod.Where(u=>u.CompanyId!=null).Select(u=>u.CompanyId!.Value)
             .Union(db.Machines.Where(m=>machinePeriods.Any(p=>p.MachineId==m.Id)).Select(m=>m.CompanyId))
             .Union(db.StripeSubscriptionPayments.Where(p=>p.PaymentReference!=""&&p.AmountPaidCents>0
                 &&((p.PeriodStartUtc<end&&p.PeriodEndUtc>start)||(p.PaymentConfirmedAtUtc>=start&&p.PaymentConfirmedAtUtc<end))).Select(p=>p.CompanyId))
+            .Union(initialPaymentsInPeriod.Select(p=>p.CompanyId!.Value))
             .Union(db.StripeWalletTopUps.Where(o=>o.PaymentConfirmedAtUtc>=start&&o.PaymentConfirmedAtUtc<end
                 &&(o.Stage==WebApp.Api.Models.Entities.StripeWalletTopUpStage.WalletCredited||o.Stage==WebApp.Api.Models.Entities.StripeWalletTopUpStage.Completed)
                 &&db.CreditLedger.Any(e=>e.Id==o.LedgerEntryId&&e.CompanyId==o.CompanyId&&e.EntryType=="TopUp"&&e.BucketType=="CompanyWallet")).Select(o=>o.CompanyId))
@@ -34,6 +42,7 @@ public static class AdminFinanceReader
         var payments=await db.StripeSubscriptionPayments.AsNoTracking()
             .Where(p=>p.PaymentConfirmedAtUtc>=start&&p.PaymentConfirmedAtUtc<end&&p.AmountPaidCents>0&&p.PaymentReference!="")
             .ToListAsync(ct);
+        var initialPayments=await initialPaymentsInPeriod.ToListAsync(ct);
         var granted=new HashSet<Guid>();decimal included=0;
         foreach(var payment in payments)
         {
@@ -44,6 +53,13 @@ public static class AdminFinanceReader
                 &&db.Machines.Any(m=>m.Id==p.MachineId&&m.CompanyId==payment.CompanyId)).ToListAsync(ct);
             foreach(var period in periods)if(granted.Add(period.Id))included+=period.IncludedAiBudgetRealCost;
         }
+        foreach(var payment in initialPayments)
+        {
+            var period=await db.MachineBillingPeriods.AsNoTracking().SingleOrDefaultAsync(p=>p.MachineId==payment.MachineId
+                &&p.PeriodStartUtc==payment.ActivatedAtUtc&&p.PeriodEndUtc==payment.FirstPeriodEndUtc
+                &&db.Machines.Any(m=>m.Id==p.MachineId&&m.CompanyId==payment.CompanyId),ct);
+            if(period!=null&&granted.Add(period.Id))included+=period.IncludedAiBudgetRealCost;
+        }
         var topups=await (from entry in db.CreditLedger.AsNoTracking()
             join op in db.StripeWalletTopUps.AsNoTracking() on entry.Id equals op.LedgerEntryId
             where entry.EntryType=="TopUp"&&entry.BucketType=="CompanyWallet"&&entry.Currency=="EUR"
@@ -51,7 +67,8 @@ public static class AdminFinanceReader
                 &&op.PaymentConfirmedAtUtc>=start&&op.PaymentConfirmedAtUtc<end
                 &&(op.Stage==WebApp.Api.Models.Entities.StripeWalletTopUpStage.WalletCredited||op.Stage==WebApp.Api.Models.Entities.StripeWalletTopUpStage.Completed)
             select entry.CommercialCreditAmount).SumAsync(ct)??0m;
-        return Results.Ok(new PeriodFinance(payments.Sum(p=>p.AmountPaidCents)/100m,included,topups,companyIds,machines,users));
+        var subscriptionsPaid=(payments.Sum(p=>p.AmountPaidCents)+initialPayments.Sum(p=>(long)p.ServiceAmountCents!.Value))/100m;
+        return Results.Ok(new PeriodFinance(subscriptionsPaid,included,topups,companyIds,machines,users));
     }
     public record GlobalTopUps(decimal TotalAddedEur);
     public static async Task<IResult> GlobalTopUpsAsync(DiagLinkDbContext db,CancellationToken ct)

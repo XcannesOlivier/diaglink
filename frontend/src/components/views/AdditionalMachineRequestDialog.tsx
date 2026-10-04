@@ -5,6 +5,7 @@ import { calculateMaximumAuthorizationPrice, calculatePreparationPrice, MAXIMUM_
 import { authorizationConfirmedMessage, checkoutReturnedMessage, checkoutWindowName, isTrustedCheckoutMessage } from '../../pages/start/checkoutPopup';
 import { formatFileSize, inspectPdfFiles, type SelectedPdf } from '../../pages/start/pdfSelection';
 import { createCompanyMachineRequestPayment, submitCompanyMachineRequest, waitForCompanyMachineRequestAuthorization } from '../../services/companyMachineRequestPaymentApi';
+import { DialogCloseButton } from '../core/DialogCloseButton';
 
 const useStyles = makeStyles({
   content: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, minWidth: 'min(560px, 80vw)' },
@@ -123,7 +124,7 @@ export function AdditionalMachineRequestDialog({ open, onOpenChange, getAccessTo
   const drop = (event: DragEvent<HTMLDivElement>) => { event.preventDefault(); void addFiles(Array.from(event.dataTransfer.files)); };
 
   return <Dialog open={open} onOpenChange={(_event, data) => !submitting && onOpenChange(data.open)}><DialogSurface>
-    <DialogTitle>Demander l’ajout d’une machine</DialogTitle><DialogBody><DialogContent className={styles.content}>
+    <DialogTitle action={<DialogCloseButton disabled={submitting} onClick={() => onOpenChange(false)} />}>Demander l’ajout d’une machine</DialogTitle><DialogBody><DialogContent className={styles.content}>
       {submitted ? <div className={styles.authorized} role="status"><Text weight="semibold" size={500}>Demande envoyée</Text><Text block>Votre demande d’ajout de machine a été transmise. Elle sera vérifiée avant activation.</Text></div> : authorized ? <div className={styles.authorized} role="status"><Text weight="semibold" size={500}>{uploadFailed ? 'Paiement autorisé — l’envoi de la demande a échoué.' : 'Envoi de votre demande…'}</Text>{error && <Text block className={styles.error}>{error}</Text>}{uploadFailed && <Button appearance="primary" disabled={submitting} onClick={() => void uploadRequest().catch(() => undefined)}>Réessayer l’envoi</Button>}</div> : <>
         <div className={styles.fields}>
           <Field label="Nom de la machine" required><Input {...field('machineName')} /></Field>

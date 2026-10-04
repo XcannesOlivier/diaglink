@@ -5,6 +5,7 @@ export interface IChatItem {
   duration?: number; // response time in ms
   attachments?: IFileAttachment[]; // File attachments
   annotations?: IAnnotation[]; // Citations/references from AI agent
+  visuals?: TechnicalVisual[]; // Technical illustrations selected by the agent
   mcpApproval?: IMcpApprovalRequest; // MCP tool approval request
   activeToolUse?: string; // Currently active tool (e.g. "file_search", "code_interpreter")
   retryAttempt?: number; // Current retry attempt (set during retries)
@@ -13,6 +14,16 @@ export interface IChatItem {
     time?: string; // ISO timestamp
     usage?: IUsageInfo; // Usage info from backend
   };
+}
+
+export interface TechnicalVisual {
+  id: number;
+  documentId: string;
+  page: number;
+  assetType: 'full' | 'tile';
+  tile: string | null;
+  name: string;
+  displayOrder: number;
 }
 
 export interface IMcpApprovalRequest {

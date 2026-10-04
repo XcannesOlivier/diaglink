@@ -8,6 +8,7 @@ import type { CurrentUser } from '../../../types/currentUser';
 
 let mockState: AppState;
 const listMachineRequestsMock = vi.hoisted(() => vi.fn());
+const machineRequestsViewState = vi.hoisted(() => ({ resetKeys: [] as number[] }));
 const mounted: { root: Root; container: HTMLDivElement }[] = [];
 afterEach(async () => {
   for (const { root, container } of mounted.splice(0)) { await act(async () => root.unmount()); container.remove(); }
@@ -21,6 +22,12 @@ vi.mock('../../../services/machineRequestAdminApi', async importOriginal => {
   const original = await importOriginal<typeof import('../../../services/machineRequestAdminApi')>();
   return { ...original, listMachineRequests: listMachineRequestsMock };
 });
+vi.mock('../../views/MachineRequestsView', () => ({
+  MachineRequestsView: ({ listResetKey = 0 }: { listResetKey?: number }) => {
+    machineRequestsViewState.resetKeys.push(listResetKey);
+    return <div data-testid="machine-requests-view" data-reset-key={listResetKey}>Liste des demandes</div>;
+  },
+}));
 vi.mock('../../core/SupportContactDialog', () => ({
   SupportContactDialog: ({ open, machineId }: { open: boolean; machineId?: string }) =>
     open ? <div role="dialog" data-machine-id={machineId}>Modale support</div> : null,
@@ -56,6 +63,7 @@ describe('AppShell navigation', () => {
     mockDispatch.mockClear();
     listMachineRequestsMock.mockReset();
     listMachineRequestsMock.mockResolvedValue({ kind: 'success', data: [] });
+    machineRequestsViewState.resetKeys.length = 0;
     window.history.replaceState(null, '', '/app');
   });
 
@@ -99,6 +107,50 @@ describe('AppShell navigation', () => {
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
     expect(mockDispatch).toHaveBeenLastCalledWith({ type: 'UI_SET_VIEW', view: 'machines' });
+  });
+
+  it('returns the active requests view to its list when its desktop tab is selected again', () => {
+    mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' }, 'machine-requests');
+    const container = renderAppShell();
+    const tab = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.includes('Nouvelles demandes'))!;
+
+    expect(container.querySelector('[data-testid="machine-requests-view"]')?.getAttribute('data-reset-key')).toBe('0');
+    act(() => tab.click());
+
+    expect(container.querySelector('[data-testid="machine-requests-view"]')?.getAttribute('data-reset-key')).toBe('1');
+    expect(mockDispatch).not.toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'machine-requests' });
+  });
+
+  it('does not reset request details from the mobile and tablet navigation', () => {
+    mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' }, 'chat');
+    const container = renderAppShell();
+    const menuButton = container.querySelector<HTMLButtonElement>('button[aria-label="Ouvrir le menu"]')!;
+    act(() => menuButton.click());
+    const requestButtons = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .filter(button => button.textContent?.includes('Nouvelles demandes'));
+
+    act(() => requestButtons.at(-1)!.click());
+
+    expect(machineRequestsViewState.resetKeys).toHaveLength(0);
+    expect(mockDispatch).toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'machine-requests' });
+  });
+
+  it('spaces and vertically aligns the Super Admin mobile requests badge', async () => {
+    listMachineRequestsMock.mockResolvedValue({
+      kind: 'success',
+      data: Array.from({ length: 12 }, (_, index) => ({ requestId: `request-${index}`, status: 'pending' })),
+    });
+    mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' });
+    const container = renderAppShell();
+    await act(async () => { await Promise.resolve(); });
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Ouvrir le menu"]')!.click());
+
+    const label = document.body.querySelector<HTMLElement>('[data-mobile-request-label]')!;
+    expect(label.textContent).toBe('Nouvelles demandes12');
+    expect(label.querySelector('[class*="fui-Badge"]')?.textContent).toBe('12');
+    expect(getComputedStyle(label).display).toBe('inline-flex');
+    expect(getComputedStyle(label).alignItems).toBe('center');
+    expect(getComputedStyle(label).gap).toBe('8px');
   });
 
   it('technician does not see Utilisateurs / Entreprise / Administration DiagLink', () => {

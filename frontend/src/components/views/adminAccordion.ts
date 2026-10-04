@@ -1,6 +1,6 @@
 import type { DetailsHTMLAttributes, SyntheticEvent } from 'react';
 
-export type AdminSection = 'statistics' | 'consumption' | 'payments' | 'billing' | 'technical' | 'repairs';
+export type AdminSection = 'statistics' | 'globalConsumption' | 'machineConsumption' | 'technical' | 'repairs';
 
 export interface AdminAccordionControl {
   openSection: AdminSection | null;

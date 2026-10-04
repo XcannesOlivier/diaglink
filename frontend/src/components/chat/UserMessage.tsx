@@ -3,7 +3,6 @@ import { Spinner, Badge } from '@fluentui/react-components';
 import { Attach24Regular, ImageRegular } from '@fluentui/react-icons';
 import { UserMessage as CopilotUserMessage } from '@fluentui-copilot/react-copilot-chat';
 import { Markdown } from '../core/Markdown';
-import { useFormatTimestamp } from '../../hooks/useFormatTimestamp';
 import type { IChatItem } from '../../types/chat';
 import styles from './UserMessage.module.css';
 
@@ -20,14 +19,10 @@ function formatFileSize(bytes: number): string {
 }
 
 function UserMessageComponent({ message }: UserMessageProps) {
-  const formatTimestamp = useFormatTimestamp();
-  const timestamp = message.more?.time ? formatTimestamp(new Date(message.more.time)) : '';
-
   return (
     <div className={styles.userMessageWrapper}>
       <CopilotUserMessage
         className={styles.userMessage}
-        timestamp={timestamp}
       >
         <Suspense fallback={<Spinner size="small" />}>
           <Markdown content={message.content} />

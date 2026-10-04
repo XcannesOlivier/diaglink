@@ -3,15 +3,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@fluentui/react-components';
 import { addStripeMachine, getStripeAdditions, type StripeAdditionSummary, type StripeCompanySummary } from '../../services/stripeAdminService';
 import styles from './CompanyFinancePanel.module.css';
+import type { MachineFinanceIntervention } from './financeInterventions';
 
 interface Props {
   companyId: string; account: StripeCompanySummary; getAccessToken: () => Promise<string | null>;
+  revision?: number;
   onDiagLinkSessionExpired?: () => void;
   technicalTarget?: HTMLElement | null;
   repairTarget?: HTMLElement | null;
-  onInterventionsChange?: (interventions: string[]) => void;
+  onInterventionsChange?: (interventions: MachineFinanceIntervention[]) => void;
 }
-export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken, onDiagLinkSessionExpired, technicalTarget, repairTarget, onInterventionsChange }: Props) {
+export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken, revision: externalRevision=0, onDiagLinkSessionExpired, technicalTarget, repairTarget, onInterventionsChange }: Props) {
   const [operations, setOperations] = useState<StripeAdditionSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -32,7 +34,7 @@ export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken
       }
     });
     return () => { generation.current++; };
-  }, [companyId, getAccessToken, onDiagLinkSessionExpired, revision]);
+  }, [companyId, getAccessToken, onDiagLinkSessionExpired, revision, externalRevision]);
 
   async function run(machineId: string) {
     if (inFlight.current || !account.testActionsEnabled || !machineId) return;
@@ -52,8 +54,12 @@ export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken
   const pendingOperations = useMemo(
     () => operations.filter(operation => operation.stage !== 'Completed' || operation.reconciliationRequired),
     [operations]);
-  const interventions = useMemo(() => pendingOperations.map(operation =>
-    `${operation.machineName} — ${operation.reconciliationRequired ? 'réconciliation requise' : 'ajout à reprendre'}`), [pendingOperations]);
+  const interventions = useMemo(() => pendingOperations.map(operation => ({
+    id: operation.id,
+    type: 'machine-addition' as const,
+    machineId: operation.machineId,
+    label: operation.reconciliationRequired ? 'Réconciliation requise' : 'Ajout à reprendre',
+  })), [pendingOperations]);
   useEffect(() => { onInterventionsChange?.(interventions); }, [interventions, onInterventionsChange]);
   const technicalDetails = <section aria-label="Détails techniques des ajouts de machines">
     <div className={styles.cardHeading}><h4>Ajouts de machines enregistrés</h4>

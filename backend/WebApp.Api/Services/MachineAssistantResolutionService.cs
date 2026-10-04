@@ -23,35 +23,40 @@ public class MachineAssistantResolutionService
         _machineAccessService = machineAccessService;
     }
 
-    /// <summary>
-    /// Resolves the assistant configuration for <paramref name="machineId"/>, returning
-    /// <see cref="MachineAssistantResolutionKind.MachineNotAccessible"/> for both "doesn't exist" and
-    /// "exists but caller can't see it" — callers must map this to 404, never 403 (anti-enumeration).
-    /// </summary>
-    public async Task<MachineAssistantResolution> ResolveAsync(ClaimsPrincipal user, Guid machineId, CancellationToken cancellationToken)
+    /// <summary>Performs the runtime-neutral access, existence and entitlement checks.</summary>
+    public async Task<MachineResolution> ResolveMachineAsync(
+        ClaimsPrincipal user,
+        Guid machineId,
+        CancellationToken cancellationToken)
     {
         if (!await _machineAccessService.CanAccessMachineAsync(user, machineId, cancellationToken))
         {
-            return MachineAssistantResolution.NotAccessible();
+            return MachineResolution.NotAccessible();
         }
 
-        // Resolve assistant configuration directly from legacy dbo.Machines row. This makes
-        // dbo.Machines the single source of truth for Foundry configuration.
         var machine = await _db.Machines
             .AsNoTracking()
             .FirstOrDefaultAsync(m => m.Id == machineId, cancellationToken);
 
         if (machine is null)
         {
-            return MachineAssistantResolution.NotConfigured();
+            return MachineResolution.NotAccessible();
         }
 
-        if (!await MachineEntitlements.Eligible(_db, DateTime.UtcNow).AnyAsync(m => m.Id == machineId, cancellationToken))
+        if (!await MachineEntitlements.Eligible(_db, DateTime.UtcNow)
+                .AnyAsync(m => m.Id == machineId, cancellationToken))
         {
-            return MachineAssistantResolution.Disabled();
+            return MachineResolution.Disabled();
         }
 
-        // Consider configured when FoundryAgentId and ProjectEndpoint are present
+        return MachineResolution.Ok(machine);
+    }
+
+    /// <summary>Builds the legacy Hosted Agent configuration after that runtime is selected.</summary>
+    public MachineAssistantResolution ResolveHostedAgent(Machine machine)
+    {
+        ArgumentNullException.ThrowIfNull(machine);
+
         if (string.IsNullOrEmpty(machine.FoundryAgentId) || string.IsNullOrEmpty(machine.ProjectEndpoint))
         {
             return MachineAssistantResolution.NotConfigured();
@@ -64,6 +69,27 @@ public class MachineAssistantResolutionService
             AgentId = machine.FoundryAgentId,
             AgentVersion = machine.AgentVersion,
             AgentName = null,
-        });
+        }, machine);
+    }
+
+    /// <summary>
+    /// Resolves the assistant configuration for <paramref name="machineId"/>, returning
+    /// <see cref="MachineAssistantResolutionKind.MachineNotAccessible"/> for both "doesn't exist" and
+    /// "exists but caller can't see it" — callers must map this to 404, never 403 (anti-enumeration).
+    /// </summary>
+    public async Task<MachineAssistantResolution> ResolveAsync(ClaimsPrincipal user, Guid machineId, CancellationToken cancellationToken)
+    {
+        var machineResolution = await ResolveMachineAsync(user, machineId, cancellationToken);
+        if (machineResolution.Kind == MachineResolutionKind.MachineNotAccessible)
+        {
+            return MachineAssistantResolution.NotAccessible();
+        }
+
+        if (machineResolution.Kind == MachineResolutionKind.MachineDisabled)
+        {
+            return MachineAssistantResolution.Disabled();
+        }
+
+        return ResolveHostedAgent(machineResolution.Machine!);
     }
 }

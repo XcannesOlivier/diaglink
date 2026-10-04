@@ -434,7 +434,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 />
               </Tooltip>
             )}
-            {onOpenMobileMenu && (
+          </div>
+          {onOpenMobileMenu && (
+            <div className={styles.mobileMenuContainer} data-mobile-menu-container>
               <Button
                 className={styles.mobileMenuButton}
                 appearance="subtle"
@@ -442,10 +444,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 onClick={onOpenMobileMenu}
                 aria-label="Ouvrir le menu"
               />
-            )}
+            </div>
+          )}
           </div>
         </div>
-      </div>
       <input
         ref={fileInputRef}
         type="file"

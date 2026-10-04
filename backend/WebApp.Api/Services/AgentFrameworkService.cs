@@ -423,8 +423,8 @@ public class AgentFrameworkService : IDisposable
             }
             else if (update is StreamingResponseOutputItemDoneUpdate itemDoneUpdate)
             {
-                if (visionDiagnostics.Observe(itemDoneUpdate.Item, "done", currentResponseId) is { } visionDone)
-                    yield return new StreamChunk { VisionUsage = visionDone };
+                foreach (var visionChunk in CreateVisionChunks(visionDiagnostics, itemDoneUpdate.Item, "done", currentResponseId))
+                    yield return visionChunk;
                 // Check for MCP tool approval request
                 if (itemDoneUpdate.Item is McpToolCallApprovalRequestItem mcpApprovalItem)
                 {
@@ -475,9 +475,11 @@ public class AgentFrameworkService : IDisposable
             }
             else if (update is StreamingResponseOutputItemAddedUpdate itemAddedUpdate)
             {
-                if (itemAddedUpdate.Item != null &&
-                    visionDiagnostics.Observe(itemAddedUpdate.Item, "added", currentResponseId) is { } visionAdded)
-                    yield return new StreamChunk { VisionUsage = visionAdded };
+                if (itemAddedUpdate.Item != null)
+                {
+                    foreach (var visionChunk in CreateVisionChunks(visionDiagnostics, itemAddedUpdate.Item, "added", currentResponseId))
+                        yield return visionChunk;
+                }
                 // Detect tool-use steps and signal the frontend for progress indicators
                 string? toolName = itemAddedUpdate.Item switch
                 {
@@ -515,6 +517,23 @@ public class AgentFrameworkService : IDisposable
         }
 
         _logger.LogInformation("Completed streaming for conversation: {ConversationId}", conversationId);
+    }
+
+    internal static IReadOnlyList<StreamChunk> CreateVisionChunks(
+        VisionToolDiagnostics diagnostics,
+        ResponseItem item,
+        string phase,
+        string? parentResponseId)
+    {
+        var chunks = new List<StreamChunk>(2);
+        if (diagnostics.Observe(item, phase, parentResponseId) is { } usage)
+            chunks.Add(new StreamChunk { VisionUsage = usage });
+
+        var newVisuals = diagnostics.TakeNewVisuals();
+        if (newVisuals.Count > 0)
+            chunks.Add(StreamChunk.WithVisuals(newVisuals));
+
+        return chunks;
     }
 
     /// <summary>

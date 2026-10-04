@@ -18,8 +18,9 @@ const staged = { requestId: 'r1', paymentRequestId: 'r1', status: 'pending', tar
 
 async function renderDialog() {
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
-  await act(async () => root.render(<AdditionalDocumentsRequestDialog open onOpenChange={vi.fn()} machine={machine} getAccessToken={async () => 'token'} />));
-  return { host, root };
+  const onOpenChange = vi.fn();
+  await act(async () => root.render(<AdditionalDocumentsRequestDialog open onOpenChange={onOpenChange} machine={machine} getAccessToken={async () => 'token'} />));
+  return { host, root, onOpenChange };
 }
 async function selectPdf(pageCount = 100) {
   const file = new File(['pdf'], 'manual.pdf', { type: 'application/pdf' });
@@ -185,10 +186,15 @@ describe('AdditionalDocumentsRequestDialog', () => {
     expect(document.body.textContent).toContain('manual.pdf');
   });
 
-  it('keeps Close distinct from durable cancellation', async () => {
+  it('only offers the top-right close control and keeps it distinct from durable cancellation', async () => {
     sessionStorage.setItem('diaglink:additional-documents:m1', JSON.stringify({ requestId: 'r1', machineId: 'm1' }));
     api.get.mockResolvedValue({ status: 'pending', amount: 0.5, currency: 'EUR' });
-    await renderDialog(); await click('Fermer');
+    const { onOpenChange } = await renderDialog();
+    const closeButtons = document.body.querySelectorAll('button[aria-label="Fermer"]');
+    expect(closeButtons).toHaveLength(1);
+    expect([...document.body.querySelectorAll('button')].some(button => button.textContent === 'Fermer')).toBe(false);
+    await act(async () => closeButtons[0].dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(api.cancel).not.toHaveBeenCalled();
   });
 

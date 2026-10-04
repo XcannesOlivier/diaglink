@@ -45,6 +45,24 @@ public record DeactivateUserOutcome
     public static DeactivateUserOutcome Error(UserDeactivationErrorKind kind, string message) => new() { Success = false, ErrorKind = kind, ErrorMessage = message };
 }
 
+public enum UserProfileUpdateErrorKind
+{
+    UserNotFound,
+    MissingRequiredField,
+    FieldTooLong,
+}
+
+public record UpdateUserProfileOutcome
+{
+    public bool Success { get; init; }
+    public CompanyUserDto? User { get; init; }
+    public UserProfileUpdateErrorKind? ErrorKind { get; init; }
+    public string? ErrorMessage { get; init; }
+
+    public static UpdateUserProfileOutcome Ok(CompanyUserDto user) => new() { Success = true, User = user };
+    public static UpdateUserProfileOutcome Error(UserProfileUpdateErrorKind kind, string message) => new() { ErrorKind = kind, ErrorMessage = message };
+}
+
 /// <summary>
 /// Creates technician accounts in dbo.Users. CompanyId is always supplied by the caller (Program.cs
 /// resolves it from either the company_admin's own claim or a super-admin-supplied route parameter —
@@ -53,6 +71,8 @@ public record DeactivateUserOutcome
 public class UserProvisioningService
 {
     private const int MaxEmailLength = 320;
+    private const int MaxNameLength = 100;
+    private const int MaxPhoneNumberLength = 30;
 
     private readonly DiagLinkDbContext _db;
 
@@ -70,6 +90,40 @@ public class UserProvisioningService
     /// company must be validated since the super-admin can target any company id.</summary>
     public Task<CreateTechnicianOutcome> CreateTechnicianForCompanyAsync(Guid companyId, CreateTechnicianRequest request, CancellationToken cancellationToken)
         => CreateTechnicianCoreAsync(companyId, request, validateCompany: true, cancellationToken);
+
+    /// <summary>Updates only the three editable profile fields. The company-scoped lookup is the
+    /// tenant boundary for both company admins and super admins.</summary>
+    public async Task<UpdateUserProfileOutcome> UpdateUserProfileAsync(
+        Guid companyId,
+        Guid userId,
+        UpdateUserProfileRequest request,
+        CancellationToken cancellationToken)
+    {
+        var firstName = ValidateProfileField(request.FirstName, "Le prénom", MaxNameLength);
+        if (firstName.ErrorKind is not null) return UpdateUserProfileOutcome.Error(firstName.ErrorKind.Value, firstName.ErrorMessage!);
+
+        var lastName = ValidateProfileField(request.LastName, "Le nom", MaxNameLength);
+        if (lastName.ErrorKind is not null) return UpdateUserProfileOutcome.Error(lastName.ErrorKind.Value, lastName.ErrorMessage!);
+
+        var phoneNumber = ValidateProfileField(request.PhoneNumber, "Le téléphone", MaxPhoneNumberLength);
+        if (phoneNumber.ErrorKind is not null) return UpdateUserProfileOutcome.Error(phoneNumber.ErrorKind.Value, phoneNumber.ErrorMessage!);
+
+        var user = await _db.Users.FirstOrDefaultAsync(
+            candidate => candidate.Id == userId && candidate.CompanyId == companyId,
+            cancellationToken);
+        if (user is null)
+        {
+            return UpdateUserProfileOutcome.Error(UserProfileUpdateErrorKind.UserNotFound, "Utilisateur introuvable.");
+        }
+
+        user.FirstName = firstName.NormalizedValue;
+        user.LastName = lastName.NormalizedValue;
+        user.PhoneNumber = phoneNumber.NormalizedValue;
+        user.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return UpdateUserProfileOutcome.Ok(ToCompanyUserDto(user));
+    }
 
     private async Task<CreateTechnicianOutcome> CreateTechnicianCoreAsync(Guid companyId, CreateTechnicianRequest request, bool validateCompany, CancellationToken cancellationToken)
     {
@@ -297,6 +351,22 @@ public class UserProvisioningService
         var trimmed = value?.Trim();
         return string.IsNullOrEmpty(trimmed)
             ? (null, UserProvisioningErrorKind.MissingRequiredField, $"{fieldLabel} est obligatoire.")
+            : (trimmed, null, null);
+    }
+
+    private static (string? NormalizedValue, UserProfileUpdateErrorKind? ErrorKind, string? ErrorMessage) ValidateProfileField(
+        string? value,
+        string fieldLabel,
+        int maxLength)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return (null, UserProfileUpdateErrorKind.MissingRequiredField, $"{fieldLabel} est obligatoire.");
+        }
+
+        return trimmed.Length > maxLength
+            ? (null, UserProfileUpdateErrorKind.FieldTooLong, $"{fieldLabel} est trop long.")
             : (trimmed, null, null);
     }
 

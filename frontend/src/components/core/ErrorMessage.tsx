@@ -1,5 +1,6 @@
-import { makeStyles, tokens, Button, Text, MessageBar, MessageBarBody, MessageBarActions } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens, Button, Text, MessageBar, MessageBarBody, MessageBarActions } from '@fluentui/react-components';
 import { DismissRegular, ArrowClockwiseRegular } from '@fluentui/react-icons';
+import { useThemeContext } from '../../contexts/ThemeContext';
 
 const useStyles = makeStyles({
   container: {
@@ -11,10 +12,24 @@ const useStyles = makeStyles({
     borderLeftStyle: 'solid',
     borderLeftColor: tokens.colorPaletteRedBorder2,
   },
+  warningLight: {
+    backgroundColor: '#FFF4E5',
+    borderLeftColor: '#F59E0B',
+  },
+  warningDark: {
+    backgroundColor: '#33280F',
+    borderLeftColor: '#D97706',
+  },
   messageText: {
     color: tokens.colorNeutralForeground1,
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
+  },
+  warningTextLight: {
+    color: '#7C4A03',
+  },
+  warningTextDark: {
+    color: '#FDE68A',
   },
   actions: {
     display: 'flex',
@@ -27,6 +42,9 @@ export interface ErrorMessageProps {
    * Error message to display
    */
   message: string;
+
+  /** Visual severity of the message. */
+  intent?: 'error' | 'warning';
   
   /**
    * Whether the error is recoverable (shows retry button)
@@ -58,12 +76,15 @@ export interface ErrorMessageProps {
  */
 export function ErrorMessage({ 
   message, 
+  intent = 'error',
   recoverable = false, 
   onRetry, 
   onDismiss,
   customAction 
 }: ErrorMessageProps) {
   const styles = useStyles();
+  const { isDarkMode } = useThemeContext();
+  const isWarning = intent === 'warning';
   
   // Defensive: ensure message is always a string
   const displayMessage = typeof message === 'string' 
@@ -72,14 +93,21 @@ export function ErrorMessage({
 
   return (
     <MessageBar
-      intent="error"
-      className={styles.container}
+      intent={intent}
+      className={mergeClasses(
+        styles.container,
+        isWarning && (isDarkMode ? styles.warningDark : styles.warningLight),
+      )}
+      data-intent={intent}
       role="alert"
       aria-live="assertive"
       aria-atomic="true"
     >
       <MessageBarBody>
-        <Text className={styles.messageText}>{displayMessage}</Text>
+        <Text className={mergeClasses(
+          styles.messageText,
+          isWarning && (isDarkMode ? styles.warningTextDark : styles.warningTextLight),
+        )}>{displayMessage}</Text>
       </MessageBarBody>
       <MessageBarActions
         containerAction={

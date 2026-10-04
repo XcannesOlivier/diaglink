@@ -16,6 +16,51 @@ export interface CreateCompanyUserRequest {
   role: string;
 }
 
+export interface UpdateUserProfileRequest {
+  firstName: string;
+  lastName: string;
+  phoneNumber: string;
+}
+
+/** PATCH /api/company/users/{userId} — company_admin, scoped server-side to its own tenant. */
+export async function updateCompanyUser(
+  getAccessToken: () => Promise<string | null>,
+  userId: string,
+  request: UpdateUserProfileRequest
+): Promise<ApiWriteResult<CompanyUserDto>> {
+  try {
+    const { headers, mode } = await getApiAuthHeaders(getAccessToken);
+    const response = await fetch(`${getApiUrl()}/company/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    return await parseApiWriteResult<CompanyUserDto>(response, mode);
+  } catch {
+    return { kind: 'error' };
+  }
+}
+
+/** PATCH /api/companies/{companyId}/users/{userId} — diaglink_super_admin only. */
+export async function updateUserForCompany(
+  getAccessToken: () => Promise<string | null>,
+  companyId: string,
+  userId: string,
+  request: UpdateUserProfileRequest
+): Promise<ApiWriteResult<CompanyUserDto>> {
+  try {
+    const { headers, mode } = await getApiAuthHeaders(getAccessToken);
+    const response = await fetch(`${getApiUrl()}/companies/${encodeURIComponent(companyId)}/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    return await parseApiWriteResult<CompanyUserDto>(response, mode);
+  } catch {
+    return { kind: 'error' };
+  }
+}
+
 /**
  * GET /api/company/users — always scoped server-side to the caller's own company_id claim.
  * Never call this for diaglink_super_admin expecting a cross-company listing (see UsersView).

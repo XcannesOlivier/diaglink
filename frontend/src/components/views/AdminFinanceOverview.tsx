@@ -1,18 +1,17 @@
-import {type ReactNode} from 'react';
+import {type ReactNode,useCallback} from 'react';
 import {CompanyConsumptionPanel} from './CompanyConsumptionPanel';
-import type {StripeCompanySummary} from '../../services/stripeAdminService';
 import {getAdminAccordionProps, type AdminAccordionControl} from './adminAccordion';
 import styles from './CompanyFinancePanel.module.css';
-const date=(s:string|null)=>s?new Date(s.endsWith('Z')?s:`${s}Z`).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric',timeZone:'UTC'}):'Non disponible';
-export function AdminFinanceOverview({companyId,account,token,revision=0,children,machineContent,accordion}:{companyId:string;account:StripeCompanySummary;token:()=>Promise<string|null>;revision?:number;children?:ReactNode;machineContent?:ReactNode;accordion?:AdminAccordionControl}){
- return <section aria-label="Synthèse financière entreprise" className={`${styles.panel} ${styles.adminFinanceRoot}`}>
-  <details className={`${styles.technical} ${styles.primarySection}`} {...getAdminAccordionProps(accordion,'consumption')}><summary>Consommation Agent</summary>
-  <CompanyConsumptionPanel key={companyId} companyId={companyId} token={token} revision={revision}/>
+import type {MachineFinanceIntervention} from './financeInterventions';
+export function AdminFinanceOverview({companyId,token,revision=0,globalContent,accordion,onConsumptionLoadComplete,machineInterventions,onExamineInterventions,machineActionsEnabled,onMachineSubscriptionChanged,onDiagLinkSessionExpired}:{companyId:string;token:()=>Promise<string|null>;revision?:number;globalContent?:ReactNode;accordion?:AdminAccordionControl;onConsumptionLoadComplete?:(view:'global'|'machines')=>void;machineInterventions?:MachineFinanceIntervention[];onExamineInterventions?:()=>void;machineActionsEnabled?:boolean;onMachineSubscriptionChanged?:()=>void;onDiagLinkSessionExpired?:()=>void}){
+ const globalLoadComplete=useCallback(()=>onConsumptionLoadComplete?.('global'),[onConsumptionLoadComplete]);
+ const machinesLoadComplete=useCallback(()=>onConsumptionLoadComplete?.('machines'),[onConsumptionLoadComplete]);
+  return <section aria-label="Synthèse financière entreprise" className={`${styles.panel} ${styles.adminFinanceRoot}`}>
+  <details className={`${styles.technical} ${styles.primarySection}`} {...getAdminAccordionProps(accordion,'globalConsumption')}><summary>Consommation globale</summary>
+  <CompanyConsumptionPanel key={`global-${companyId}`} companyId={companyId} token={token} revision={revision} view="global" onLoadComplete={globalLoadComplete} globalContent={globalContent}/>
   </details>
-   <details className={styles.technical} {...getAdminAccordionProps(accordion,'payments')}><summary>Crédits et paiements</summary>
-   <p><strong>Prochaine échéance : </strong>{account.cancelAtPeriodEnd||account.subscriptionStatus==='canceled'?'Aucune prévue':date(account.currentPeriodEndUtc)}{account.cancelAtPeriodEnd&&' · Résiliation prévue à échéance'}</p>
-   {machineContent}
-   </details>
-   <section aria-label="État de facturation">{children}</section>
+  <details className={`${styles.technical} ${styles.primarySection}`} {...getAdminAccordionProps(accordion,'machineConsumption')}><summary>Consommation par machine</summary>
+  <CompanyConsumptionPanel key={`machines-${companyId}`} companyId={companyId} token={token} revision={revision} view="machines" onLoadComplete={machinesLoadComplete} machineInterventions={machineInterventions} onExamineInterventions={onExamineInterventions} machineActionsEnabled={machineActionsEnabled} onMachineSubscriptionChanged={onMachineSubscriptionChanged} onDiagLinkSessionExpired={onDiagLinkSessionExpired}/>
+  </details>
  </section>;
 }

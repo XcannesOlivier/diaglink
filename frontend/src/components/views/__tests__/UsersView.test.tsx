@@ -3,11 +3,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { UsersView } from '../UsersView';
 
-const { getCompanyUsersMock, getUsersByCompanyMock, createTechnicianMock, createUserForCompanyMock, getUserMachineAccessMock, getUserMachineAccessForCompanyMock, replaceUserMachineAccessMock, replaceUserMachineAccessForCompanyMock, getCompaniesMock } = vi.hoisted(() => ({
+const { getCompanyUsersMock, getUsersByCompanyMock, createTechnicianMock, createUserForCompanyMock, updateCompanyUserMock, updateUserForCompanyMock, getUserMachineAccessMock, getUserMachineAccessForCompanyMock, replaceUserMachineAccessMock, replaceUserMachineAccessForCompanyMock, getCompaniesMock } = vi.hoisted(() => ({
   getCompanyUsersMock: vi.fn(),
   getUsersByCompanyMock: vi.fn(),
   createTechnicianMock: vi.fn(),
   createUserForCompanyMock: vi.fn(),
+  updateCompanyUserMock: vi.fn(),
+  updateUserForCompanyMock: vi.fn(),
   getUserMachineAccessMock: vi.fn(),
   getUserMachineAccessForCompanyMock: vi.fn(),
   replaceUserMachineAccessMock: vi.fn(),
@@ -20,6 +22,8 @@ vi.mock('../../../services/userService', () => ({
   getUsersByCompany: getUsersByCompanyMock,
   createTechnician: createTechnicianMock,
   createUserForCompany: createUserForCompanyMock,
+  updateCompanyUser: updateCompanyUserMock,
+  updateUserForCompany: updateUserForCompanyMock,
   getUserMachineAccess: getUserMachineAccessMock,
   getUserMachineAccessForCompany: getUserMachineAccessForCompanyMock,
   replaceUserMachineAccess: replaceUserMachineAccessMock,
@@ -72,6 +76,8 @@ describe('UsersView (company_admin)', () => {
     getUsersByCompanyMock.mockReset();
     createTechnicianMock.mockReset();
     createUserForCompanyMock.mockReset();
+    updateCompanyUserMock.mockReset();
+    updateUserForCompanyMock.mockReset();
     getUserMachineAccessMock.mockReset();
     getUserMachineAccessForCompanyMock.mockReset();
     replaceUserMachineAccessMock.mockReset();
@@ -123,6 +129,85 @@ describe('UsersView (company_admin)', () => {
     expect(getCompanyUsersMock).toHaveBeenCalledTimes(1);
   });
 
+  it("masque l'administrateur connecté par son identifiant et conserve les autres utilisateurs", async () => {
+    getCompanyUsersMock.mockResolvedValue({
+      kind: 'success',
+      data: [
+        { id: 'admin1', email: 'moi@acme.test', role: 'company_admin', status: 'active' },
+        { id: 'u2', email: 'autre.admin@acme.test', role: 'company_admin', status: 'active' },
+        { id: 'u3', email: 'tech@acme.test', role: 'technician', status: 'active' },
+      ],
+    });
+
+    const container = await renderView();
+
+    expect(container.textContent).not.toContain('moi@acme.test');
+    expect(container.textContent).toContain('autre.admin@acme.test');
+    expect(container.textContent).toContain('tech@acme.test');
+    expect(getCompanyUsersMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('modifie les trois informations autorisées puis recharge la liste entreprise', async () => {
+    getCompanyUsersMock.mockResolvedValue({
+      kind: 'success',
+      data: [{ id: 'u1', email: 'admin@acme.test', role: 'company_admin', status: 'active', firstName: 'Jean', lastName: 'Dupont', phoneNumber: '000' }],
+    });
+    updateCompanyUserMock.mockResolvedValue({
+      kind: 'success',
+      data: { id: 'u1', email: 'admin@acme.test', role: 'company_admin', status: 'active', firstName: 'Alice', lastName: 'Martin', phoneNumber: '123' },
+    });
+    const container = await renderView();
+    const row = Array.from(container.querySelectorAll('[role="button"]')).find(element => element.textContent?.includes('admin@acme.test'));
+    await act(async () => (row as HTMLElement).click());
+    const edit = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.includes('Modifier'));
+    expect(edit?.querySelector('svg')).not.toBeNull();
+    await act(async () => edit!.click());
+
+    const inputs = Array.from(document.querySelectorAll('[role="dialog"] input')) as HTMLInputElement[];
+    expect(inputs).toHaveLength(3);
+    expect(inputs.map(input => input.value)).toEqual(['Jean', 'Dupont', '000']);
+    expect(document.querySelector('[role="dialog"] input[type="email"]')).toBeNull();
+    expect(document.querySelector('[role="dialog"] [role="combobox"]')).toBeNull();
+    await act(async () => {
+      setInputValue(inputs[0], ' Alice ');
+      setInputValue(inputs[1], ' Martin ');
+      setInputValue(inputs[2], ' 123 ');
+    });
+    const save = Array.from(document.querySelectorAll('[role="dialog"] button')).find(button => button.textContent === 'Enregistrer');
+    await act(async () => (save as HTMLButtonElement).click());
+
+    expect(updateCompanyUserMock).toHaveBeenCalledWith(expect.any(Function), 'u1', {
+      firstName: 'Alice', lastName: 'Martin', phoneNumber: '123',
+    });
+    expect(getCompanyUsersMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('utilise la route super administrateur avec l’entreprise sélectionnée', async () => {
+    getCompaniesMock.mockResolvedValue({ kind: 'success', data: [{ id: 'c1', name: 'Acme', status: 'active' }] });
+    getUsersByCompanyMock.mockResolvedValue({
+      kind: 'success',
+      data: [{ id: 'u1', email: 'admin@acme.test', role: 'company_admin', status: 'active', firstName: 'Jean', lastName: 'Dupont', phoneNumber: '000' }],
+    });
+    updateUserForCompanyMock.mockResolvedValue({
+      kind: 'success',
+      data: { id: 'u1', email: 'admin@acme.test', role: 'company_admin', status: 'active', firstName: 'Jean', lastName: 'Dupont', phoneNumber: '000' },
+    });
+    const container = await renderView('diaglink_super_admin');
+    const company = Array.from(container.querySelectorAll('[role="button"]')).find(element => element.textContent?.includes('Acme'));
+    await act(async () => (company as HTMLElement).click());
+    const row = Array.from(container.querySelectorAll('[role="button"]')).find(element => element.textContent?.includes('admin@acme.test'));
+    await act(async () => (row as HTMLElement).click());
+    const edit = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.includes('Modifier'));
+    await act(async () => edit!.click());
+    const save = Array.from(document.querySelectorAll('[role="dialog"] button')).find(button => button.textContent === 'Enregistrer');
+    await act(async () => (save as HTMLButtonElement).click());
+
+    expect(updateUserForCompanyMock).toHaveBeenCalledWith(expect.any(Function), 'c1', 'u1', {
+      firstName: 'Jean', lastName: 'Dupont', phoneNumber: '000',
+    });
+    expect(getUsersByCompanyMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("n'appelle pas /api/company/users pour diaglink_super_admin", async () => {
     await renderView('diaglink_super_admin');
 
@@ -139,6 +224,13 @@ describe('UsersView (company_admin)', () => {
       addButton!.click();
     });
     expect(document.body.textContent).toContain('Email');
+
+    const actions = document.querySelector('[data-company-add-user-actions]');
+    expect(actions).toBeTruthy();
+    expect(Array.from(actions!.querySelectorAll(':scope > button')).map(button => button.textContent)).toEqual([
+      'Annuler',
+      "Ajouter l'utilisateur",
+    ]);
 
     const cancelButton = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Annuler');
     await act(async () => {

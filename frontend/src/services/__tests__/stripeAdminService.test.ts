@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { addStripeMachine, getStripeAdditions, stripeCompanyRequest } from '../stripeAdminService';
+import { addStripeMachine, getStripeAdditions, setCompanyStripeMachineStatus, stripeCompanyRequest } from '../stripeAdminService';
 vi.mock('../../utils/apiAuth', () => ({ getApiAuthHeaders: async () => ({ headers: { Authorization: 'Bearer local-test' }, mode: 'microsoft' }) }));
 describe('Stripe admin HTTP contract', () => {
   const token = vi.fn(); const fetchMock = vi.fn();
@@ -22,5 +22,14 @@ describe('Stripe admin HTTP contract', () => {
     expect(await addStripeMachine(token, 'c1', 'm1')).toEqual({ kind: 'forbidden' });
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Réconciliation requise' }), { status: 409 }));
     expect(await addStripeMachine(token, 'c1', 'm1')).toEqual({ kind: 'conflict', message: 'Réconciliation requise' });
+  });
+  it('uses the claim-scoped company route without a client company id', async () => {
+    await setCompanyStripeMachineStatus(token,'machine/id',false,'request-id');
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/company/stripe/machines/machine%2Fid/status',{
+      method:'POST',headers:{Authorization:'Bearer local-test','Content-Type':'application/json'},
+      body:JSON.stringify({active:false,requestId:'request-id'})
+    });
+    expect(fetchMock.mock.lastCall?.[0]).not.toContain('/companies/');
+    expect(fetchMock.mock.lastCall?.[1].body).not.toContain('companyId');
   });
 });

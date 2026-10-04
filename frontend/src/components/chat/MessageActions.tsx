@@ -3,20 +3,16 @@ import { Tooltip } from '@fluentui/react-components';
 import {
   CopyRegular,
   ArrowClockwiseRegular,
-  ThumbLikeRegular,
-  ThumbDislikeRegular,
 } from '@fluentui/react-icons';
 import styles from './MessageActions.module.css';
 
 interface MessageActionsProps {
   content: string;
   onRegenerate: () => void;
-  onFeedback: (rating: 'positive' | 'negative') => void;
 }
 
-function MessageActionsComponent({ content, onRegenerate, onFeedback }: MessageActionsProps) {
+function MessageActionsComponent({ content, onRegenerate }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
-  const [feedback, setFeedback] = useState<'positive' | 'negative' | null>(null);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -27,14 +23,6 @@ function MessageActionsComponent({ content, onRegenerate, onFeedback }: MessageA
       console.warn('Clipboard copy failed:', err);
     }
   }, [content]);
-
-  const handleFeedback = useCallback((rating: 'positive' | 'negative') => {
-    const newRating = feedback === rating ? null : rating;
-    setFeedback(newRating);
-    if (newRating) {
-      onFeedback(newRating);
-    }
-  }, [feedback, onFeedback]);
 
   return (
     <div className={styles.actionsBar}>
@@ -59,27 +47,6 @@ function MessageActionsComponent({ content, onRegenerate, onFeedback }: MessageA
         </button>
       </Tooltip>
 
-      <Tooltip content="Bonne réponse" relationship="label" withArrow>
-        <button
-          className={`${styles.actionButton} ${feedback === 'positive' ? styles.feedbackSelected : ''}`}
-          onClick={() => handleFeedback('positive')}
-          aria-label="Bonne réponse"
-          aria-pressed={feedback === 'positive'}
-        >
-          <ThumbLikeRegular fontSize={16} />
-        </button>
-      </Tooltip>
-
-      <Tooltip content="Mauvaise réponse" relationship="label" withArrow>
-        <button
-          className={`${styles.actionButton} ${feedback === 'negative' ? styles.feedbackSelected : ''}`}
-          onClick={() => handleFeedback('negative')}
-          aria-label="Mauvaise réponse"
-          aria-pressed={feedback === 'negative'}
-        >
-          <ThumbDislikeRegular fontSize={16} />
-        </button>
-      </Tooltip>
     </div>
   );
 }

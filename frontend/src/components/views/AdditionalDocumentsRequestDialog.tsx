@@ -6,6 +6,7 @@ import { formatFileSize, inspectPdfFiles, type SelectedPdf } from '../../pages/s
 import { cancelAdditionalDocumentsRequest, getAdditionalDocumentsPayment, stageAdditionalDocuments, startAdditionalDocumentsPayment, type AdditionalDocumentsStage } from '../../services/additionalDocumentsRequestApi';
 import type { MachineDto } from '../../types/machine';
 import { additionalDocumentsMinimumAmountCents, additionalDocumentsPricePerPageCents, calculateAdditionalDocumentsAmountCents } from './additionalDocumentsPricing';
+import { DialogCloseButton } from '../core/DialogCloseButton';
 
 const SHORT_POLL_ATTEMPTS = 6;
 const SHORT_POLL_INTERVAL_MS = 1500;
@@ -21,6 +22,7 @@ const useStyles = makeStyles({
   estimate: { display: 'grid', gridTemplateColumns: '1fr auto', gap: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalL}` },
   error: { color: tokens.colorPaletteRedForeground1 },
   success: { padding: tokens.spacingVerticalL, borderRadius: tokens.borderRadiusMedium, backgroundColor: tokens.colorPaletteGreenBackground1 },
+  actions: { justifyContent: 'center', flexWrap: 'wrap' },
 });
 
 type Attempt = { key: string; stage?: AdditionalDocumentsStage };
@@ -190,7 +192,7 @@ export function AdditionalDocumentsRequestDialog({ open, onOpenChange, machine, 
   const serverPages = stage?.totalPages ?? localPages; const serverAmount = stage?.amountCents ?? localAmount;
 
   return <Dialog open={open} onOpenChange={(_event, data) => !busy.current && onOpenChange(data.open)}><DialogSurface>
-    <DialogTitle>Demander l’ajout de documents</DialogTitle><DialogBody><DialogContent className={styles.content}>
+    <DialogTitle action={<DialogCloseButton disabled={busy.current} onClick={() => onOpenChange(false)} />}>Demander l’ajout de documents</DialogTitle><DialogBody><DialogContent className={styles.content}>
       <Text>Machine</Text><Text weight="semibold">{machine.name}</Text>
       {phase === 'authorized' ? <div className={styles.success} role="status">
         <Text block weight="semibold" size={500}>Demande envoyée</Text>
@@ -223,7 +225,7 @@ export function AdditionalDocumentsRequestDialog({ open, onOpenChange, machine, 
         {phase === 'pending' && <Text role="status">Autorisation en cours de vérification. Vous pouvez la vérifier à nouveau sans renvoyer les PDF.</Text>}
         {error && <Text className={styles.error} role="alert">{error}</Text>}
       </>}
-    </DialogContent><DialogActions><Button appearance="secondary" disabled={busy.current} onClick={() => onOpenChange(false)}>Fermer</Button>
+    </DialogContent><DialogActions className={styles.actions}>
       {phase === 'pending' && (stage || recoveredRequestId) && <Button appearance="secondary" onClick={() => void checkAuthorization(false)}>Vérifier l’autorisation</Button>}
       {phase === 'pending' && (stage || recoveredRequestId) && <Button appearance="secondary" onClick={() => void cancelRequest()}>Annuler la demande</Button>}
       {phase !== 'authorized' && phase !== 'awaiting-return' && phase !== 'verifying' && <Button appearance="primary" disabled={reading || busy.current}

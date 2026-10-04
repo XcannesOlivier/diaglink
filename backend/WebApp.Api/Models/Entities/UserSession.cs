@@ -1,7 +1,7 @@
 namespace WebApp.Api.Models.Entities;
 
 /// <summary>
-/// A DiagLink session issued after a successful OTP verification, valid 24h. The opaque session
+/// A DiagLink session issued after a successful OTP verification, with a role-based lifetime. The opaque session
 /// token is never persisted — only its hash (TokenHash) is stored, checked via constant-time
 /// comparison. RevokedAtUtc allows invalidating a session before its natural expiry.
 /// </summary>

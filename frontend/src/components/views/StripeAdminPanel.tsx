@@ -5,12 +5,15 @@ import { getCompanies } from '../../services/companyService';
 import { StripeCompanyPanel } from './StripeCompanyPanel';
 import type { AdminAccordionControl } from './adminAccordion';
 
-export function StripeAdminPanel({ getAccessToken, onDiagLinkSessionExpired, accordion }: {
+export function StripeAdminPanel({ getAccessToken, onDiagLinkSessionExpired, accordion, selectedCompanyId, onSelectedCompanyChange, refreshRevision=0, onRefreshComplete, onRefreshRequest }: {
   getAccessToken: () => Promise<string | null>; onDiagLinkSessionExpired?: () => void; accordion?: AdminAccordionControl;
+  selectedCompanyId?: string; onSelectedCompanyChange?: (companyId:string)=>void; refreshRevision?:number; onRefreshComplete?:(revision:number)=>void; onRefreshRequest?:()=>void;
 }) {
   const fetcher = useCallback(() => getCompanies(getAccessToken), [getAccessToken]);
   const state = useApiResource(fetcher, onDiagLinkSessionExpired);
-  const [selected, setSelected] = useState('');
+  const [localSelected, setLocalSelected] = useState('');
+  const selected=selectedCompanyId??localSelected;
+  const setSelected=(value:string)=>{if(onSelectedCompanyChange)onSelectedCompanyChange(value);else setLocalSelected(value);};
   return <section className={styles.admin} aria-label="Administration par entreprise" style={{ gridColumn: '1 / -1', minWidth: 0 }}>
     <h2>Entreprise</h2>
     {state.kind === 'loading' && <p>Chargement des entreprises…</p>}
@@ -21,7 +24,8 @@ export function StripeAdminPanel({ getAccessToken, onDiagLinkSessionExpired, acc
         {state.data.map(c => <option key={c.id} value={c.id}>{c.name} ({c.status})</option>)}
       </select></label>
       {selected && state.data.some(c => c.id === selected) && <StripeCompanyPanel key={selected} companyId={selected}
-        getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} accordion={accordion} />}
+        getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} accordion={accordion}
+        refreshRevision={refreshRevision} onRefreshComplete={onRefreshComplete} onRefreshRequest={onRefreshRequest} />}
     </>}
   </section>;
 }

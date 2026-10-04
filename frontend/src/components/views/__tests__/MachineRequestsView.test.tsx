@@ -1,14 +1,16 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Navigation } from '../../layout/Navigation';
 import type { MachineRequestDetail, MachineRequestListItem } from '../../../services/machineRequestAdminApi';
 import { MachineRequestsView } from '../MachineRequestsView';
 
-const api = vi.hoisted(() => ({ get: vi.fn(), download: vi.fn(), update: vi.fn(), capture: vi.fn(), cancel: vi.fn(), decide: vi.fn(), decideDocuments: vi.fn(), attach: vi.fn(), linkCustomer: vi.fn(), subscription: vi.fn(), activate: vi.fn(), ready: vi.fn(), companies: vi.fn(), machines: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), listArchived: vi.fn(), archive: vi.fn(), download: vi.fn(), update: vi.fn(), capture: vi.fn(), cancel: vi.fn(), decide: vi.fn(), decideDocuments: vi.fn(), attach: vi.fn(), linkCustomer: vi.fn(), subscription: vi.fn(), activate: vi.fn(), ready: vi.fn(), companies: vi.fn(), machines: vi.fn() }));
 vi.mock('../../../services/machineRequestAdminApi', async importOriginal => {
   const original = await importOriginal<typeof import('../../../services/machineRequestAdminApi')>();
-  return { ...original, getMachineRequest: api.get, downloadMachineRequestDocument: api.download, updateMachineRequestStatus: api.update,
+  return { ...original, getMachineRequest: api.get, listArchivedMachineRequests: api.listArchived, updateMachineRequestArchive: api.archive, downloadMachineRequestDocument: api.download, updateMachineRequestStatus: api.update,
     captureMachineRequestPayment: api.capture, cancelMachineRequestPayment: api.cancel, decideAdditionalMachineRequest: api.decide, decideAdditionalDocumentsRequest: api.decideDocuments, attachMachineRequestBusinessEntities: api.attach,
     linkMachineRequestCustomer: api.linkCustomer, configureMachineRequestSubscription: api.subscription, activateMachineRequest: api.activate, markMachineRequestReady: api.ready };
 });
@@ -56,7 +58,7 @@ async function openDetail(data: MachineRequestDetail = detail) {
 }
 
 beforeEach(() => {
-  api.get.mockReset(); api.download.mockReset(); api.update.mockReset(); api.capture.mockReset(); api.cancel.mockReset(); api.decide.mockReset(); api.decideDocuments.mockReset(); api.attach.mockReset(); api.linkCustomer.mockReset(); api.subscription.mockReset(); api.activate.mockReset(); api.ready.mockReset();
+  api.get.mockReset(); api.listArchived.mockReset().mockResolvedValue({ kind: 'success', data: [] }); api.archive.mockReset(); api.download.mockReset(); api.update.mockReset(); api.capture.mockReset(); api.cancel.mockReset(); api.decide.mockReset(); api.decideDocuments.mockReset(); api.attach.mockReset(); api.linkCustomer.mockReset(); api.subscription.mockReset(); api.activate.mockReset(); api.ready.mockReset();
   api.companies.mockReset().mockResolvedValue({ kind: 'success', data: [{ id: 'company-a', name: 'Atelier A', status: 'active' }, { id: 'company-b', name: 'Atelier B', status: 'active' }] });
   api.machines.mockReset().mockResolvedValue({ kind: 'success', data: [{ id: 'machine-a', companyId: 'company-a', name: 'Compresseur A', reference: 'A-1', status: 'active', hasAssistantConfigured: true, isAccessible: true }, { id: 'machine-b', companyId: 'company-b', name: 'Machine B', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true }] });
   updated.mockClear(); retry.mockClear();
@@ -65,13 +67,22 @@ afterEach(async () => { if (root) await act(async () => root?.unmount()); contai
 
 describe('MachineRequestsView', () => {
   it('confirms and marks a captured machine ready, then hides the action', async () => {
-    const eligible: MachineRequestDetail = { ...provisioningDetail, preparationStatus: 'pending' };
+    const eligible: MachineRequestDetail = { ...provisioningDetail, preparationStatus: 'pending', payment: {
+      ...provisioningDetail.payment!, provisioningStage: 'businessEntitiesCreated', companyId: 'company-a', machineId: 'machine-a',
+    } };
     const ready: MachineRequestDetail = { ...eligible, preparationStatus: 'ready', readyAtUtc: '2026-09-25T12:00:00Z' };
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     api.ready.mockResolvedValue({ kind: 'success', data: ready });
     await renderView(); await openDetail(eligible);
     const button = () => Array.from(container!.querySelectorAll('button')).find(item => item.textContent === 'Marquer la machine comme prête');
+    const billingButton = () => Array.from(container!.querySelectorAll('button')).find(item => item.textContent === 'Préparer la facturation') as HTMLButtonElement;
+    expect(container?.querySelector('[data-workflow-step="payment"]')?.getAttribute('data-state')).toBe('completed');
+    expect(container?.querySelector('[data-workflow-step="provisioning"]')?.getAttribute('data-state')).toBe('completed');
+    expect(container?.querySelector('[data-workflow-step="readiness"]')?.getAttribute('data-state')).toBe('current');
+    expect(container?.textContent).toContain('Étape actuelle');
     expect(button()).toBeTruthy();
+    expect((button() as HTMLButtonElement).disabled).toBe(false);
+    expect(billingButton().disabled).toBe(true);
     await act(async () => button()!.click());
     expect(api.ready).not.toHaveBeenCalled();
     await act(async () => button()!.click());
@@ -79,6 +90,7 @@ describe('MachineRequestsView', () => {
     expect(api.ready).toHaveBeenCalledWith(token, eligible.requestId);
     expect(container?.textContent).toContain('Machine prête');
     expect(button()).toBeUndefined();
+    expect(billingButton().disabled).toBe(false);
   });
 
   it('uses the documents-ready wording and restores ready state from backend detail', async () => {
@@ -110,6 +122,179 @@ describe('MachineRequestsView', () => {
     expect(container?.textContent).toContain('Ateliers réels');
     expect(container?.textContent).toContain('Compresseur réel');
     expect(container?.textContent).toContain('550');
+    const compactFields = Array.from(container!.querySelectorAll<HTMLElement>('[data-mobile-field]'));
+    expect(compactFields.map(field => field.dataset.mobileField)).toEqual(['date', 'type', 'company', 'status', 'action']);
+    expect(compactFields.map(field => field.textContent)).toEqual([
+      'Date :20 septembre 2026',
+      'Type de demande :Première machine',
+      'Entreprise :Ateliers réels',
+      'En attente',
+      'Voir la demande',
+    ]);
+  });
+
+  it('applies the compact card layout only below 1024 px', () => {
+    const source = readFileSync(resolve('src/components/views/MachineRequestsView.tsx'), 'utf8');
+    expect(source).toContain('"@media (max-width: 1023px)"');
+    expect(source).toContain('display: "none !important"');
+    expect(source).toContain('minHeight: "44px"');
+    expect(source).toContain('"@media (min-width: 1024px)"');
+    expect(source).not.toContain('1099px');
+    expect(source).not.toContain('1100px');
+  });
+
+  it('shares one stable desktop grid between headers, active requests and history rows', () => {
+    const source = readFileSync(resolve('src/components/views/MachineRequestsView.tsx'), 'utf8');
+    expect(source.match(/const requestTableColumns/g)).toHaveLength(1);
+    expect(source.match(/gridTemplateColumns: requestTableColumns/g)).toHaveLength(1);
+    expect(source).toContain('mergeClasses(styles.listHeader, styles.requestTableGrid)');
+    expect(source).toContain('mergeClasses(styles.requestRow, styles.requestTableGrid,');
+    expect(source).toContain('minmax(150px,.9fr)');
+    expect(source).not.toContain('110px auto');
+    expect(source).toContain('paddingLeft: `calc(${tokens.spacingHorizontalM} - 3px)`');
+  });
+
+  it('keeps detail labels and values in two responsive columns on narrow screens', () => {
+    const source = readFileSync(resolve('src/components/views/MachineRequestsView.tsx'), 'utf8');
+    expect(source).toContain('gridTemplateColumns: "minmax(88px,40%) minmax(0,1fr)"');
+    expect(source).toContain('headerClassName={styles.detailHeader}');
+    expect(source).toContain('paddingRight: "52px"');
+    expect(source).toContain('flexDirection: "column"');
+  });
+
+  it('renders each detail term immediately beside its value', async () => {
+    await renderView();
+    await openDetail();
+    const firstDetailList = container!.querySelector('dl')!;
+    const entries = Array.from(firstDetailList.children);
+    expect(entries[0].tagName).toBe('DT');
+    expect(entries[1].tagName).toBe('DD');
+    expect(entries[1].textContent).toBe('Claire');
+    expect(entries[2].tagName).toBe('DT');
+    expect(entries[3].tagName).toBe('DD');
+  });
+
+  it('returns an open detail to the main list when the desktop navigation reset changes', async () => {
+    await renderView({ listResetKey: 0 });
+    await openDetail();
+    expect(container?.textContent).toContain('Retour aux demandes');
+
+    await act(async () => root?.render(
+      <MachineRequestsView
+        requests={[summary]}
+        isLoading={false}
+        hasLoadingError={false}
+        getAccessToken={token}
+        onRetry={retry}
+        onRequestUpdated={updated}
+        listResetKey={1}
+      />,
+    ));
+
+    expect(container?.textContent).not.toContain('Retour aux demandes');
+    expect(container?.textContent).toContain('Voir la demande');
+    expect(api.archive).not.toHaveBeenCalled();
+  });
+
+  it('offers only detail actions in rows and archives terminal requests from their detail', async () => {
+    const treated = { ...summary, requestId: 'treated', status: 'treated' as const, machineName: 'Machine traitée' };
+    const rejected = { ...summary, requestId: 'rejected', status: 'rejected' as const, machineName: 'Machine refusée' };
+    api.archive.mockResolvedValue({ kind: 'success', data: { ...detail, requestId: treated.requestId, status: 'treated', isArchived: true, archivedAtUtc: '2026-09-29T12:00:00Z' } });
+    api.listArchived.mockResolvedValueOnce({ kind: 'success', data: [] }).mockResolvedValue({ kind: 'success', data: [{ ...treated, isArchived: true, archivedAtUtc: '2026-09-29T12:00:00Z' }] });
+    await renderView({ requests: [summary, treated, rejected] });
+    const mainList = container!.querySelector('details')!.previousElementSibling!;
+    expect(Array.from(mainList.querySelectorAll('button')).map(button => button.textContent)).toEqual(['Voir la demande', 'Voir la demande', 'Voir la demande']);
+    expect(mainList.textContent).not.toContain('Archiver');
+    expect(mainList.textContent).toContain('Compresseur réel');
+
+    api.get.mockResolvedValue({ kind: 'success', data: { ...detail, requestId: treated.requestId, status: 'treated', isArchived: false } });
+    const treatedAction = Array.from(mainList.querySelectorAll<HTMLElement>('[data-mobile-field="action"]')).find(field => field.parentElement?.parentElement?.textContent?.includes('Machine traitée'))!;
+    await act(async () => treatedAction.querySelector('button')!.click());
+    const archiveButtons = Array.from(container!.querySelectorAll('button')).filter(button => button.textContent === 'Archiver la demande');
+    const returnButton = Array.from(container!.querySelectorAll('button')).find(button => button.textContent === 'Retour aux demandes')!;
+    expect(archiveButtons).toHaveLength(1);
+    expect(archiveButtons[0].compareDocumentPosition(returnButton) & 4).toBeTruthy();
+    await act(async () => archiveButtons[0].click());
+    expect(document.body.textContent).toContain('Archiver cette demande ?');
+    expect(document.body.textContent).toContain('Elle sera déplacée dans l’historique et restera entièrement consultable.');
+    expect(api.archive).not.toHaveBeenCalled();
+    await act(async () => Array.from(document.querySelector('[role="dialog"]')!.querySelectorAll('button')).find(button => button.textContent === 'Archiver')!.click());
+
+    expect(api.archive).toHaveBeenCalledWith(token, treated.requestId, true);
+    expect(Array.from(container!.querySelectorAll('button')).filter(button => button.textContent === 'Restaurer la demande')).toHaveLength(1);
+    await act(async () => Array.from(container!.querySelectorAll('button')).find(button => button.textContent === 'Retour aux demandes')!.click());
+    const refreshedMainList = container!.querySelector('details')!.previousElementSibling!;
+    expect(refreshedMainList.textContent).not.toContain('Machine traitée');
+    expect(refreshedMainList.textContent).toContain('Machine refusée');
+    expect(container?.textContent).toContain('Historique des demandes (1)');
+    expect(retry).toHaveBeenCalled();
+  });
+
+  it('keeps history closed, searches its metadata, opens the existing detail and restores without changing status', async () => {
+    const archived: MachineRequestListItem[] = [
+      { ...summary, requestId: 'archive-a', status: 'treated', company: 'Entreprise Alpha', firstName: 'Zoé', lastName: 'Durand', machineName: 'Presse historique', serialNumber: 'REF-ALPHA', description: 'Ligne nord', requestKind: 'additionalMachine', isArchived: true, archivedAtUtc: '2026-09-29T12:00:00Z' },
+      { ...summary, requestId: 'archive-b', status: 'rejected', company: 'Entreprise Beta', firstName: 'Marc', lastName: 'Petit', machineName: 'Pompe secondaire', isArchived: true, archivedAtUtc: '2026-09-28T12:00:00Z' },
+    ];
+    api.listArchived.mockResolvedValue({ kind: 'success', data: archived });
+    await renderView();
+    const history = container!.querySelector<HTMLDetailsElement>('details')!;
+    expect(history.open).toBe(false);
+    expect(history.querySelector('summary')?.textContent).toContain('Historique des demandes (2)');
+    const search = history.querySelector<HTMLInputElement>('input[aria-label="Rechercher dans l’historique"]')!;
+    const typeSearch = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    for (const query of ['entreprise alpha', 'zoé durand', 'presse historique', 'ref-alpha', 'ajout de machine']) {
+      await typeSearch(query);
+      expect(history.textContent).toContain('Entreprise Alpha');
+      expect(history.textContent).not.toContain('Entreprise Beta');
+    }
+    await typeSearch('aucune correspondance');
+    expect(history.textContent).toContain('Aucune demande trouvée dans l’historique.');
+
+    await typeSearch('entreprise alpha');
+    expect(Array.from(history.querySelectorAll('button')).map(button => button.textContent)).toEqual(['Voir la demande']);
+    expect(Array.from(history.querySelectorAll<HTMLElement>('[data-mobile-field]')).map(field => field.dataset.mobileField)).toEqual(['date', 'type', 'company', 'status', 'action']);
+    api.get.mockResolvedValue({ kind: 'success', data: { ...detail, requestId: 'archive-a', status: 'treated', isArchived: true, archivedAtUtc: archived[0].archivedAtUtc } });
+    await act(async () => Array.from(history.querySelectorAll('button')).find(button => button.textContent === 'Voir la demande')!.click());
+    expect(container?.textContent).toContain('manuel-reel.pdf');
+    expect(Array.from(container!.querySelectorAll('button')).filter(button => button.textContent === 'Restaurer la demande')).toHaveLength(1);
+
+    api.archive.mockResolvedValue({ kind: 'success', data: { ...detail, requestId: 'archive-a', status: 'treated', isArchived: false } });
+    api.listArchived.mockResolvedValue({ kind: 'success', data: [archived[1]] });
+    await act(async () => Array.from(container!.querySelectorAll('button')).find(button => button.textContent === 'Restaurer la demande')!.click());
+    expect(document.body.textContent).toContain('Restaurer cette demande ?');
+    await act(async () => Array.from(document.querySelector('[role="dialog"]')!.querySelectorAll('button')).find(button => button.textContent === 'Restaurer')!.click());
+    expect(api.archive).toHaveBeenCalledWith(token, 'archive-a', false);
+    expect(container?.textContent).toContain('Traitée');
+    expect(container?.textContent).not.toContain('Restaurer la demande');
+  });
+
+  it('scrolls history into view only when opening and respects reduced motion', async () => {
+    api.listArchived.mockResolvedValue({ kind: 'success', data: [{ ...summary, isArchived: true }] });
+    const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { callback(0); return 1; });
+    await renderView();
+    const history = container!.querySelector<HTMLDetailsElement>('details')!;
+    const historySummary = history.querySelector<HTMLElement>('summary')!;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(historySummary, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+
+    await act(async () => { historySummary.click(); await new Promise(resolve => window.setTimeout(resolve, 0)); });
+    expect(history.open).toBe(true);
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'smooth', block: 'start' });
+
+    await act(async () => { historySummary.click(); await new Promise(resolve => window.setTimeout(resolve, 0)); });
+    expect(history.open).toBe(false);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+      matches: query === '(prefers-reduced-motion: reduce)', media: query, onchange: null,
+      addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; },
+    }));
+    await act(async () => { historySummary.click(); await new Promise(resolve => window.setTimeout(resolve, 0)); });
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'auto', block: 'start' });
   });
 
   it('renders empty, loading and error states without mock fallbacks', async () => {
@@ -274,7 +459,7 @@ describe('MachineRequestsView', () => {
   });
 
   it('provisions an additional machine through CustomerLinked and stops at SubscriptionCreated', async () => {
-    const business: MachineRequestDetail = { ...detail, status: 'treated', requestKind: 'additionalMachine', payment: {
+    const business: MachineRequestDetail = { ...detail, status: 'treated', requestKind: 'additionalMachine', preparationStatus: 'ready', payment: {
       paymentRequestId: 'payment-additional', status: 'captured', amount: 119.17, currency: 'EUR',
       authorizationInsufficient: false, provisioningStage: 'businessEntitiesCreated', companyId: 'company-a', machineId: 'machine-new',
     } };
@@ -307,7 +492,7 @@ describe('MachineRequestsView', () => {
   });
 
   it('describes an AdditionalMachine customer verification failure without CAS A linking wording', async () => {
-    const business: MachineRequestDetail = { ...detail, status: 'treated', requestKind: 'additionalMachine', payment: {
+    const business: MachineRequestDetail = { ...detail, status: 'treated', requestKind: 'additionalMachine', preparationStatus: 'ready', payment: {
       paymentRequestId: 'payment-additional', status: 'captured', amount: 114.03, currency: 'EUR',
       authorizationInsufficient: false, provisioningStage: 'businessEntitiesCreated', companyId: 'company-a', machineId: 'machine-new',
     } };
@@ -324,7 +509,7 @@ describe('MachineRequestsView', () => {
   });
 
   it('shows the resumable initial-period checkpoint for an additional machine', async () => {
-    const initial: MachineRequestDetail = { ...detail, status: 'treated', requestKind: 'additionalMachine', payment: {
+    const initial: MachineRequestDetail = { ...detail, status: 'treated', requestKind: 'additionalMachine', preparationStatus: 'ready', payment: {
       paymentRequestId: 'payment-additional', status: 'captured', amount: 119.17, currency: 'EUR',
       authorizationInsufficient: false, provisioningStage: 'initialPeriodCreated', companyId: 'company-a', machineId: 'machine-new',
     } };
@@ -412,7 +597,7 @@ describe('MachineRequestsView', () => {
   });
 
   it('prepares billing and immediately displays the linked Stripe customer checkpoint', async () => {
-    const attached: MachineRequestDetail = { ...provisioningDetail, payment: { ...provisioningDetail.payment!,
+    const attached: MachineRequestDetail = { ...provisioningDetail, preparationStatus: 'ready', payment: { ...provisioningDetail.payment!,
       provisioningStage: 'businessEntitiesCreated', companyId: 'company-a', machineId: 'machine-a' } };
     const linked: MachineRequestDetail = { ...attached, payment: { ...attached.payment!, provisioningStage: 'customerLinked' } };
     api.linkCustomer.mockResolvedValue({ kind: 'success', data: linked });
@@ -426,7 +611,7 @@ describe('MachineRequestsView', () => {
   });
 
   it('configures the subscription only from CustomerLinked and hides the action after success', async () => {
-    const customerLinked: MachineRequestDetail = { ...provisioningDetail, payment: { ...provisioningDetail.payment!,
+    const customerLinked: MachineRequestDetail = { ...provisioningDetail, preparationStatus: 'ready', payment: { ...provisioningDetail.payment!,
       provisioningStage: 'customerLinked', companyId: 'company-a', machineId: 'machine-a' } };
     const configured: MachineRequestDetail = { ...customerLinked, payment: { ...customerLinked.payment!, provisioningStage: 'subscriptionCreated' } };
     api.subscription.mockResolvedValue({ kind: 'success', data: configured });
@@ -440,7 +625,7 @@ describe('MachineRequestsView', () => {
   });
 
   it('keeps CustomerLinked and exposes a retry when subscription configuration fails', async () => {
-    const customerLinked: MachineRequestDetail = { ...provisioningDetail, payment: { ...provisioningDetail.payment!,
+    const customerLinked: MachineRequestDetail = { ...provisioningDetail, preparationStatus: 'ready', payment: { ...provisioningDetail.payment!,
       provisioningStage: 'customerLinked', companyId: 'company-a', machineId: 'machine-a' } };
     api.subscription.mockResolvedValue({ kind: 'error' });
     await renderView(); await openDetail(customerLinked);
@@ -451,7 +636,7 @@ describe('MachineRequestsView', () => {
   });
 
   it('activates a configured machine and displays included credit without wallet wording', async () => {
-    const configured: MachineRequestDetail = { ...provisioningDetail, payment: { ...provisioningDetail.payment!,
+    const configured: MachineRequestDetail = { ...provisioningDetail, preparationStatus: 'ready', payment: { ...provisioningDetail.payment!,
       provisioningStage: 'subscriptionCreated', companyId: 'company-a', machineId: 'machine-a' } };
     const completed: MachineRequestDetail = { ...configured, payment: { ...configured.payment!, provisioningStage: 'completed' } };
     api.activate.mockResolvedValue({ kind: 'success', data: completed });

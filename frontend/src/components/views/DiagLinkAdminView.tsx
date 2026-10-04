@@ -1,7 +1,7 @@
 import {GlobalFinancePeriod} from './GlobalFinancePeriod';
 import React, { useCallback, useId, useState } from 'react';
-import { makeStyles, tokens, Text } from '@fluentui/react-components';
-import { ChevronDown20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
+import { Button, makeStyles, tokens, Text } from '@fluentui/react-components';
+import { ArrowClockwise20Regular, ChevronDown20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
 import { PlaceholderView } from './PlaceholderView';
 import { StripeAdminPanel } from './StripeAdminPanel';
 import type { AdminSection } from './adminAccordion';
@@ -71,14 +71,32 @@ export const DiagLinkAdminView: React.FC<{ onDiagLinkSessionExpired?: () => void
   const styles = useStyles();
   const { getAccessToken } = useAuth();
   const [openSection, setOpenSection] = useState<AdminSection | null>(null);
+  const [selectedCompanyId, setSelectedCompanyId] = useState('');
+  const [refreshRevision, setRefreshRevision] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const statisticsContentId = useId();
   const onSectionToggle = useCallback((section: AdminSection, isOpen: boolean) => {
     setOpenSection(current => isOpen ? section : current === section ? null : current);
   }, []);
   const statisticsOpen = openSection === 'statistics';
+  const refresh = () => {
+    if (!selectedCompanyId || refreshing) return;
+    setRefreshing(true);
+    setRefreshRevision(value => value + 1);
+  };
+  const selectCompany = (companyId: string) => {
+    setSelectedCompanyId(companyId);
+    setRefreshRevision(0);
+    setRefreshing(false);
+  };
+  const completeRefresh = useCallback((revision:number) => {
+    if (revision === refreshRevision) setRefreshing(false);
+  }, [refreshRevision]);
 
   return (
-    <PlaceholderView title="Administration DiagLink" subtitle="Espace réservé au super administrateur DiagLink.">
+    <PlaceholderView title="Administration DiagLink" subtitle="Espace réservé au super administrateur DiagLink."
+      headerAction={<Button appearance="subtle" size="small" icon={<ArrowClockwise20Regular/>}
+        disabled={!selectedCompanyId || refreshing} onClick={refresh}>{refreshing?'Actualisation…':'Actualiser'}</Button>}>
       <div className={styles.grid}>
         {FUTURE_SECTIONS.map(section => (
           section === 'Statistiques globales' ? (
@@ -102,7 +120,9 @@ export const DiagLinkAdminView: React.FC<{ onDiagLinkSessionExpired?: () => void
           ) : null
         ))}
         <StripeAdminPanel getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired}
-          accordion={{ openSection, onSectionToggle }} />
+          accordion={{ openSection, onSectionToggle }} selectedCompanyId={selectedCompanyId}
+          onSelectedCompanyChange={selectCompany} refreshRevision={refreshRevision}
+          onRefreshComplete={completeRefresh} onRefreshRequest={refresh} />
       </div>
     </PlaceholderView>
   );

@@ -7,12 +7,13 @@ import { DiagLinkAdminView } from '../DiagLinkAdminView';
 vi.mock('../../../hooks/useAuth', () => ({ useAuth: () => ({ getAccessToken: vi.fn() }) }));
 vi.mock('../GlobalFinancePeriod', () => ({ GlobalFinancePeriod: () => null }));
 vi.mock('../StripeAdminPanel', () => ({
-  StripeAdminPanel: ({ accordion }: { accordion: AdminAccordionControl }) => (
+  StripeAdminPanel: ({ accordion,selectedCompanyId,onSelectedCompanyChange,refreshRevision,onRefreshComplete }: { accordion: AdminAccordionControl;selectedCompanyId:string;onSelectedCompanyChange:(value:string)=>void;refreshRevision:number;onRefreshComplete:(revision:number)=>void }) => (
     <section aria-label="Sections financières de test">
+      <select aria-label="Entreprise" value={selectedCompanyId} onChange={event=>onSelectedCompanyChange(event.target.value)}><option value="">Sélectionner</option><option value="company">Entreprise</option></select>
+      {refreshRevision>0&&<button type="button" onClick={()=>onRefreshComplete(refreshRevision)}>Terminer le rafraîchissement</button>}
       {([
-        ['consumption', 'Consommation Agent'],
-        ['payments', 'Crédits et paiements'],
-        ['billing', 'État de facturation'],
+        ['globalConsumption', 'Consommation globale'],
+        ['machineConsumption', 'Consommation par machine'],
         ['technical', 'Détails techniques'],
         ['repairs', 'Outils de réparation'],
       ] as const).map(([section, label]) => (
@@ -26,7 +27,6 @@ vi.mock('../StripeAdminPanel', () => ({
           }}
         >
           <summary>{label}</summary>
-          {section === 'billing' && <details data-internal-section><summary>Machines facturables</summary></details>}
         </details>
       ))}
     </section>
@@ -62,21 +62,18 @@ describe('DiagLinkAdminView primary accordions', () => {
     });
   };
 
-  it('allows zero or one primary section to be open while nested sections remain independent', async () => {
+  it('allows zero or one primary section to be open', async () => {
     await act(async () => root.render(<DiagLinkAdminView />));
     const statistics = container.querySelector<HTMLButtonElement>('button[aria-controls]')!;
 
     expect(statistics.getAttribute('aria-expanded')).toBe('false');
     expect(openPrimarySections()).toEqual([]);
 
-    await click(summary('consumption'));
-    expect(openPrimarySections()).toEqual(['consumption']);
+    await click(summary('globalConsumption'));
+    expect(openPrimarySections()).toEqual(['globalConsumption']);
 
-    await click(summary('payments'));
-    expect(openPrimarySections()).toEqual(['payments']);
-
-    await click(summary('billing'));
-    expect(openPrimarySections()).toEqual(['billing']);
+    await click(summary('machineConsumption'));
+    expect(openPrimarySections()).toEqual(['machineConsumption']);
 
     await click(statistics);
     expect(statistics.getAttribute('aria-expanded')).toBe('true');
@@ -92,10 +89,19 @@ describe('DiagLinkAdminView primary accordions', () => {
     await click(summary('repairs'));
     expect(openPrimarySections()).toEqual([]);
 
-    await click(summary('billing'));
-    const nested = container.querySelector<HTMLDetailsElement>('[data-internal-section]')!;
-    await click(nested.querySelector('summary')!);
-    expect(nested.open).toBe(true);
-    expect(openPrimarySections()).toEqual(['billing']);
+  });
+
+  it('provides one global refresh button in the page header with a loading state',async()=>{
+    await act(async()=>root.render(<DiagLinkAdminView/>));
+    const header=container.querySelector('[data-page-header]')!;
+    const refresh=()=>[...container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Actualiser'||button.textContent==='Actualisation…')!;
+    expect(refresh().disabled).toBe(true);expect(header.contains(refresh())).toBe(true);
+    const company=container.querySelector<HTMLSelectElement>('select[aria-label="Entreprise"]')!;
+    await act(async()=>{company.value='company';company.dispatchEvent(new Event('change',{bubbles:true}));});
+    expect(refresh().disabled).toBe(false);await act(async()=>refresh().click());
+    expect(refresh().textContent).toBe('Actualisation…');expect(refresh().disabled).toBe(true);
+    expect([...container.querySelectorAll('button')].filter(button=>button.textContent==='Actualiser')).toHaveLength(0);
+    await act(async()=>[...container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Terminer le rafraîchissement')!.click());
+    expect(refresh().textContent).toBe('Actualiser');expect(refresh().disabled).toBe(false);
   });
 });

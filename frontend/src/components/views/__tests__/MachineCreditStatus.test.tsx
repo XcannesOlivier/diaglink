@@ -21,6 +21,12 @@ it('loads credit automatically and reloads on machine change without a refresh b
  expect(box.querySelector('button')).toBeNull();
  expect(box.textContent).toContain('Crédit entreprise disponible');
 });
+it('does not render the included-budget availability message or an empty wrapper',async()=>{
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({message:'Budget IA inclus disponible.'}))));
+ await act(async()=>root.render(<MachineCreditStatus machineId="m" getAccessToken={async()=>null}/>));
+ expect(box.textContent).not.toContain('Budget IA inclus disponible.');
+ expect(box.childElementCount).toBe(0);
+});
 it('maps credit refusal to a recharge message rather than authentication or retry',()=>{
  const code=getErrorCodeFromResponse(new Response('',{status:402}));
  expect(code).toBe('AiCreditExhausted');

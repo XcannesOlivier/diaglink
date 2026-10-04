@@ -246,44 +246,51 @@ public sealed class MachineRequestPaymentStore(DiagLinkDbContext db)
             || string.IsNullOrWhiteSpace(payment.MachineRequestId)
             || request.Status != MachineRequestStatuses.Treated)
             throw new InvalidOperationException("La demande capturée et acceptée est requise.");
-        await using var transaction = db.Database.IsRelational()
-            ? await db.Database.BeginTransactionAsync(ct)
-            : null;
-        try
+        async Task<MachineRequestPayment> ExecuteAsync()
         {
-            var entity = await db.MachineRequestPayments.SingleAsync(item => item.Id == payment.PaymentRequestId, ct);
-            if (entity.Status != PaymentStatus.Captured || entity.CapturedAtUtc is null
-                || entity.MachineRequestId != request.RequestId || entity.RequestKind != request.RequestKind)
-                throw new InvalidOperationException("Le paiement capturé ne correspond pas à la demande.");
-            if (entity.PreparationStatus == MachineRequestPreparationStatus.Pending)
+            await using var transaction = db.Database.IsRelational()
+                ? await db.Database.BeginTransactionAsync(ct)
+                : null;
+            try
             {
-                EnsureVersion(entity, payment);
-                entity.PreparationStatus = MachineRequestPreparationStatus.Ready;
-                entity.ReadyAtUtc = DateTime.UtcNow;
-                entity.ReadyByUserId = readyByUserId;
-                entity.UpdatedAtUtc = entity.ReadyAtUtc.Value;
-            }
-            else if (entity.ReadyAtUtc is null || entity.ReadyByUserId is null)
-                throw new InvalidOperationException("L'état documentaire Ready est incohérent.");
+                var entity = await db.MachineRequestPayments.SingleAsync(item => item.Id == payment.PaymentRequestId, ct);
+                if (entity.Status != PaymentStatus.Captured || entity.CapturedAtUtc is null
+                    || entity.MachineRequestId != request.RequestId || entity.RequestKind != request.RequestKind)
+                    throw new InvalidOperationException("Le paiement capturé ne correspond pas à la demande.");
+                if (entity.PreparationStatus == MachineRequestPreparationStatus.Pending)
+                {
+                    EnsureVersion(entity, payment);
+                    entity.PreparationStatus = MachineRequestPreparationStatus.Ready;
+                    entity.ReadyAtUtc = DateTime.UtcNow;
+                    entity.ReadyByUserId = readyByUserId;
+                    entity.UpdatedAtUtc = entity.ReadyAtUtc.Value;
+                }
+                else if (entity.ReadyAtUtc is null || entity.ReadyByUserId is null)
+                    throw new InvalidOperationException("L'état documentaire Ready est incohérent.");
 
-            var notification = MachineRequestDecisionNotifications.Ready(request, FromEntity(entity), entity.ReadyAtUtc!.Value);
-            var expected = entity.RequestKind == MachineRequestKind.AdditionalDocuments
-                ? EmailNotificationType.DocumentsReady : EmailNotificationType.MachineReady;
-            if (notification.NotificationType != expected)
-                throw new InvalidOperationException("Le type de notification Ready est incohérent.");
-            var exists = await db.EmailOutbox.AnyAsync(item => item.MachineRequestId == entity.MachineRequestId
-                && item.NotificationType == expected, ct);
-            if (!exists) db.EmailOutbox.Add(EmailOutboxStore.CreatePending(notification, DateTime.UtcNow));
-            await db.SaveChangesAsync(ct);
-            if (transaction is not null) await transaction.CommitAsync(ct);
-            return FromEntity(entity);
+                var notification = MachineRequestDecisionNotifications.Ready(request, FromEntity(entity), entity.ReadyAtUtc!.Value);
+                var expected = entity.RequestKind == MachineRequestKind.AdditionalDocuments
+                    ? EmailNotificationType.DocumentsReady : EmailNotificationType.MachineReady;
+                if (notification.NotificationType != expected)
+                    throw new InvalidOperationException("Le type de notification Ready est incohérent.");
+                var exists = await db.EmailOutbox.AnyAsync(item => item.MachineRequestId == entity.MachineRequestId
+                    && item.NotificationType == expected, ct);
+                if (!exists) db.EmailOutbox.Add(EmailOutboxStore.CreatePending(notification, DateTime.UtcNow));
+                await db.SaveChangesAsync(ct);
+                if (transaction is not null) await transaction.CommitAsync(ct);
+                return FromEntity(entity);
+            }
+            catch (DbUpdateException exception)
+            {
+                if (transaction is not null) await transaction.RollbackAsync(CancellationToken.None);
+                db.ChangeTracker.Clear();
+                throw new InvalidOperationException("L'état Ready et sa notification n'ont pas pu être enregistrés atomiquement.", exception);
+            }
         }
-        catch (DbUpdateException exception)
-        {
-            if (transaction is not null) await transaction.RollbackAsync(CancellationToken.None);
-            db.ChangeTracker.Clear();
-            throw new InvalidOperationException("L'état Ready et sa notification n'ont pas pu être enregistrés atomiquement.", exception);
-        }
+
+        if (!db.Database.IsRelational()) return await ExecuteAsync();
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(ExecuteAsync);
     }
 
     public async Task<MachineRequestPayment> FinalizeAmountAsync(MachineRequestPayment payment,

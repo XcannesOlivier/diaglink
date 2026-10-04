@@ -17,11 +17,14 @@ import {
   Option,
   Spinner,
 } from '@fluentui/react-components';
-import { ArrowLeftRegular, DeleteRegular } from '@fluentui/react-icons';
+import { ArrowLeftRegular, DeleteRegular, EditRegular } from '@fluentui/react-icons';
+import { UserProfileEditDialog } from '../core/UserProfileEditDialog';
+import { DialogCloseButton } from '../core/DialogCloseButton';
 import { ViewRoot, ViewMessage } from './ViewLayout';
 import { useApiResource } from '../../hooks/useApiResource';
 import { getCompanies } from '../../services/companyService';
-import { getCompanyUsers, getUsersByCompany, createTechnician, createUserForCompany, deleteCompanyUser, deleteUserForCompany, reactivateCompanyUser, reactivateUserForCompany, permanentlyDeleteCompanyUser, permanentlyDeleteUserForCompany, getUserMachineAccess, getUserMachineAccessForCompany, replaceUserMachineAccess, replaceUserMachineAccessForCompany } from '../../services/userService';
+import { getCompanyUsers, getUsersByCompany, createTechnician, createUserForCompany, updateCompanyUser, updateUserForCompany, deleteCompanyUser, deleteUserForCompany, reactivateCompanyUser, reactivateUserForCompany, permanentlyDeleteCompanyUser, permanentlyDeleteUserForCompany, getUserMachineAccess, getUserMachineAccessForCompany, replaceUserMachineAccess, replaceUserMachineAccessForCompany } from '../../services/userService';
+import type { UpdateUserProfileRequest } from '../../services/userService';
 import { isSuperAdmin, isCompanyAdmin } from '../../utils/roles';
 import type { CurrentUser, DiagLinkRole } from '../../types/currentUser';
 import type { CompanyDto, CompanyUserDto } from '../../types/company';
@@ -164,6 +167,22 @@ const useStyles = makeStyles({
   formError: {
     color: tokens.colorPaletteRedForeground1,
   },
+  companyAddUserActions: {
+    '@media (max-width: 767px)': {
+      display: 'flex',
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      gap: '8px',
+      width: '100%',
+      '> button': {
+        flex: '0 1 auto',
+        minWidth: 0,
+        maxWidth: '100%',
+        paddingInline: tokens.spacingHorizontalS,
+      },
+    },
+  },
   detailPanel: {
     marginTop: tokens.spacingVerticalM,
     padding: tokens.spacingVerticalM,
@@ -187,6 +206,22 @@ const useStyles = makeStyles({
   },
   dangerButton: {
     color: tokens.colorPaletteRedForeground1,
+  },
+  editActionButton: {
+    width: '100%',
+    justifyContent: 'flex-start',
+    color: tokens.colorNeutralForeground1,
+    cursor: 'pointer',
+  },
+  accountActions: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: tokens.spacingVerticalS,
+    width: '100%',
+    marginTop: tokens.spacingVerticalXS,
+    paddingTop: tokens.spacingVerticalM,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   actionsCell: {
     display: 'flex',
@@ -302,6 +337,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<CompanyUserDto | null>(null);
   const [permanentlyDeleting, setPermanentlyDeleting] = useState(false);
   const [permanentDeleteError, setPermanentDeleteError] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<CompanyUserDto | null>(null);
 
   // Single row expanded at a time — reuses `selectedUser` (kept in sync below) to drive the existing
   // machine-access fetch effect, so expanding a row is exactly "select this user" for that purpose.
@@ -314,6 +350,22 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
       return next;
     });
   };
+
+  const saveEditedUser = useCallback(
+    (request: UpdateUserProfileRequest) => {
+      if (!editTarget) return Promise.resolve({ kind: 'error' } as const);
+      return isSuper && selectedCompany
+        ? updateUserForCompany(getAccessToken, selectedCompany.id, editTarget.id, request)
+        : updateCompanyUser(getAccessToken, editTarget.id, request);
+    },
+    [editTarget, getAccessToken, isSuper, selectedCompany]
+  );
+
+  const handleEditedUserSaved = useCallback((updatedUser: CompanyUserDto) => {
+    setSelectedUser(current => current?.id === updatedUser.id ? updatedUser : current);
+    if (isSuper) setSuperAdminRefreshKey(key => key + 1);
+    else setRefreshKey(key => key + 1);
+  }, [isSuper]);
 
   // Tracks whichever row/panel pair is currently expanded, so an outside click can tell it apart
   // from a click inside the panel's own controls (checkboxes, buttons, machine list).
@@ -341,6 +393,9 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const fetchUsers = useCallback(() => getCompanyUsers(getAccessToken), [getAccessToken, refreshKey]);
   const state = useApiResource(fetchUsers, onDiagLinkSessionExpired, isAdmin);
+  const otherCompanyUsers = state.kind === 'success'
+    ? state.data.filter(user => user.id !== currentUser?.userId)
+    : [];
   const fetchCompanies = useCallback(() => getCompanies(getAccessToken), [getAccessToken]);
   const companiesState = useApiResource(fetchCompanies, onDiagLinkSessionExpired, isSuper);
 
@@ -882,10 +937,13 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                           )}
                         </div>
                         <div className={styles.expandedPanelColumn}>
+                          <Text weight="semibold">Gestion du compte</Text>
+                          <Text>Statut : {user.status ?? '—'}</Text>
+                          <Button appearance="subtle" icon={<EditRegular />} className={styles.editActionButton} onClick={() => setEditTarget(user)}>
+                            Modifier l’utilisateur
+                          </Button>
                           {canDeleteUser(user) && (
-                            <>
-                              <Text weight="semibold">Gestion du compte</Text>
-                              <Text>Statut : {user.status ?? '—'}</Text>
+                            <div className={styles.accountActions}>
                               {user.status === 'active' ? (
                                 <Button
                                   appearance="subtle"
@@ -914,7 +972,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                               >
                                 Supprimer l'utilisateur
                               </Button>
-                            </>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -928,7 +986,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
         )}
         <Dialog open={superAdminDialogOpen} onOpenChange={(_event, data) => !superAdminSubmitting && setSuperAdminDialogOpen(data.open)}>
           <DialogSurface>
-            <DialogTitle>Ajouter un utilisateur</DialogTitle>
+            <DialogTitle action={<DialogCloseButton disabled={superAdminSubmitting} onClick={() => setSuperAdminDialogOpen(false)} />}>Ajouter un utilisateur</DialogTitle>
             <DialogBody>
               <DialogContent className={styles.form}>
                 <Field label="Prénom" required>
@@ -990,7 +1048,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
         </Dialog>
         <Dialog open={machineDialogOpen} onOpenChange={(_event, data) => !savingAccess && setMachineDialogOpen(data.open)}>
           <DialogSurface>
-            <DialogTitle>Machines autorisées — {selectedUser?.email}</DialogTitle>
+            <DialogTitle action={<DialogCloseButton disabled={savingAccess} onClick={() => setMachineDialogOpen(false)} />}>Machines autorisées — {selectedUser?.email}</DialogTitle>
             <DialogBody>
               <DialogContent className={styles.form}>
                 {machinesLoading && <ViewMessage loading message="Chargement des machines..." />}
@@ -1020,9 +1078,18 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
             </DialogBody>
           </DialogSurface>
         </Dialog>
+        <UserProfileEditDialog
+          open={!!editTarget}
+          title="Modifier l’utilisateur"
+          user={editTarget}
+          onOpenChange={open => !open && setEditTarget(null)}
+          onSave={saveEditedUser}
+          onSaved={handleEditedUserSaved}
+          onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+        />
         <Dialog open={!!deleteTarget} onOpenChange={(_event, data) => !deleting && !data.open && setDeleteTarget(null)}>
           <DialogSurface>
-            <DialogTitle>Désactiver l'accès ?</DialogTitle>
+            <DialogTitle action={<DialogCloseButton disabled={deleting} onClick={() => setDeleteTarget(null)} />}>Désactiver l'accès ?</DialogTitle>
             <DialogBody>
               <DialogContent className={styles.form}>
                 <Text weight="semibold">{[deleteTarget?.firstName, deleteTarget?.lastName].filter(Boolean).join(' ') || deleteTarget?.email}</Text>
@@ -1043,7 +1110,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
         </Dialog>
         <Dialog open={!!permanentDeleteTarget} onOpenChange={(_event, data) => !permanentlyDeleting && !data.open && setPermanentDeleteTarget(null)}>
           <DialogSurface>
-            <DialogTitle>Supprimer définitivement cet utilisateur ?</DialogTitle>
+            <DialogTitle action={<DialogCloseButton disabled={permanentlyDeleting} onClick={() => setPermanentDeleteTarget(null)} />}>Supprimer définitivement cet utilisateur ?</DialogTitle>
             <DialogBody>
               <DialogContent className={styles.form}>
                 <Text weight="semibold">{[permanentDeleteTarget?.firstName, permanentDeleteTarget?.lastName].filter(Boolean).join(' ') || permanentDeleteTarget?.email}</Text>
@@ -1087,8 +1154,8 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
       {state.kind === 'unauthorized' && <ViewMessage message="Votre session a expiré. Veuillez vous reconnecter." />}
       {state.kind === 'forbidden' && <ViewMessage message="Accès non autorisé." />}
       {state.kind === 'error' && <ViewMessage message="Impossible de charger les données." />}
-      {state.kind === 'success' && state.data.length === 0 && <ViewMessage message="Aucun utilisateur trouvé." />}
-      {state.kind === 'success' && state.data.length > 0 && (
+      {state.kind === 'success' && otherCompanyUsers.length === 0 && <ViewMessage message="Aucun utilisateur trouvé." />}
+      {state.kind === 'success' && otherCompanyUsers.length > 0 && (
         <div className={styles.table}>
           <div className={`${styles.row} ${styles.headerRow} ${styles.userTableHeader}`}>
             <Text>Nom</Text>
@@ -1098,7 +1165,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
             <Text>Statut</Text>
             <Text>Actions</Text>
           </div>
-          {state.data.map(user => (
+          {otherCompanyUsers.map(user => (
             <React.Fragment key={user.id}>
               <div
                 ref={expandedUserId === user.id ? expandedRowRef : undefined}
@@ -1169,10 +1236,13 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                     )}
                   </div>
                   <div className={styles.expandedPanelColumn}>
+                    <Text weight="semibold">Gestion du compte</Text>
+                    <Text>Statut : {user.status ?? '—'}</Text>
+                    <Button appearance="subtle" icon={<EditRegular />} className={styles.editActionButton} onClick={() => setEditTarget(user)}>
+                      Modifier l’utilisateur
+                    </Button>
                     {canDeleteUser(user) && (
-                      <>
-                        <Text weight="semibold">Gestion du compte</Text>
-                        <Text>Statut : {user.status ?? '—'}</Text>
+                      <div className={styles.accountActions}>
                         {user.status === 'active' ? (
                           <Button
                             appearance="subtle"
@@ -1201,7 +1271,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                         >
                           Supprimer l'utilisateur
                         </Button>
-                      </>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1213,7 +1283,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
 
       <Dialog open={dialogOpen} onOpenChange={(_e, data) => setDialogOpen(data.open)}>
         <DialogSurface>
-          <DialogTitle>Ajouter un utilisateur</DialogTitle>
+          <DialogTitle action={<DialogCloseButton disabled={submitting} onClick={() => setDialogOpen(false)} />}>Ajouter un utilisateur</DialogTitle>
           <DialogBody>
             <DialogContent className={styles.form}>
               <Field label="Prénom" required>
@@ -1262,7 +1332,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
               </Field>
               {formError && <Text className={styles.formError}>{formError}</Text>}
             </DialogContent>
-            <DialogActions>
+            <DialogActions className={styles.companyAddUserActions} data-company-add-user-actions>
               <Button appearance="secondary" onClick={() => setDialogOpen(false)} disabled={submitting}>
                 Annuler
               </Button>
@@ -1275,7 +1345,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
       </Dialog>
       <Dialog open={machineDialogOpen} onOpenChange={(_event, data) => !savingAccess && setMachineDialogOpen(data.open)}>
         <DialogSurface>
-          <DialogTitle>Machines autorisées — {selectedUser?.email}</DialogTitle>
+          <DialogTitle action={<DialogCloseButton disabled={savingAccess} onClick={() => setMachineDialogOpen(false)} />}>Machines autorisées — {selectedUser?.email}</DialogTitle>
           <DialogBody>
             <DialogContent className={styles.form}>
               {machinesLoading && <ViewMessage loading message="Chargement des machines..." />}
@@ -1305,9 +1375,18 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
           </DialogBody>
         </DialogSurface>
       </Dialog>
+      <UserProfileEditDialog
+        open={!!editTarget}
+        title="Modifier l’utilisateur"
+        user={editTarget}
+        onOpenChange={open => !open && setEditTarget(null)}
+        onSave={saveEditedUser}
+        onSaved={handleEditedUserSaved}
+        onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+      />
       <Dialog open={!!deleteTarget} onOpenChange={(_event, data) => !deleting && !data.open && setDeleteTarget(null)}>
         <DialogSurface>
-          <DialogTitle>Désactiver l'accès ?</DialogTitle>
+          <DialogTitle action={<DialogCloseButton disabled={deleting} onClick={() => setDeleteTarget(null)} />}>Désactiver l'accès ?</DialogTitle>
           <DialogBody>
             <DialogContent className={styles.form}>
               <Text weight="semibold">{[deleteTarget?.firstName, deleteTarget?.lastName].filter(Boolean).join(' ') || deleteTarget?.email}</Text>
@@ -1328,7 +1407,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
       </Dialog>
       <Dialog open={!!permanentDeleteTarget} onOpenChange={(_event, data) => !permanentlyDeleting && !data.open && setPermanentDeleteTarget(null)}>
         <DialogSurface>
-          <DialogTitle>Supprimer définitivement cet utilisateur ?</DialogTitle>
+          <DialogTitle action={<DialogCloseButton disabled={permanentlyDeleting} onClick={() => setPermanentDeleteTarget(null)} />}>Supprimer définitivement cet utilisateur ?</DialogTitle>
           <DialogBody>
             <DialogContent className={styles.form}>
               <Text weight="semibold">{[permanentDeleteTarget?.firstName, permanentDeleteTarget?.lastName].filter(Boolean).join(' ') || permanentDeleteTarget?.email}</Text>

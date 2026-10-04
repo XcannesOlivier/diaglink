@@ -11,6 +11,7 @@ import type { MachineDto } from '../types/machine';
 import { useAppContext } from '../contexts/AppContext';
 import { trackFeedback } from '../services/telemetry';
 import { isSuperAdmin, isCompanyAdmin } from '../utils/roles';
+import {isMachineEntryChoiceHandled,markMachineEntryChoiceHandled} from '../utils/apiAuth';
 import type { IChatItem } from '../types/chat';
 import styles from './AgentChat.module.css';
 
@@ -38,6 +39,9 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
   const { getAccessToken } = useAuth();
   const machineToasterId = useId('machine-toaster');
   const { dispatchToast: dispatchMachineToast } = useToastController(machineToasterId);
+  const conversationListRequest = useRef<{ generation: number; controller: AbortController } | null>(null);
+  const conversationMessagesRequest = useRef<{ generation: number; controller: AbortController } | null>(null);
+  const selectedMachineId = state.machine.selected?.id;
 
   // Create service instances
   const apiUrl = import.meta.env.VITE_API_URL || '/api';
@@ -155,6 +159,11 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     }
   }, [chatService, dispatch]);
 
+  const handleLoadTechnicalVisual = useCallback(
+    (visualId: number, signal?: AbortSignal) => chatService.getTechnicalVisualBlob(visualId, signal),
+    [chatService]
+  );
+
   // Auto-send when regenerateText is set (from regenerate or edit actions)
   useEffect(() => {
     if (chat.regenerateText?.trim() && chat.status === 'idle') {
@@ -179,14 +188,52 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     }
   };
 
+  const loadConversations = useCallback(async (limit: number, appendFrom?: number) => {
+    conversationListRequest.current?.controller.abort();
+    const request = {
+      generation: (conversationListRequest.current?.generation ?? 0) + 1,
+      controller: new AbortController(),
+    };
+    conversationListRequest.current = request;
+    dispatch({ type: 'CONVERSATIONS_LOADING' });
+    try {
+      const result = await chatService.listConversations(limit, selectedMachineId, request.controller.signal);
+      if (request.controller.signal.aborted || conversationListRequest.current?.generation !== request.generation) return;
+      const conversations = appendFrom === undefined ? result.conversations : result.conversations.slice(appendFrom);
+      const hasMore = appendFrom === undefined
+        ? result.hasMore
+        : conversations.length > 0 && result.hasMore;
+      dispatch({ type: 'CONVERSATIONS_SET_LIST', conversations, hasMore, append: appendFrom !== undefined });
+    } catch (error) {
+      if (request.controller.signal.aborted || conversationListRequest.current?.generation !== request.generation) return;
+      dispatch({ type: 'CONVERSATIONS_LOADING_DONE' });
+      throw error;
+    }
+  }, [chatService, dispatch, selectedMachineId]);
+
+  useEffect(() => {
+    conversationMessagesRequest.current?.controller.abort();
+    if (conversationMessagesRequest.current) conversationMessagesRequest.current.generation++;
+    dispatch({ type: 'CONVERSATIONS_SET_LIST', conversations: [], hasMore: false });
+    if (selectedMachineId) {
+      void loadConversations(CONVERSATIONS_PAGE_SIZE).catch(error => {
+        console.error('Failed to load conversations for selected machine:', error);
+      });
+    } else {
+      conversationListRequest.current?.controller.abort();
+    }
+    return () => {
+      conversationListRequest.current?.controller.abort();
+      conversationMessagesRequest.current?.controller.abort();
+    };
+  }, [dispatch, loadConversations, selectedMachineId]);
+
   const handleToggleSidebar = useCallback(async () => {
     const willOpen = !state.conversations.sidebarOpen;
     dispatch({ type: 'CONVERSATIONS_TOGGLE_SIDEBAR' });
-    if (willOpen) {
-      dispatch({ type: 'CONVERSATIONS_LOADING' });
+    if (willOpen && selectedMachineId) {
       try {
-        const result = await chatService.listConversations(CONVERSATIONS_PAGE_SIZE);
-        dispatch({ type: 'CONVERSATIONS_SET_LIST', conversations: result.conversations, hasMore: result.hasMore });
+        await loadConversations(CONVERSATIONS_PAGE_SIZE);
       } catch (error) {
         console.error('Failed to load conversations:', error);
         dispatch({ type: 'CONVERSATIONS_SET_LIST', conversations: [], hasMore: false });
@@ -201,7 +248,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
         });
       }
     }
-  }, [state.conversations.sidebarOpen, dispatch, chatService]);
+  }, [state.conversations.sidebarOpen, selectedMachineId, dispatch, loadConversations]);
 
   const handleSidebarOpenChange = useCallback((open: boolean) => {
     if (!open && state.conversations.sidebarOpen) {
@@ -218,20 +265,13 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
   }, [autoOpenHistory]);
 
   const handleLoadMoreConversations = useCallback(async () => {
-    dispatch({ type: 'CONVERSATIONS_LOADING' });
     try {
       const currentCount = state.conversations.list.length;
-      const result = await chatService.listConversations(currentCount + CONVERSATIONS_PAGE_SIZE);
-      // Slice off items we already have and append only new ones
-      const newItems = result.conversations.slice(currentCount);
-      // If no new items returned (e.g., backend limit cap), stop pagination
-      const hasMore = newItems.length > 0 && result.hasMore;
-      dispatch({ type: 'CONVERSATIONS_SET_LIST', conversations: newItems, hasMore, append: true });
+      await loadConversations(currentCount + CONVERSATIONS_PAGE_SIZE, currentCount);
     } catch (error) {
       console.error('Failed to load more conversations:', error);
-      dispatch({ type: 'CONVERSATIONS_LOADING_DONE' });
     }
-  }, [state.conversations.list.length, dispatch, chatService]);
+  }, [state.conversations.list.length, loadConversations]);
 
   const handleCollapseConversations = useCallback(() => {
     const keepCount = Math.max(CONVERSATIONS_PAGE_SIZE, state.conversations.list.length - CONVERSATIONS_PAGE_SIZE);
@@ -239,15 +279,23 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
   }, [state.conversations.list.length, dispatch]);
 
   const handleSelectConversation = useCallback(async (conversationId: string) => {
+    conversationMessagesRequest.current?.controller.abort();
+    const request = {
+      generation: (conversationMessagesRequest.current?.generation ?? 0) + 1,
+      controller: new AbortController(),
+    };
+    conversationMessagesRequest.current = request;
     try {
       chatService.cancelStream();
-      const messages = await chatService.getConversationMessages(conversationId);
+      const messages = await chatService.getConversationMessages(conversationId, request.controller.signal);
+      if (request.controller.signal.aborted || conversationMessagesRequest.current?.generation !== request.generation) return;
       const chatItems: IChatItem[] = messages
         .filter(msg => msg.role === 'user' || msg.role === 'assistant')
         .map((msg, index) => ({
           id: `${conversationId}-${index}`,
           role: msg.role as 'user' | 'assistant',
           content: msg.content,
+          visuals: msg.role === 'assistant' ? msg.visuals : undefined,
           more: { time: new Date().toISOString() },
         }));
 
@@ -266,6 +314,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
         dispatch({ type: 'MACHINE_CLEAR' });
       }
     } catch (error) {
+      if (request.controller.signal.aborted || conversationMessagesRequest.current?.generation !== request.generation) return;
       console.error('Failed to load conversation:', error);
     }
   }, [chatService, dispatch, state.conversations.list]);
@@ -285,25 +334,21 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     }
   }, [chatService, dispatch, chat.currentConversationId]);
 
-  const handleChangeMachine = useCallback(() => {
-    dispatch({ type: 'UI_SET_VIEW', view: 'machines' });
-  }, [dispatch]);
+  // Ce panneau est un choix d’entrée dans l’application, traité une seule fois par session.
+  // Son état ne dépend volontairement pas de la machine sélectionnée.
+  const [showMachineConfirmation, setShowMachineConfirmation] = useState(()=>!isMachineEntryChoiceHandled());
 
-  // Panneau local de confirmation de machine — masqué pour la session tant que la même
-  // machine reste active (sessionStorage), réaffiché si l'id de machine change.
-  const [showMachineConfirmation, setShowMachineConfirmation] = useState(true);
-
-  useEffect(() => {
-    const confirmedMachineId = sessionStorage.getItem('diaglink-confirmed-machine-id');
-    setShowMachineConfirmation(confirmedMachineId !== state.machine.selected?.id);
-  }, [state.machine.selected?.id]);
-
-  const handleKeepMachine = useCallback(() => {
-    if (state.machine.selected) {
-      sessionStorage.setItem('diaglink-confirmed-machine-id', state.machine.selected.id);
-    }
+  const handleMachineEntryChoice = useCallback(() => {
+    markMachineEntryChoiceHandled();
     setShowMachineConfirmation(false);
-  }, [state.machine.selected]);
+  }, []);
+
+  const handleKeepMachine = handleMachineEntryChoice;
+
+  const handleChangeMachine = useCallback(() => {
+    handleMachineEntryChoice();
+    dispatch({ type: 'UI_SET_VIEW', view: 'machines' });
+  }, [dispatch,handleMachineEntryChoice]);
 
   const canAccessAdministration = isSuperAdmin(state.auth.currentUser) || isCompanyAdmin(state.auth.currentUser);
 
@@ -312,14 +357,10 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
       <Toaster toasterId={machineToasterId} position="top-end" />
       {/* top brand logo removed to avoid duplication with header/footer */}
 
-      <div className={showMachineConfirmation && state.machine.selected ? `${styles.mainContent} ${styles.mainContentWithPanel}` : styles.mainContent}>
-        {showMachineConfirmation && state.machine.selected && (
-          <div className={styles.machineConfirmationCard}>
-            <div className={styles.machineConfirmationContent}>
-              <div className={styles.machineConfirmationText}>
-                <div style={{ fontSize: 12, opacity: 0.7 }}>Machine actuelle</div>
-                <div style={{ fontSize: 18, fontWeight: 600 }}>{state.machine.selected.name}</div>
-              </div>
+      <div className={styles.mainContent}>
+        <ChatInterface
+          starterAccessory={showMachineConfirmation && state.machine.selected ? (
+            <div className={styles.machineConfirmationCard} aria-label="Confirmation de la machine sélectionnée">
               <div className={styles.machineConfirmationActions}>
                 <Button appearance="primary" onClick={handleKeepMachine}>
                   Garder cette machine
@@ -334,9 +375,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
                 )}
               </div>
             </div>
-          </div>
-        )}
-        <ChatInterface 
+          ) : undefined}
           messages={chat.messages}
           status={chat.status}
           error={chat.error}
@@ -356,6 +395,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           isEditing={!!chat.editSnapshot}
           onFeedback={handleFeedback}
           onDownloadFile={handleDownloadFile}
+          onLoadTechnicalVisual={handleLoadTechnicalVisual}
           conversationId={chat.currentConversationId}
           pendingMessages={chat.pendingMessages}
           onDequeueMessage={handleDequeueMessage}

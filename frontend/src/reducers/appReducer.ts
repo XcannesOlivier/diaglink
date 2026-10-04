@@ -1,5 +1,6 @@
 import type { AppState, AppAction } from '../types/appState';
 import { resolveView } from '../utils/navigation';
+import { parseTechnicalVisuals } from '../utils/technicalVisuals';
 
 /**
  * Main application state reducer.
@@ -185,6 +186,20 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           messages: updatedMessages,
         },
       };
+    }
+
+    case 'CHAT_STREAM_VISUALS': {
+      const messageIndex = state.chat.messages.findIndex(
+        msg => msg.id === action.messageId && msg.role === 'assistant'
+      );
+      if (messageIndex === -1) return state;
+
+      const updatedMessages = [...state.chat.messages];
+      updatedMessages[messageIndex] = {
+        ...updatedMessages[messageIndex],
+        visuals: parseTechnicalVisuals(action.visuals),
+      };
+      return { ...state, chat: { ...state.chat, messages: updatedMessages } };
     }
 
     case 'CHAT_STREAM_TOOL_USE': {
@@ -391,8 +406,12 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           recoveredInput: action.messageText,
           error: {
             ...action.error,
-            message: `Failed to get a response after ${action.retryCount} ${action.retryCount === 1 ? 'attempt' : 'attempts'}. Your message has been restored.`,
-            recoverable: true,
+            message: action.error.code === 'AiCreditExhausted'
+              ? action.error.message
+              : `Failed to get a response after ${action.retryCount} ${action.retryCount === 1 ? 'attempt' : 'attempts'}. Your message has been restored.`,
+            recoverable: action.error.code === 'AiCreditExhausted'
+              ? action.error.recoverable
+              : true,
           },
         },
         ui: {

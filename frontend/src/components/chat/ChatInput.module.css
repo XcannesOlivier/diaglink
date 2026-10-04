@@ -155,6 +155,10 @@
   display: none !important;
 }
 
+.mobileMenuContainer {
+  display: none;
+}
+
 /* Responsive adjustments for small screens to prevent overflow */
 @media (max-width: 768px) {
   .chatInputContainer {
@@ -203,6 +207,30 @@
 
   .mobileMenuButton {
     display: inline-flex !important;
+  }
+
+  .mobileMenuContainer {
+    display: flex;
+    align-items: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .buttonRow {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    column-gap: clamp(0.125rem, 1vw, 0.25rem);
+  }
+
+  .actionButtons {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    gap: clamp(0.125rem, 1vw, 0.25rem);
+  }
+
+  .mobileMenuContainer {
+    flex: 0 0 auto;
+    margin-left: auto;
   }
 }
 

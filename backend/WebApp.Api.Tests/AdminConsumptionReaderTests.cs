@@ -74,12 +74,66 @@ public class AdminConsumptionReaderTests
   Assert.AreEqual(1m,actual.Metrics.RealCost);Assert.AreEqual(2.5m,actual.Metrics.CommercialCredit);
   var zero=rows.Single(user=>user.Id==withoutUsage);
   Assert.AreEqual("Active Zero",zero.Name);Assert.AreEqual(0,zero.Metrics.Responses);Assert.AreEqual(0,zero.Metrics.Vision);
-  Assert.AreEqual(0m,zero.Metrics.RealCost);Assert.AreEqual(0m,zero.Metrics.CommercialCredit);
+  Assert.AreEqual(0m,zero.Metrics.RealCost);Assert.AreEqual(0m,zero.Metrics.CommercialCredit);Assert.AreEqual(0m,zero.Metrics.IncludedQuotaConsumed);
   var implicitAdmin=rows.Single(user=>user.Id==admin);
   Assert.AreEqual("Company Admin",implicitAdmin.Name);Assert.AreEqual(0,implicitAdmin.Metrics.Responses);
   Assert.AreEqual(0m,implicitAdmin.Metrics.RealCost);Assert.AreEqual(0,await db.UserMachineAccess.CountAsync(access=>access.UserId==admin));
   Assert.IsFalse(rows.Any(user=>user.Id==unassigned));
   var historical=rows.Single(user=>user.Id==deleted);
   Assert.AreEqual("Utilisateur non attribué / supprimé",historical.Name);Assert.AreEqual(1,historical.Metrics.Vision);
+ }
+
+ [TestMethod]
+ public async Task ReportsExactIncludedQuotaConsumptionPerUserFromMachineLedgerEntries()
+ {
+  await using var f=new Fixture();await f.Seed();await using var db=f.Db();
+  await db.Database.ExecuteSqlRawAsync("CREATE TABLE Users (Id TEXT PRIMARY KEY, CompanyId TEXT, EntraObjectId TEXT, Email TEXT, Role TEXT, Status TEXT, CreatedAt TEXT, UpdatedAt TEXT, FirstName TEXT, LastName TEXT, PhoneNumber TEXT)");
+  await db.Database.ExecuteSqlRawAsync("CREATE TABLE UserMachines (UserId TEXT NOT NULL, MachineId TEXT NOT NULL, CreatedAt TEXT NOT NULL, PRIMARY KEY (UserId, MachineId))");
+  var now=DateTime.UtcNow;
+  var fullUser=Guid.NewGuid();var walletUser=Guid.NewGuid();var splitUser=Guid.NewGuid();var multiUser=Guid.NewGuid();
+  var zeroUser=Guid.NewGuid();var noQuotaUser=Guid.NewGuid();var outsideUser=Guid.NewGuid();var noQuotaMachine=Guid.NewGuid();
+  foreach(var (id,name) in new[]{(fullUser,"Full"),(walletUser,"Wallet"),(splitUser,"Split"),(multiUser,"Multi"),
+      (zeroUser,"Zero"),(noQuotaUser,"NoQuota"),(outsideUser,"Outside")})
+   db.Users.Add(new(){Id=id,CompanyId=f.CompanyId,Email=$"{name.ToLowerInvariant()}@example.test",FirstName=name,LastName="User",
+       Role="technician",Status="active",CreatedAt=now,UpdatedAt=now});
+  db.UserMachineAccess.Add(new(){UserId=zeroUser,MachineId=f.MachineId,CreatedAtUtc=now});
+  db.Machines.Add(new(){Id=noQuotaMachine,CompanyId=f.CompanyId,Name="Without quota",Status="active"});
+  db.AiUsageRecords.RemoveRange(db.AiUsageRecords);await db.SaveChangesAsync();
+  var period=await db.MachineBillingPeriods.SingleAsync();period.PeriodStartUtc=now.AddDays(-2);period.PeriodEndUtc=now.AddDays(2);
+  period.IncludedAiBudgetRealCost=10m;period.IncludedAiUsedRealCost=2.4m;
+  db.AiPricing.Add(new(){Id=Guid.NewGuid(),Provider="test",Model="test",Currency="EUR",InputPricePerMillion=1,OutputPricePerMillion=1,EffectiveFromUtc=now.AddDays(-10)});
+  Guid Usage(Guid user,Guid machine,DateTime created,int tokens=1_000_000)
+  {
+   var id=Guid.NewGuid();db.AiUsageRecords.Add(new(){Id=id,MachineId=machine,CompanyId=f.CompanyId,UserId=user,CreatedAtUtc=created,
+       UsageType=AiUsageType.ChatResponse,Provider="test",Model="test",Available=true,InputTokens=tokens,OutputTokens=0,TotalTokens=tokens});return id;
+  }
+  var full=Usage(fullUser,f.MachineId,now);var wallet=Usage(walletUser,f.MachineId,now);var split=Usage(splitUser,f.MachineId,now);
+  var multi1=Usage(multiUser,f.MachineId,now,500_000);var multi2=Usage(multiUser,f.MachineId,now,500_000);
+  var outside=Usage(outsideUser,f.MachineId,now.AddDays(-5));var noQuota=Usage(noQuotaUser,noQuotaMachine,now);
+  void Ledger(Guid usage,Guid machine,string bucket,decimal real,decimal? commercial=null,Guid? billingPeriodId=null)
+   =>db.CreditLedger.Add(new(){Id=Guid.NewGuid(),CompanyId=f.CompanyId,MachineId=machine,MachineBillingPeriodId=billingPeriodId,
+       AiUsageRecordId=usage,EntryType="AiUsage",BucketType=bucket,Currency="EUR",RealAiCost=real,
+       CommercialCreditAmount=commercial,BalanceAfter=0,CreatedAtUtc=now});
+  Ledger(full,f.MachineId,"MachineIncluded",1m,null,period.Id);
+  Ledger(wallet,f.MachineId,"CompanyWallet",1m,2m);
+  Ledger(split,f.MachineId,"MachineIncluded",.4m,null,period.Id);Ledger(split,f.MachineId,"CompanyWallet",.6m,1.2m);
+  Ledger(multi1,f.MachineId,"MachineIncluded",.5m,null,period.Id);Ledger(multi2,f.MachineId,"MachineIncluded",.5m,null,period.Id);
+  Ledger(outside,f.MachineId,"MachineIncluded",1m,null,period.Id);Ledger(noQuota,noQuotaMachine,"CompanyWallet",1m,2m);
+  await db.SaveChangesAsync();db.ChangeTracker.Clear();
+
+  var report=(AdminConsumptionReader.Report)((IValueHttpResult)await AdminConsumptionReader.ReadAsync(
+      f.CompanyId,now.AddDays(-1).ToString("O"),now.AddDays(1).ToString("O"),null,db,default)).Value!;
+  var machine=report.Machines.Single(row=>row.Id==f.MachineId);var users=machine.Users;
+  Assert.AreEqual(1m,users.Single(user=>user.Id==fullUser).Metrics.IncludedQuotaConsumed);
+  Assert.AreEqual(0m,users.Single(user=>user.Id==walletUser).Metrics.IncludedQuotaConsumed);
+  Assert.AreEqual(.4m,users.Single(user=>user.Id==splitUser).Metrics.IncludedQuotaConsumed);
+  Assert.AreEqual(1m,users.Single(user=>user.Id==multiUser).Metrics.IncludedQuotaConsumed);
+  Assert.AreEqual(0m,users.Single(user=>user.Id==zeroUser).Metrics.IncludedQuotaConsumed);
+  Assert.IsFalse(users.Any(user=>user.Id==outsideUser));
+  Assert.AreEqual(2.4m,users.Sum(user=>user.Metrics.IncludedQuotaConsumed));Assert.AreEqual(machine.Used,users.Sum(user=>user.Metrics.IncludedQuotaConsumed));
+  var splitMetrics=users.Single(user=>user.Id==splitUser).Metrics;
+  Assert.AreEqual(1m,splitMetrics.RealCost);Assert.AreEqual(1.2m,splitMetrics.CommercialCredit);Assert.AreEqual(.6m,splitMetrics.WalletRealCost);
+  var withoutQuota=report.Machines.Single(row=>row.Id==noQuotaMachine);
+  Assert.AreEqual(0m,withoutQuota.Budget);Assert.AreEqual(0m,withoutQuota.Users.Single(user=>user.Id==noQuotaUser).Metrics.IncludedQuotaConsumed);
  }
 }

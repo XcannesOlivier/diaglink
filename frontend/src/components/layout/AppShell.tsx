@@ -24,10 +24,11 @@ import { DiagLinkAdminView } from '../views/DiagLinkAdminView';
 import { MachineRequestsView } from '../views/MachineRequestsView';
 import { SettingsPanel } from '../core/SettingsPanel';
 import { SupportContactDialog } from '../core/SupportContactDialog';
+import { DiagLinkLogo } from '../core/DiagLinkLogo';
 import { getNavItemsForRole, resolveView, ROLE_LABELS } from '../../utils/navigation';
-import logoDiagLink from '../../assets/Logo DiagLink.png';
 import type { AppView } from '../../types/navigation';
 import { listMachineRequests, type MachineRequestDetail, type MachineRequestListItem } from '../../services/machineRequestAdminApi';
+import { fetchCurrentUser } from '../../services/currentUserService';
 
 const useStyles = makeStyles({
   shell: {
@@ -108,6 +109,11 @@ const useStyles = makeStyles({
   mobileNavItem: {
     justifyContent: 'flex-start',
   },
+  mobileRequestLabel: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
   mobileDrawerBody: {
     display: 'flex',
     flexDirection: 'column',
@@ -181,6 +187,16 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [machineRequests, setMachineRequests] = useState<MachineRequestListItem[]>([]);
   const [machineRequestsLoading, setMachineRequestsLoading] = useState(false);
   const [machineRequestsError, setMachineRequestsError] = useState(false);
+  const [machineRequestsListResetKey, setMachineRequestsListResetKey] = useState(0);
+
+  const refreshCurrentUser = useCallback(async () => {
+    const result = await fetchCurrentUser(getAccessToken);
+    if (result.currentUser) {
+      dispatch({ type: 'AUTH_CURRENT_USER_LOADED', currentUser: result.currentUser });
+    } else if (result.diagLinkSessionExpired) {
+      onDiagLinkSessionExpired?.();
+    }
+  }, [dispatch, getAccessToken, onDiagLinkSessionExpired]);
 
   const loadMachineRequests = useCallback(async () => {
     if (currentUser?.role !== 'diaglink_super_admin') {
@@ -202,7 +218,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   useEffect(() => { void loadMachineRequests(); }, [loadMachineRequests]);
 
   const handleMachineRequestUpdated = useCallback((request: MachineRequestDetail) => {
-    setMachineRequests(current => current.map(item => item.requestId === request.requestId
+    setMachineRequests(current => request.isArchived ? current.filter(item => item.requestId !== request.requestId) : current.map(item => item.requestId === request.requestId
       ? { ...item, status: request.status }
       : item));
   }, []);
@@ -235,6 +251,14 @@ export const AppShell: React.FC<AppShellProps> = ({
     dispatch({ type: 'UI_SET_VIEW', view: allowedView });
   };
 
+  const handleSelectDesktopView = (view: AppView) => {
+    if (view === 'machine-requests' && currentView === 'machine-requests') {
+      setMachineRequestsListResetKey(current => current + 1);
+      return;
+    }
+    handleSelectView(view);
+  };
+
   const handleSelectMobileView = (view: AppView) => {
     handleSelectView(view);
     setIsMobileMenuOpen(false);
@@ -261,7 +285,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           {/* Header brand logo removed per request (keep page logo intact) */}
         </div>
         <div className={styles.nav}>
-          <Navigation role={currentUser?.role} currentView={currentView} onSelectView={handleSelectView} pendingMachineRequestCount={pendingMachineRequestCount} />
+          <Navigation role={currentUser?.role} currentView={currentView} onSelectView={handleSelectDesktopView} pendingMachineRequestCount={pendingMachineRequestCount} />
         </div>
         {canContactSupport && (
           <Button
@@ -315,7 +339,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                 appearance={currentView === item.view ? 'primary' : 'subtle'}
                 onClick={() => handleSelectMobileView(item.view)}
               >
-                {item.label}{item.badgeCount !== undefined && <Badge appearance="filled" color="important" size="small">{item.badgeCount}</Badge>}
+                {item.badgeCount !== undefined
+                  ? <span className={styles.mobileRequestLabel} data-mobile-request-label>{item.label}<Badge appearance="filled" color="important" size="small">{item.badgeCount}</Badge></span>
+                  : item.label}
               </Button>
             ))}
           </div>
@@ -348,7 +374,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             </div>
           )}
           <div className={styles.mobileDrawerBranding}>
-            <img src={logoDiagLink} alt="DiagLink" className={styles.mobileDrawerDiagLinkLogo} />
+            <DiagLinkLogo className={styles.mobileDrawerDiagLinkLogo} />
             <div className={styles.mobileDrawerFoundry}>
               <Text size={200}>Propulsé par Microsoft Foundry</Text>
             </div>
@@ -400,6 +426,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             onRetry={loadMachineRequests}
             onRequestUpdated={handleMachineRequestUpdated}
             onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+            listResetKey={machineRequestsListResetKey}
           />
         )}
         {currentView === 'diaglink-admin' && <DiagLinkAdminView onDiagLinkSessionExpired={onDiagLinkSessionExpired} />}
@@ -413,7 +440,14 @@ export const AppShell: React.FC<AppShellProps> = ({
           onDiagLinkSessionExpired={onDiagLinkSessionExpired}
         />
       )}
-      <SettingsPanel isOpen={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
+      <SettingsPanel
+        isOpen={isSettingsOpen}
+        onOpenChange={setIsSettingsOpen}
+        currentUser={currentUser}
+        getAccessToken={getAccessToken}
+        onCurrentUserRefresh={refreshCurrentUser}
+        onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+      />
     </div>
   );
 };

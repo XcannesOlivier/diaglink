@@ -178,6 +178,24 @@ public sealed class MachineRequestStorageService
         return updated;
     }
 
+    public async Task<MachineRequestRecord?> UpdateArchiveAsync(
+        string requestId,
+        bool isArchived,
+        Guid archivedByUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var record = await GetAsync(requestId, cancellationToken);
+        if (record is null) return null;
+        var updated = record with
+        {
+            IsArchived = isArchived,
+            ArchivedAtUtc = isArchived ? DateTimeOffset.UtcNow : null,
+            ArchivedByUserId = isArchived ? archivedByUserId : null,
+        };
+        await SaveRecordAsync(updated, overwrite: true, cancellationToken);
+        return updated;
+    }
+
     public static string SanitizePdfFileName(string originalName)
     {
         var fileName = Path.GetFileName(originalName ?? string.Empty);

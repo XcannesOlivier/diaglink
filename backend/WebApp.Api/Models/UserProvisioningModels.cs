@@ -12,3 +12,12 @@ public record CreateTechnicianRequest
     public required string PhoneNumber { get; init; }
     public required string Role { get; init; }
 }
+
+/// <summary>Only the editable identity fields are accepted. Email, role, status and tenant are
+/// deliberately absent so they cannot be changed through profile editing.</summary>
+public record UpdateUserProfileRequest
+{
+    public required string FirstName { get; init; }
+    public required string LastName { get; init; }
+    public required string PhoneNumber { get; init; }
+}

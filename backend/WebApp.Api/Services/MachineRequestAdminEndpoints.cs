@@ -13,9 +13,11 @@ public static class MachineRequestAdminEndpoints
     {
         var group = app.MapGroup(BaseRoute).RequireAuthorization("SuperAdminOnly");
         group.MapGet("", ListAsync);
+        group.MapGet("/history", ListArchivedAsync);
         group.MapGet("/{requestId}", GetAsync);
         group.MapGet("/{requestId}/documents/{documentId}", DownloadDocumentAsync);
         group.MapPatch("/{requestId}/status", UpdateStatusAsync);
+        group.MapPatch("/{requestId}/archive", UpdateArchiveAsync);
         group.MapPatch("/{requestId}/provisioning/business-entities", AttachBusinessEntitiesAsync);
         group.MapPost("/{requestId}/provisioning/customer", LinkCustomerAsync);
         group.MapPost("/{requestId}/provisioning/subscription", ConfigureSubscriptionAsync);
@@ -32,7 +34,27 @@ public static class MachineRequestAdminEndpoints
         [FromServices] MachineRequestPaymentService paymentService,
         CancellationToken cancellationToken)
     {
-        var requests = await storageService.ListAsync(cancellationToken);
+        var requests = (await storageService.ListAsync(cancellationToken)).Where(request => !request.IsArchived).ToList();
+        return Results.Ok((await VisibleAsync(requests, paymentService, cancellationToken)).Select(ToListItem));
+    }
+
+    public static async Task<IResult> ListArchivedAsync(
+        [FromServices] MachineRequestStorageService storageService,
+        [FromServices] MachineRequestPaymentService paymentService,
+        CancellationToken cancellationToken)
+    {
+        var requests = (await storageService.ListAsync(cancellationToken))
+            .Where(request => request.IsArchived)
+            .OrderByDescending(request => request.ArchivedAtUtc ?? request.CreatedAt)
+            .ToList();
+        return Results.Ok((await VisibleAsync(requests, paymentService, cancellationToken)).Select(ToListItem));
+    }
+
+    private static async Task<IReadOnlyList<MachineRequestRecord>> VisibleAsync(
+        IReadOnlyList<MachineRequestRecord> requests,
+        MachineRequestPaymentService paymentService,
+        CancellationToken cancellationToken)
+    {
         var visible = new List<MachineRequestRecord>(requests.Count);
         foreach (var request in requests)
         {
@@ -45,7 +67,7 @@ public static class MachineRequestAdminEndpoints
             var payment = await paymentService.ReadAsync(request.Payment.PaymentRequestId, cancellationToken);
             if (payment is not null && payment.Status != "pending") visible.Add(request);
         }
-        return Results.Ok(visible.Select(ToListItem));
+        return visible;
     }
 
     public static async Task<IResult> GetAsync(
@@ -127,6 +149,35 @@ public static class MachineRequestAdminEndpoints
             }
             var request = await storageService.UpdateStatusAsync(requestId, update.Status, cancellationToken);
             return request is null ? Results.NotFound() : Results.Ok(ToDetail(request, payment));
+        }
+        catch (ArgumentException)
+        {
+            return Results.BadRequest(new { error = "L’identifiant de la demande est invalide." });
+        }
+    }
+
+    public static async Task<IResult> UpdateArchiveAsync(
+        string requestId,
+        [FromBody] MachineRequestArchiveUpdate update,
+        HttpContext httpContext,
+        [FromServices] MachineRequestStorageService storageService,
+        [FromServices] MachineRequestPaymentService paymentService,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(httpContext.User.FindFirst(DiagLinkClaimTypes.UserId)?.Value, out var userId))
+            return Results.Forbid();
+        try
+        {
+            var existing = await storageService.GetAsync(requestId, cancellationToken);
+            if (existing is null) return Results.NotFound();
+            if (update.IsArchived && existing.Status is not (MachineRequestStatuses.Treated or MachineRequestStatuses.Rejected))
+                return Results.Conflict(new { error = "Seules les demandes traitées ou refusées peuvent être archivées." });
+            var request = await storageService.UpdateArchiveAsync(requestId, update.IsArchived, userId, cancellationToken);
+            if (request is null) return Results.NotFound();
+            var payment = request.Payment is null
+                ? null
+                : await paymentService.ReadAsync(request.Payment.PaymentRequestId, cancellationToken);
+            return Results.Ok(ToDetail(request, payment));
         }
         catch (ArgumentException)
         {
@@ -327,12 +378,17 @@ public static class MachineRequestAdminEndpoints
         request.Machine.MachineName,
         request.Machine.Manufacturer,
         request.Machine.Model,
+        request.Machine.SerialNumber,
+        request.Machine.Description,
         request.Documents.Count,
         request.Pricing.TotalPages,
         request.Pricing.PreparationTotal,
         RequestKind(request.RequestKind),
         request.CompanyId,
-        request.RequestedByUserId);
+        request.RequestedByUserId,
+        request.IsArchived,
+        request.ArchivedAtUtc,
+        request.ArchivedByUserId);
 
     private static MachineRequestDetail ToDetail(MachineRequestRecord request, MachineRequestPaymentResult? payment) => new(
         request.RequestId,
@@ -365,7 +421,10 @@ public static class MachineRequestAdminEndpoints
             request.Pricing.PreparationTotal,
             payment?.ActivatedAtUtc,
             payment?.FirstPeriodEndUtc,
-            payment?.ServiceAmountCents));
+            payment?.ServiceAmountCents),
+        request.IsArchived,
+        request.ArchivedAtUtc,
+        request.ArchivedByUserId);
 
     private static string CreateDocumentId(string blobName) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(blobName)))[..24].ToLowerInvariant();
@@ -391,12 +450,17 @@ public sealed record MachineRequestListItem(
     string MachineName,
     string Manufacturer,
     string Model,
+    string? SerialNumber,
+    string? Description,
     int DocumentCount,
     int TotalPages,
     decimal PreparationTotal,
     string RequestKind,
     Guid? CompanyId,
-    Guid? RequestedByUserId);
+    Guid? RequestedByUserId,
+    bool IsArchived,
+    DateTimeOffset? ArchivedAtUtc,
+    Guid? ArchivedByUserId);
 
 public sealed record MachineRequestDocumentDetail(string DocumentId, string OriginalName, long Size, int PageCount);
 
@@ -414,7 +478,10 @@ public sealed record MachineRequestDetail(
     string PreparationStatus,
     DateTime? ReadyAtUtc,
     Guid? ReadyByUserId,
-    MachineRequestPaymentAdminDetail? Payment);
+    MachineRequestPaymentAdminDetail? Payment,
+    bool IsArchived,
+    DateTimeOffset? ArchivedAtUtc,
+    Guid? ArchivedByUserId);
 
 public sealed record MachineRequestPaymentAdminDetail(
     Guid PaymentRequestId,
@@ -432,4 +499,5 @@ public sealed record MachineRequestPaymentAdminDetail(
     int? ServiceAmountCents);
 
 public sealed record MachineRequestStatusUpdate(string Status);
+public sealed record MachineRequestArchiveUpdate(bool IsArchived);
 public sealed record MachineRequestBusinessEntitiesUpdate(Guid CompanyId, Guid MachineId);

@@ -13,6 +13,7 @@ interface IStarterMessageProps {
    * Prompts are stored as newline-separated text in the "starterPrompts" metadata key.
    */
   starterPrompts?: string[];
+  accessory?: ReactNode;
   onPromptClick?: (prompt: string) => void;
 }
 
@@ -27,6 +28,7 @@ export const StarterMessages = ({
   agentName,
   agentDescription,
   starterPrompts,
+  accessory,
   onPromptClick,
 }: IStarterMessageProps): ReactNode => {
   // Use agent-provided prompts or fall back to defaults
@@ -63,6 +65,8 @@ export const StarterMessages = ({
           <Body1 className={styles.caption}>{agentDescription}</Body1>
         )}
       </div>
+
+      {accessory}
 
       {onPromptClick && (
         <ul className={styles.promptList}>

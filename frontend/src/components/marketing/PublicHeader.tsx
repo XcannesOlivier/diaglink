@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Dismiss24Regular, Navigation24Regular } from '@fluentui/react-icons';
-import logoDiagLink from '../../assets/Logo DiagLink.png';
+import { DiagLinkLogo } from '../core/DiagLinkLogo';
 import { APP_INSTALL_URL } from '../../config/origins';
 import styles from '../../pages/landing/LandingPage.module.css';
 
@@ -17,7 +17,7 @@ export function PublicHeader({ loginTarget, landingPath = '' }: { loginTarget: s
   return (
     <header className={styles.header}>
       <div className={styles.headerInner}>
-        <a href="#top" className={styles.brand} aria-label="DiagLink — accueil"><img src={logoDiagLink} alt="DiagLink" /></a>
+        <a href="#top" className={styles.brand} aria-label="DiagLink — accueil"><DiagLinkLogo /></a>
         <nav className={styles.desktopNav} aria-label="Navigation principale">
           {links.map(([label, href]) => <a key={href} href={landingHref(href)}>{label}</a>)}
         </nav>

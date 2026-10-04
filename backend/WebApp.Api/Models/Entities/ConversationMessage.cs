@@ -14,4 +14,5 @@ public class ConversationMessage
     public DateTime CreatedAtUtc { get; set; }
 
     public Conversation? Conversation { get; set; }
+    public ICollection<ConversationMessageVisual> Visuals { get; set; } = new List<ConversationMessageVisual>();
 }

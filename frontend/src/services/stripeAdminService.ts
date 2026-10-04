@@ -42,6 +42,15 @@ export async function setStripeMachineStatus(token: () => Promise<string | null>
   } catch {return {kind:'error'};}
 }
 
+export async function setCompanyStripeMachineStatus(token: () => Promise<string | null>, machineId: string,
+  active: boolean, requestId: string): Promise<ApiWriteResult<{status: string}>> {
+  try {
+    const {headers,mode}=await getApiAuthHeaders(token);
+    return await parseApiWriteResult(await fetch(`${import.meta.env.VITE_API_URL || '/api'}/company/stripe/machines/${encodeURIComponent(machineId)}/status`,
+      {method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({active,requestId})}),mode);
+  } catch {return {kind:'error'};}
+}
+
 export interface StripeAdditionSummary {
   id: string; machineId: string; machineName: string; stage: string;
   stripeInvoiceId: string | null; targetQuantity: number; aiAmountEur: number; serviceAmountEur: number;

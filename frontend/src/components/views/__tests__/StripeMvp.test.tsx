@@ -42,13 +42,13 @@ describe('Stripe MVP administration', () => {
     mocks.operations.mockResolvedValue({ kind: 'success', data: [op] });
     await render(); expect(mocks.account).toHaveBeenCalledWith(token, 'c1'); expect(mocks.add).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain('Lancer l’ajout Stripe');
-    expect(container.textContent).toContain('Intervention requise');
-    const billing = [...container.querySelectorAll('details')].find(details => details.querySelector('summary')?.textContent?.startsWith('État de facturation'))!;
     const repairs = [...container.querySelectorAll('details')].find(details => details.querySelector('summary')?.textContent === 'Outils de réparation (1)')!;
-    expect(billing.open).toBe(false); expect(billing.querySelector('summary')?.textContent).toContain('⚠ 1 intervention'); expect(repairs.open).toBe(false);
+    expect(container.textContent).not.toContain('État de facturation');
+    expect(container.textContent).not.toContain('Machines facturables');
+    expect(container.querySelector('[aria-label="Opérations nécessitant une intervention"] strong')?.textContent).toBe('1');
+    expect(repairs.open).toBe(false);
     expect(repairs.classList.contains(styles.repairTools)).toBe(true);
-    await act(async () => billing.querySelector('summary')!.click());
-    await click('Examiner / reprendre');
+    await act(async () => repairs.querySelector('summary')!.click());
     expect(repairs.open).toBe(true);
     mocks.add.mockResolvedValue({ kind: 'success', data: { operationId: 'op1', status: 'AwaitingPayment' } });
     await click('Reprendre l’opération');
@@ -61,7 +61,7 @@ describe('Stripe MVP administration', () => {
     expect(mocks.add).toHaveBeenCalledTimes(1); expect(container.textContent).toContain('Completed'); expect(container.textContent).toContain('period1');
     expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('Reprendre l’opération'))).toBe(false);
     expect(container.textContent).toContain('Aucun ajout de machine ne nécessite d’intervention.');
-    expect(container.textContent).not.toContain('Intervention requise');
+    expect(container.querySelector('[aria-label="Opérations nécessitant une intervention"] strong')?.textContent).toBe('Aucune');
     expect(repairs.querySelector('summary')?.textContent).toBe('Outils de réparation');
     expect(repairs.classList.contains(styles.repairTools)).toBe(false);
   });

@@ -16,4 +16,20 @@ public record ConversationMessageInfo
 {
     public required string Role { get; init; }
     public required string Content { get; init; }
+    public IReadOnlyList<ConversationMessageVisualInfo> Visuals { get; init; } = [];
 }
+
+public record ConversationMessageVisualInfo
+{
+    public long Id { get; init; }
+    public required string DocumentId { get; init; }
+    public int Page { get; init; }
+    public required string AssetType { get; init; }
+    public string? Tile { get; init; }
+    public required string Name { get; init; }
+    public int DisplayOrder { get; init; }
+}
+
+public sealed record ConversationMessagePersistenceResult(
+    long MessageId,
+    IReadOnlyList<ConversationMessageVisualInfo> Visuals);

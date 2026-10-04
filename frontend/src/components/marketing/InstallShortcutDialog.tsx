@@ -9,6 +9,7 @@ import {
 } from '@fluentui/react-components';
 import { detectShortcutBrowser, type ShortcutBrowser, type ShortcutPlatform } from '../../utils/installShortcut';
 import { APP_LOGIN_URL } from '../../config/origins';
+import { DialogCloseButton } from '../core/DialogCloseButton';
 
 export function InstallShortcutDialog({ platform, onClose, browser = detectShortcutBrowser(), showOpenLoginButton = true }: {
   platform: ShortcutPlatform | null;
@@ -22,7 +23,7 @@ export function InstallShortcutDialog({ platform, onClose, browser = detectShort
     <Dialog open={platform !== null} onOpenChange={(_event, data) => !data.open && onClose()}>
       <DialogSurface>
         <DialogBody>
-          <DialogTitle>{mobile ? 'Ajouter DiagLink à l’écran d’accueil' : 'Créer un raccourci DiagLink'}</DialogTitle>
+          <DialogTitle action={<DialogCloseButton onClick={onClose} />}>{mobile ? 'Ajouter DiagLink à l’écran d’accueil' : 'Créer un raccourci DiagLink'}</DialogTitle>
           <DialogContent>
             <p>{showOpenLoginButton
               ? 'Cliquez sur « Ouvrir DiagLink ». Dans le nouvel onglet, créez ensuite un raccourci vers la page de connexion.'

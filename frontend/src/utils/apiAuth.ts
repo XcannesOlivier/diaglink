@@ -1,5 +1,9 @@
 const DIAGLINK_TOKEN_KEY = 'diaglink_session_token';
 const DIAGLINK_EXPIRES_KEY = 'diaglink_session_expires_at';
+const MACHINE_ENTRY_CHOICE_HANDLED_KEY = 'diaglink_machine_entry_choice_handled';
+
+export const isMachineEntryChoiceHandled = (): boolean => sessionStorage.getItem(MACHINE_ENTRY_CHOICE_HANDLED_KEY) === 'true';
+export const markMachineEntryChoiceHandled = (): void => sessionStorage.setItem(MACHINE_ENTRY_CHOICE_HANDLED_KEY, 'true');
 
 export function getDiagLinkSessionToken(): string | null {
   return sessionStorage.getItem(DIAGLINK_TOKEN_KEY);
@@ -17,6 +21,7 @@ export function setDiagLinkSession(sessionToken: string, expiresAtUtc: string): 
 export function clearDiagLinkSession(): void {
   sessionStorage.removeItem(DIAGLINK_TOKEN_KEY);
   sessionStorage.removeItem(DIAGLINK_EXPIRES_KEY);
+  sessionStorage.removeItem(MACHINE_ENTRY_CHOICE_HANDLED_KEY);
 }
 
 export interface ApiAuthResult {

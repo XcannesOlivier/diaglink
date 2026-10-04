@@ -9,7 +9,7 @@ using WebApp.Api.Models;
 
 namespace WebApp.Api.Services;
 
-public class BlobStorageService
+public class BlobStorageService : ITechnicalVisualBlobReader
 {
     private readonly BlobServiceClient _client;
     private readonly IPdfPageCounter _pageCounter;
@@ -100,6 +100,33 @@ public class BlobStorageService
             return await blob.OpenReadAsync(cancellationToken: cancellationToken);
         }
         catch (Azure.RequestFailedException ex) when (ex.Status == 404) { return null; }
+    }
+
+    public async Task<Stream?> OpenReadAsync(string blobName, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(blobName) ||
+            blobName.StartsWith('/') ||
+            blobName.StartsWith('\\') ||
+            blobName.Contains("..", StringComparison.Ordinal) ||
+            blobName.Contains('\\') ||
+            blobName.Any(char.IsControl) ||
+            !blobName.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+            Uri.TryCreate(blobName, UriKind.Absolute, out _))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await _client
+                .GetBlobContainerClient("documents")
+                .GetBlobClient(blobName)
+                .OpenReadAsync(cancellationToken: cancellationToken);
+        }
+        catch (Azure.RequestFailedException)
+        {
+            return null;
+        }
     }
 
     private static bool IsPdfName(string name) =>

@@ -53,6 +53,88 @@ public class MachineAssistantResolutionServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveMachineAsync_MachineInaccessible_ReturnsMachineNotAccessible()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (companyId, machineId) = await SeedCompanyWithMachineAsync(dbName);
+        var principal = BuildPrincipal(DiagLinkRoles.Technician, companyId, Guid.NewGuid());
+
+        await using var context = CreateContext(dbName);
+        var resolution = await new MachineAssistantResolutionService(context, new MachineAccessService(context))
+            .ResolveMachineAsync(principal, machineId, CancellationToken.None);
+
+        Assert.AreEqual(MachineResolutionKind.MachineNotAccessible, resolution.Kind);
+        Assert.IsNull(resolution.Machine);
+    }
+
+    [TestMethod]
+    public async Task ResolveMachineAsync_MissingMachine_ReturnsMachineNotAccessible()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await using var context = CreateContext(dbName);
+        var resolution = await new MachineAssistantResolutionService(context, new MachineAccessService(context))
+            .ResolveMachineAsync(
+                BuildPrincipal(DiagLinkRoles.SuperAdmin, Guid.NewGuid()),
+                Guid.NewGuid(),
+                CancellationToken.None);
+
+        Assert.AreEqual(MachineResolutionKind.MachineNotAccessible, resolution.Kind);
+        Assert.IsNull(resolution.Machine);
+    }
+
+    [TestMethod]
+    public async Task ResolveMachineAsync_IneligibleMachine_ReturnsMachineDisabled()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (companyId, machineId) = await SeedCompanyWithMachineAsync(dbName);
+        await using (var seedContext = CreateContext(dbName))
+        {
+            var machine = await seedContext.Machines.FirstAsync(item => item.Id == machineId);
+            machine.Status = "disabled";
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using var context = CreateContext(dbName);
+        var resolution = await new MachineAssistantResolutionService(context, new MachineAccessService(context))
+            .ResolveMachineAsync(
+                BuildPrincipal(DiagLinkRoles.CompanyAdmin, companyId),
+                machineId,
+                CancellationToken.None);
+
+        Assert.AreEqual(MachineResolutionKind.MachineDisabled, resolution.Kind);
+        Assert.IsNull(resolution.Machine);
+    }
+
+    [TestMethod]
+    public async Task ResolveMachineAsync_EligibleMachineWithoutHostedAgentIdentity_ReturnsMachine()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var (companyId, machineId) = await SeedCompanyWithMachineAsync(dbName);
+        await using (var seedContext = CreateContext(dbName))
+        {
+            var machine = await seedContext.Machines.FirstAsync(item => item.Id == machineId);
+            machine.ProjectEndpoint = "https://resource.test/api/projects/company";
+            machine.BlobPrefix = "company/machine";
+            machine.VectorStoreId = "vs_marker123";
+            machine.FoundryAgentId = null;
+            machine.AgentVersion = null;
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using var context = CreateContext(dbName);
+        var resolution = await new MachineAssistantResolutionService(context, new MachineAccessService(context))
+            .ResolveMachineAsync(
+                BuildPrincipal(DiagLinkRoles.CompanyAdmin, companyId),
+                machineId,
+                CancellationToken.None);
+
+        Assert.AreEqual(MachineResolutionKind.Resolved, resolution.Kind);
+        Assert.AreEqual(machineId, resolution.Machine!.Id);
+        Assert.IsNull(resolution.Machine.FoundryAgentId);
+        Assert.IsNull(resolution.Machine.AgentVersion);
+    }
+
+    [TestMethod]
     public async Task ResolveAsync_MachineInaccessible_ReturnsMachineNotAccessible()
     {
         var dbName = Guid.NewGuid().ToString();
@@ -116,7 +198,7 @@ public class MachineAssistantResolutionServiceTests
     }
 
     [TestMethod]
-    public async Task ResolveAsync_ConfiguredAndAccessible_ReturnsConfiguredWithoutLeakingEntity()
+    public async Task ResolveAsync_ConfiguredAndAccessible_ReturnsConfiguredWithServerResolvedMachine()
     {
         var dbName = Guid.NewGuid().ToString();
         var (companyId, machineId) = await SeedCompanyWithMachineAsync(dbName);
@@ -146,6 +228,10 @@ public class MachineAssistantResolutionServiceTests
         Assert.AreEqual("agent-123", resolution.Configuration.AgentId);
         Assert.AreEqual("3", resolution.Configuration.AgentVersion);
         Assert.IsNull(resolution.Configuration.AgentName);
+        Assert.IsNotNull(resolution.Machine);
+        Assert.AreEqual(machineId, resolution.Machine.Id);
+        Assert.AreEqual("vs-abc", resolution.Machine.VectorStoreId);
+        Assert.AreEqual("bp-abc", resolution.Machine.BlobPrefix);
         // Configuration is a plain ResolvedAssistantConfiguration record, never the EF entity — no
         // VectorStoreId/Id/CreatedAtUtc/Machine navigation is exposed through it.
         Assert.IsInstanceOfType(resolution.Configuration, typeof(ResolvedAssistantConfiguration));

@@ -49,6 +49,24 @@ public class ConversationHistoryRepository
         string content,
         CancellationToken cancellationToken)
     {
+        var result = await AddMessageAsync(
+            foundryConversationId,
+            userObjectId,
+            role,
+            content,
+            Array.Empty<TechnicalVisualReference>(),
+            cancellationToken);
+        return result?.MessageId;
+    }
+
+    public async Task<ConversationMessagePersistenceResult?> AddMessageAsync(
+        string foundryConversationId,
+        string userObjectId,
+        string role,
+        string content,
+        IReadOnlyList<TechnicalVisualReference> visuals,
+        CancellationToken cancellationToken)
+    {
         // Ownership check and lookup in the same query — never write to another user's conversation.
         var conversation = await _db.Conversations
             .FirstOrDefaultAsync(
@@ -72,11 +90,37 @@ public class ConversationHistoryRepository
             IsSummarized = false,
             CreatedAtUtc = now
         };
+
+        var assetKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var visual in visuals)
+        {
+            if (!assetKeys.Add(visual.AssetKey))
+            {
+                continue;
+            }
+
+            message.Visuals.Add(new ConversationMessageVisual
+            {
+                DocumentId = visual.DocumentId,
+                Page = visual.Page,
+                AssetType = visual.AssetType,
+                Tile = visual.Tile,
+                Name = visual.Name,
+                AssetKey = visual.AssetKey,
+                DisplayOrder = message.Visuals.Count
+            });
+        }
+
         _db.ConversationMessages.Add(message);
         conversation.UpdatedAtUtc = now;
 
         await _db.SaveChangesAsync(cancellationToken);
-        return message.Id;
+        return new ConversationMessagePersistenceResult(
+            message.Id,
+            message.Visuals
+                .OrderBy(visual => visual.DisplayOrder)
+                .Select(ToVisualInfo)
+                .ToList());
     }
 
     /// <summary>
@@ -181,16 +225,25 @@ public class ConversationHistoryRepository
     /// <summary>
     /// Lists a user's conversations (most recent first), with a display title derived from each
     /// conversation's first user message. Strictly scoped to <paramref name="userObjectId"/> —
-    /// never returns another user's conversations. The returned <c>Id</c> is the FoundryConversationId,
-    /// matching the identifier the frontend already treats as its conversationId.
+    /// never returns another user's conversations. When <paramref name="machineId"/> is supplied,
+    /// only conversations bound to that machine are returned. The returned <c>Id</c> is the
+    /// FoundryConversationId, matching the identifier the frontend already treats as its conversationId.
     /// </summary>
     public async Task<List<ConversationSummary>> ListConversationsForUserAsync(
         string userObjectId,
+        Guid? machineId,
         CancellationToken cancellationToken)
     {
-        var conversations = await _db.Conversations
+        var query = _db.Conversations
             .AsNoTracking()
-            .Where(c => c.UserObjectId == userObjectId)
+            .Where(c => c.UserObjectId == userObjectId);
+
+        if (machineId.HasValue)
+        {
+            query = query.Where(c => c.MachineId == machineId.Value);
+        }
+
+        var conversations = await query
             .OrderByDescending(c => c.CreatedAtUtc)
             .Select(c => new { c.Id, c.FoundryConversationId, c.CreatedAtUtc, c.MachineId })
             .ToListAsync(cancellationToken);
@@ -246,6 +299,7 @@ public class ConversationHistoryRepository
         var conversation = await _db.Conversations
             .AsNoTracking()
             .Include(c => c.Messages.OrderBy(m => m.CreatedAtUtc))
+            .ThenInclude(m => m.Visuals.OrderBy(v => v.DisplayOrder))
             .FirstOrDefaultAsync(
                 c => c.FoundryConversationId == foundryConversationId && c.UserObjectId == userObjectId,
                 cancellationToken);
@@ -256,9 +310,28 @@ public class ConversationHistoryRepository
         }
 
         return conversation.Messages
-            .Select(m => new ConversationMessageInfo { Role = m.Role, Content = m.Content })
+            .Select(m => new ConversationMessageInfo
+            {
+                Role = m.Role,
+                Content = m.Content,
+                Visuals = m.Visuals
+                    .OrderBy(v => v.DisplayOrder)
+                    .Select(ToVisualInfo)
+                    .ToList()
+            })
             .ToList();
     }
+
+    private static ConversationMessageVisualInfo ToVisualInfo(ConversationMessageVisual visual) => new()
+    {
+        Id = visual.Id,
+        DocumentId = visual.DocumentId,
+        Page = visual.Page,
+        AssetType = visual.AssetType,
+        Tile = visual.Tile,
+        Name = visual.Name,
+        DisplayOrder = visual.DisplayOrder
+    };
 
     /// <summary>
     /// Returns the most recent non-summarized messages for a conversation, scoped to its owning user

@@ -53,6 +53,9 @@ public class MachineRequestStorageServiceTests
         json.Remove("companyId");
         json.Remove("requestedByUserId");
         json.Remove("targetMachineId");
+        json.Remove("isArchived");
+        json.Remove("archivedAtUtc");
+        json.Remove("archivedByUserId");
         await using var content = new MemoryStream(Encoding.UTF8.GetBytes(json.ToJsonString()));
         await blobs.UploadAsync($"{requestId}/request.json", content, "application/json", overwrite: false);
 
@@ -63,6 +66,9 @@ public class MachineRequestStorageServiceTests
         Assert.IsNull(restored.CompanyId);
         Assert.IsNull(restored.RequestedByUserId);
         Assert.IsNull(restored.TargetMachineId);
+        Assert.IsFalse(restored.IsArchived);
+        Assert.IsNull(restored.ArchivedAtUtc);
+        Assert.IsNull(restored.ArchivedByUserId);
     }
 
     [TestMethod]
@@ -122,6 +128,31 @@ public class MachineRequestStorageServiceTests
         Assert.AreEqual(MachineRequestStatuses.Treated, updated?.Status);
         Assert.AreEqual(MachineRequestStatuses.Treated, (await service.GetAsync(created.RequestId))?.Status);
         Assert.IsNull(await service.OpenDocumentAsync(created.RequestId, $"{created.RequestId}/documents/not-listed.pdf"));
+    }
+
+    [TestMethod]
+    public async Task ArchiveAndRestore_UpdateOnlyRequestMetadataAndPreserveDocumentsAndStatus()
+    {
+        var blobs = new InMemoryMachineRequestBlobClient();
+        var service = new MachineRequestStorageService(blobs);
+        var created = await service.CreateAsync(CreateDraft(), [Upload("manual.pdf", 400, "pdf-content")]);
+        await service.UpdateStatusAsync(created.RequestId, MachineRequestStatuses.Treated);
+        var documentNames = blobs.Names.Where(name => name.Contains("/documents/", StringComparison.Ordinal)).ToArray();
+        var userId = Guid.NewGuid();
+
+        var archived = await service.UpdateArchiveAsync(created.RequestId, true, userId);
+        Assert.IsTrue(archived?.IsArchived);
+        Assert.IsNotNull(archived?.ArchivedAtUtc);
+        Assert.AreEqual(userId, archived?.ArchivedByUserId);
+        Assert.AreEqual(MachineRequestStatuses.Treated, archived?.Status);
+        CollectionAssert.AreEquivalent(documentNames, blobs.Names.Where(name => name.Contains("/documents/", StringComparison.Ordinal)).ToArray());
+
+        var restored = await service.UpdateArchiveAsync(created.RequestId, false, userId);
+        Assert.IsFalse(restored?.IsArchived);
+        Assert.IsNull(restored?.ArchivedAtUtc);
+        Assert.IsNull(restored?.ArchivedByUserId);
+        Assert.AreEqual(MachineRequestStatuses.Treated, restored?.Status);
+        CollectionAssert.AreEquivalent(documentNames, blobs.Names.Where(name => name.Contains("/documents/", StringComparison.Ordinal)).ToArray());
     }
 
     [TestMethod]

@@ -27,6 +27,7 @@ vi.mock('../components/AuthenticatedApp', () => ({ AuthenticatedApp: ({ loadingO
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
+const scrollTo = vi.fn();
 
 async function renderAt(path: string) {
   container = document.createElement('div');
@@ -42,11 +43,14 @@ afterEach(async () => {
   container?.remove();
   root = null;
   container = null;
+  vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
   authentication.isAuthenticated = false;
   authentication.isCheckingSession = false;
+  vi.stubGlobal('scrollTo', scrollTo);
+  scrollTo.mockClear();
 });
 
 describe('main application routes', () => {
@@ -69,6 +73,31 @@ describe('main application routes', () => {
   it('renders the public legal notice page directly', async () => {
     await renderAt('/mentions-legales');
     expect(container?.textContent).toContain('Mentions légales');
+  });
+
+  it('renders the public professional service conditions directly', async () => {
+    await renderAt('/conditions');
+    expect(container?.textContent).toContain('Conditions générales de service');
+    expect(container?.textContent).toContain('Clients professionnels');
+    expect(container?.textContent).toContain('29,90 € HT par mois et par machine active');
+    expect(container?.textContent).toContain('14. Litiges et contact');
+    expect(container?.textContent).not.toContain('login-page');
+
+    const privacyLink = [...container!.querySelectorAll('a')]
+      .find(link => link.textContent === 'Politique de confidentialité de DiagLink');
+    expect(privacyLink?.getAttribute('href')).toBe('/confidentialite');
+  });
+
+  it('scrolls to the top when navigating normally to the service conditions', async () => {
+    await renderAt('/confidentialite');
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    const conditionsLink = [...container!.querySelectorAll('a')]
+      .find(link => link.textContent === 'Conditions générales de service');
+    await act(async () => conditionsLink?.click());
+
+    expect(container?.textContent).toContain('Conditions générales de service');
+    expect(scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 0, left: 0, behavior: 'auto' });
   });
 
   it('renders the public demonstration page directly', async () => {

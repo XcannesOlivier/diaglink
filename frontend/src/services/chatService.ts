@@ -19,6 +19,7 @@ import {
 } from '../utils/fileAttachments';
 import { parseSseLine, splitSseBuffer } from '../utils/sseParser';
 import { getApiAuthHeaders, clearDiagLinkSession } from '../utils/apiAuth';
+import { parseTechnicalVisuals } from '../utils/technicalVisuals';
 
 /**
  * ChatService handles all chat-related API operations.
@@ -195,7 +196,10 @@ export class ChatService {
       this.handleUnauthorized(res);
       const errorMessage = await parseErrorFromResponse(res);
       const errorCode = getErrorCodeFromResponse(res);
-      throw createAppError(new Error(errorMessage), errorCode);
+      const appError = createAppError(new Error(errorMessage), errorCode);
+      throw errorCode === 'AiCreditExhausted'
+        ? { ...appError, message: errorMessage }
+        : appError;
     }
 
     return res;
@@ -442,6 +446,14 @@ export class ChatService {
               }
               break;
 
+            case 'visuals': {
+              const visuals = parseTechnicalVisuals(event.data.visuals);
+              if (visuals.length > 0) {
+                this.dispatch({ type: 'CHAT_STREAM_VISUALS', messageId, visuals });
+              }
+              break;
+            }
+
             case 'toolUse':
               if (event.data.toolName) {
                 this.dispatch({
@@ -642,14 +654,30 @@ export class ChatService {
     setTimeout(() => URL.revokeObjectURL(url), 100);
   }
 
+  async getTechnicalVisualBlob(visualId: number, signal?: AbortSignal): Promise<Blob> {
+    const authHeaders = await this.getAuthHeaders();
+    const response = await fetch(`${this.apiUrl}/chat/visuals/${encodeURIComponent(String(visualId))}`, {
+      headers: authHeaders,
+      signal,
+    });
+    if (!response.ok) {
+      this.handleUnauthorized(response);
+      throw createAppError(new Error(`Technical visual request failed: ${response.status}`), 'API');
+    }
+    return response.blob();
+  }
+
   /**
    * List all conversations from the server.
    * @returns Array of conversation summaries
    */
-  async listConversations(limit: number = 20): Promise<{ conversations: ConversationSummary[]; hasMore: boolean }> {
+  async listConversations(limit: number = 20, machineId?: string, signal?: AbortSignal): Promise<{ conversations: ConversationSummary[]; hasMore: boolean }> {
     const authHeaders = await this.getAuthHeaders();
-    const response = await fetch(`${this.apiUrl}/conversations?limit=${limit}`, {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (machineId) query.set('machineId', machineId);
+    const response = await fetch(`${this.apiUrl}/conversations?${query}`, {
       headers: authHeaders,
+      signal,
     });
 
     if (!response.ok) {
@@ -665,10 +693,11 @@ export class ChatService {
    * @param conversationId - The conversation ID to fetch messages for
    * @returns Array of conversation messages
    */
-  async getConversationMessages(conversationId: string): Promise<ConversationMessageInfo[]> {
+  async getConversationMessages(conversationId: string, signal?: AbortSignal): Promise<ConversationMessageInfo[]> {
     const authHeaders = await this.getAuthHeaders();
     const response = await fetch(`${this.apiUrl}/conversations/${conversationId}/messages`, {
       headers: authHeaders,
+      signal,
     });
 
     if (!response.ok) {
@@ -676,7 +705,15 @@ export class ChatService {
       throw createAppError(new Error(`Failed to get conversation messages: ${response.status}`), 'API');
     }
 
-    return response.json();
+    const messages = await response.json() as Array<Record<string, unknown>>;
+    return messages.map(message => {
+      const visuals = parseTechnicalVisuals(message.visuals);
+      return {
+        role: typeof message.role === 'string' ? message.role : '',
+        content: typeof message.content === 'string' ? message.content : '',
+        ...(visuals.length > 0 ? { visuals } : {}),
+      };
+    });
   }
 
   /**

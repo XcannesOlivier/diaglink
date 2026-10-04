@@ -18,6 +18,7 @@ public class DiagLinkDbContext : DbContext
 
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
+    public DbSet<ConversationMessageVisual> ConversationMessageVisuals => Set<ConversationMessageVisual>();
     public DbSet<User> Users => Set<User>();
     public DbSet<LoginCode> LoginCodes => Set<LoginCode>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
@@ -376,6 +377,36 @@ public class DiagLinkDbContext : DbContext
             entity.Property(m => m.Content).IsRequired();
 
             entity.HasIndex(m => m.ConversationId);
+
+            entity.HasMany(m => m.Visuals)
+                  .WithOne(v => v.ConversationMessage!)
+                  .HasForeignKey(v => v.ConversationMessageId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ConversationMessageVisual>(entity =>
+        {
+            entity.ToTable("ConversationMessageVisuals", Schema, table =>
+            {
+                table.HasCheckConstraint("CK_ConversationMessageVisuals_Page", "[Page] > 0");
+                table.HasCheckConstraint("CK_ConversationMessageVisuals_DisplayOrder", "[DisplayOrder] >= 0");
+                table.HasCheckConstraint("CK_ConversationMessageVisuals_AssetType", "[AssetType] IN ('full', 'tile')");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint(
+                        "CK_ConversationMessageVisuals_RequiredStrings",
+                        "LEN([DocumentId]) > 0 AND LEN([Name]) > 0 AND LEN([AssetKey]) > 0");
+                }
+            });
+            entity.HasKey(v => v.Id);
+            entity.Property(v => v.DocumentId).IsRequired().HasMaxLength(200);
+            entity.Property(v => v.AssetType).IsRequired().HasMaxLength(4).IsUnicode(false);
+            entity.Property(v => v.Tile).HasMaxLength(7).IsUnicode(false);
+            entity.Property(v => v.Name).IsRequired().HasMaxLength(512);
+            entity.Property(v => v.AssetKey).IsRequired().HasMaxLength(768);
+
+            entity.HasIndex(v => v.ConversationMessageId);
+            entity.HasIndex(v => new { v.ConversationMessageId, v.AssetKey }).IsUnique();
         });
 
         modelBuilder.Entity<LoginCode>(entity =>
