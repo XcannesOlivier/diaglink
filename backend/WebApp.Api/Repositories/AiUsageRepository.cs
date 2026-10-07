@@ -13,9 +13,8 @@ public class AiUsageRepository(
     {
         var usage = measurement.Response;
         // Initial local placeholders are not evidence of an initiated provider response.
-        if (!usage.Completed && string.IsNullOrWhiteSpace(usage.ResponseId) &&
-            !(usage.UsageType == AiUsageType.VisionTool && !string.IsNullOrWhiteSpace(usage.CallId) &&
-              !string.IsNullOrWhiteSpace(usage.ParentResponseId))) return new(measurement.EventId, AiUsageRecordWriteStatus.Skipped);
+        if (!usage.Completed && string.IsNullOrWhiteSpace(usage.ResponseId))
+            return new(measurement.EventId, AiUsageRecordWriteStatus.Skipped);
         try
         {
             // Never flush failed/pending conversation writes from the request's tracked DbContext.
@@ -33,7 +32,7 @@ public class AiUsageRepository(
                 MachineId = measurement.MachineId,
                 ConversationId = measurement.SqlConversationId,
                 AssistantMessageId = measurement.AssistantMessageId,
-                FoundryConversationId = measurement.FoundryConversationId,
+                ConversationPublicId = measurement.ConversationPublicId,
                 ResponseId = usage.ResponseId,
                 CallId = usage.CallId,
                 ParentResponseId = usage.ParentResponseId,
@@ -41,10 +40,15 @@ public class AiUsageRepository(
                 Provider = usage.Provider,
                 Deployment = usage.Deployment,
                 ModelSource = usage.ModelSource,
-                AgentVersion = usage.AgentVersion,
+                CallBreakdownJson = usage.CallBreakdownJson,
                 InputTokens = usage.InputTokens,
                 OutputTokens = usage.OutputTokens,
                 TotalTokens = usage.TotalTokens,
+                CacheReadInputTokens = usage.CacheReadInputTokens,
+                CacheCreationInputTokens = usage.CacheCreationInputTokens,
+                CacheCreation5mInputTokens = usage.CacheCreation5mInputTokens,
+                CacheCreation1hInputTokens = usage.CacheCreation1hInputTokens,
+                WebSearchRequests = usage.WebSearchRequests,
                 CreatedAtUtc = usage.TimestampUtc.UtcDateTime,
             });
             await db.SaveChangesAsync(cancellationToken);

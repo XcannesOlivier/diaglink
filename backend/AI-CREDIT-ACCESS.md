@@ -3,7 +3,7 @@
 `AiCreditAccessService` reads the machine's current [start,end) included budget,
 then its company's EUR wallet. `POST /api/chat/stream` calls it after ownership
 checks but before provider conversation creation, metadata, messages or streaming.
-The same guard covers resumed conversations and approval resumes. Unbound legacy
+The same guard covers resumed conversations. Unbound legacy
 conversations remain readable but cannot start an unscoped AI call.
 
 No funds are reserved. An accepted request (including its tools/summary) finishes

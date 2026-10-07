@@ -5,13 +5,11 @@ namespace WebApp.Api.Models;
 /// Supports all Azure AI Agent SDK annotation types:
 /// - uri_citation: Bing, Azure AI Search, SharePoint
 /// - file_citation: File search from vector stores
-/// - file_path: Code interpreter generated files
-/// - container_file_citation: Container file citations
 /// </summary>
 public record AnnotationInfo
 {
     /// <summary>
-    /// The type of annotation: "uri_citation", "file_citation", "file_path", or "container_file_citation".
+    /// The type of annotation: "uri_citation" or "file_citation".
     /// </summary>
     public required string Type { get; init; }
     
@@ -29,12 +27,6 @@ public record AnnotationInfo
     /// File ID for file citations (null for URI citations).
     /// </summary>
     public string? FileId { get; init; }
-    
-    /// <summary>
-    /// Container ID for container file citations (code interpreter outputs).
-    /// Required together with FileId to download container files.
-    /// </summary>
-    public string? ContainerId { get; init; }
     
     /// <summary>
     /// The placeholder text in the response to replace (e.g., "【4:0†source】").

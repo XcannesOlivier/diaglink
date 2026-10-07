@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -241,7 +241,7 @@ public class TechnicalVisualAccessTests
             var conversation = new Conversation
             {
                 Id = Guid.NewGuid(),
-                FoundryConversationId = "conversation",
+                ConversationPublicId = "conversation",
                 UserObjectId = Owner,
                 MachineId = conversationHasMachine ? machineId : null,
                 CreatedAtUtc = now,

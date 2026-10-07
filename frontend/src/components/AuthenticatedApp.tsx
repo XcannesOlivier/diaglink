@@ -43,6 +43,7 @@ export function AuthenticatedApp({ loadingOnly = false, onDiagLinkSessionExpired
         id: 'fallback-agent', object: 'agent', createdAt: Date.now() / 1000,
         name: 'Assistant Technique', description: 'Votre support pour diagnostiquer, localiser et intervenir plus vite',
         model: 'gpt-4o-mini', metadata: { logo: 'Avatar_Default.svg' },
+        capabilities: { imageAttachments: false, fileAttachments: false },
       });
       document.title = 'Assistant Technique';
     } finally {

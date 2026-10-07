@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -16,9 +15,6 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
     private const string ProjectEndpoint = "https://resource.test/api/projects/develon";
     private const string McpEndpoint =
         "https://resource.test/api/projects/develon/toolboxes/toolbox-dx10z/versions/1/mcp?api-version=v1";
-    private const string ExpectedLegacyPromptSha256 =
-        "010dad1296ba1abe633a60074127b70aa6ffa133e376d64be85306c05aa5827e";
-
     [TestMethod]
     public async Task ResolveAsync_ReadsValidToolboxMarker()
     {
@@ -129,52 +125,23 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
     }
 
     [TestMethod]
-    public void PromptProvider_LoadsExactCanonicalLegacyPrompt()
-    {
-        var provider = PromptProvider();
-        var normalized = Normalize(provider.GetLegacyPrompt());
-
-        Assert.AreEqual(177, normalized.Split('\n').Length);
-        Assert.AreEqual(
-            ExpectedLegacyPromptSha256,
-            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant());
-    }
-
-    [TestMethod]
     public void PromptProvider_ClaudeDirectContainsPrincipalBusinessRules()
     {
         var prompt = PromptProvider().GetClaudeDirectPrompt();
 
         foreach (var expected in new[]
         {
-            "SOURCES ET OUTILS",
-            "FIABILITÉ",
-            "SCHÉMAS ET CIRCUITS TECHNIQUES",
-            "DIAGNOSTIC PAS À PAS",
-            "SÉCURITÉ",
+            "Utilise d’abord File Search avec une recherche ciblée sur la demande actuelle.",
+            "Commence normalement par une seule recherche File Search précise.",
+            "N’effectue une recherche supplémentaire que si :",
+            "Utilise get_page_image uniquement lorsqu’une vérification visuelle apporte une information nécessaire",
+            "Lorsque get_page_image est utilisé, analyse directement l’image retournée.",
             "Trajet non confirmé de bout en bout.",
             "Vérification incomplète."
         })
         {
             StringAssert.Contains(prompt, expected);
         }
-    }
-
-    [TestMethod]
-    public void PromptProvider_ClaudeDirectHasOnlyDocumentedToolAdaptations()
-    {
-        var provider = PromptProvider();
-        var legacy = Normalize(provider.GetLegacyPrompt());
-        var expected = legacy
-            .Replace("Recherche de fichier", "File Search", StringComparison.Ordinal)
-            .Replace("blob_page_images", "get_page_image", StringComparison.Ordinal)
-            .Replace(
-                "Utilise get_page_image uniquement lorsqu’une vérification visuelle est nécessaire.\n",
-                "Utilise get_page_image uniquement lorsqu’une vérification visuelle est nécessaire.\n" +
-                "L’image retournée par get_page_image est directement visible par Claude.\n",
-                StringComparison.Ordinal);
-
-        Assert.AreEqual(expected, Normalize(provider.GetClaudeDirectPrompt()));
     }
 
     [TestMethod]
@@ -279,8 +246,6 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
 
     private static TechnicalAssistantPromptProvider PromptProvider() => new(AppContext.BaseDirectory);
 
-    private static string Normalize(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n');
-
     private sealed class Fixture
     {
         private Fixture(
@@ -341,7 +306,6 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
 
     private sealed class StaticPromptProvider : ITechnicalAssistantPromptProvider
     {
-        public string GetLegacyPrompt() => "PROMPT LEGACY";
         public string GetClaudeDirectPrompt() => "PROMPT DIRECT";
     }
 

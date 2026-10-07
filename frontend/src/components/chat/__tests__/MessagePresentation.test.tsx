@@ -19,7 +19,11 @@ vi.mock('@fluentui-copilot/react-copilot-chat', () => ({
   ),
 }));
 
-vi.mock('../../core/Markdown', () => ({ Markdown: ({ content }: { content: string }) => <p>{content}</p> }));
+vi.mock('../../core/Markdown', () => ({
+  Markdown: ({ content, sources }: { content: string; sources?: Array<{ label: string }> }) => (
+    <p data-source-count={sources?.length ?? 0} data-source-label={sources?.[0]?.label}>{content}</p>
+  ),
+}));
 vi.mock('../../../hooks/useFormatTimestamp', () => ({ useFormatTimestamp: () => () => 'à l’instant' }));
 
 describe('chat message presentation', () => {
@@ -64,6 +68,97 @@ describe('chat message presentation', () => {
     expect(assistantMessage?.querySelector('button[aria-label="Mauvaise réponse"]')).toBeNull();
     expect(assistantMessage?.querySelector('button[aria-label="Copier le message"]')).not.toBeNull();
     expect(assistantMessage?.querySelector('button[aria-label="Régénérer la réponse"]')).not.toBeNull();
+  });
+
+  it('keeps file-search citations as non-downloadable documentary references', async () => {
+    await act(async () => root.render(
+      <AssistantMessage
+        message={{
+          id: 'citation',
+          role: 'assistant',
+          content: 'Consultez la documentation.',
+          annotations: [{ type: 'file_citation', label: 'manuel.pdf', fileId: 'file-search-id' }],
+        }}
+      />,
+    ));
+
+    expect(container.textContent).toContain('manuel.pdf');
+    expect(container.querySelector('[aria-label="Télécharger manuel.pdf"]')).toBeNull();
+  });
+
+  it('renders deduplicated Web citations as safe external links', async () => {
+    await act(async () => root.render(
+      <AssistantMessage
+        message={{
+          id: 'web-citations',
+          role: 'assistant',
+          content: 'Answer with a Web source.',
+          annotations: [
+            {
+              type: 'uri_citation',
+              label: 'Manufacturer documentation',
+              url: 'https://example.test/technical-article',
+              quote: 'Quoted technical passage.',
+            },
+            {
+              type: 'uri_citation',
+              label: 'Duplicate',
+              url: 'https://example.test/technical-article',
+            },
+          ],
+        }}
+      />,
+    ));
+
+    const section = container.querySelector('section[aria-labelledby="web-sources-web-citations"]');
+    const links = section?.querySelectorAll<HTMLAnchorElement>('a');
+    expect(section?.textContent).toContain('Sources Web');
+    expect(section?.textContent).toContain('Manufacturer documentation');
+    expect(section?.textContent).toContain('Quoted technical passage.');
+    expect(section?.textContent).not.toContain('Duplicate');
+    expect(links).toHaveLength(1);
+    expect(links?.[0].getAttribute('href')).toBe('https://example.test/technical-article');
+    expect(links?.[0].getAttribute('target')).toBe('_blank');
+    expect(links?.[0].getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('keeps private PDF sources separate from Web citations', async () => {
+    await act(async () => root.render(
+      <AssistantMessage
+        message={{
+          id: 'mixed-sources',
+          role: 'assistant',
+          content: 'Source: p. 70.',
+          sources: [{
+            id: 123,
+            pdfPage: 72,
+            displayPage: '70',
+            label: 'p. 70',
+            startIndex: 8,
+            endIndex: 13,
+            displayOrder: 0,
+          }],
+          annotations: [{
+            type: 'uri_citation',
+            label: 'Public source',
+            url: 'https://example.test/public-source',
+          }],
+        }}
+      />,
+    ));
+
+    const markdown = container.querySelector('[data-source-count]');
+    expect(markdown?.getAttribute('data-source-count')).toBe('1');
+    expect(markdown?.getAttribute('data-source-label')).toBe('p. 70');
+    expect(container.querySelectorAll('section[aria-labelledby="web-sources-mixed-sources"] a')).toHaveLength(1);
+  });
+
+  it('does not render a Web sources section without a Web citation', async () => {
+    await act(async () => root.render(
+      <AssistantMessage message={{ id: 'no-web', role: 'assistant', content: 'Answer without a citation.' }} />,
+    ));
+
+    expect(container.textContent).not.toContain('Sources Web');
   });
 
   it('renders ordered visuals between the answer and suggested questions', async () => {

@@ -36,6 +36,9 @@ public static class StripeAdminEndpoints
         group.MapGet("/finance", AdminFinanceReader.OverviewAsync);
         group.MapGet("/finance/technical", AdminFinanceReader.TechnicalAsync);
         group.MapGet("/finance/consumption", AdminConsumptionReader.ReadAsync);
+        group.MapGet(
+            "/machines/{machineId:guid}/token-history",
+            AdminConsumptionReader.ReadMachineTokenHistoryAsync);
         group.MapGet("/machine-additions", ReadAdditionsAsync);
         group.MapGet("/subscription-payment", ReadSubscriptionPaymentAsync);
         group.MapPost("/machines/{machineId:guid}/status", SetMachineStatusAsync);

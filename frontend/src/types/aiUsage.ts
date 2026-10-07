@@ -4,6 +4,8 @@ export interface AiUsageMetricsDto {
   eventCount: number; chatResponseCount: number; conversationSummaryCount: number; visionToolCount: number;
   knownUsageCount: number; unknownUsageCount: number; completedCount: number; notCompletedCount: number;
   inputTokens: number | null; outputTokens: number | null; totalTokens: number | null;
+  cacheReadInputTokens?: number | null; cacheCreationInputTokens?: number | null;
+  cacheCreation5mInputTokens?: number | null; cacheCreation1hInputTokens?: number | null;
 }
 export interface AiUsageSummaryDto {
   from: string | null; to: string; usageType: UsageType | null; metrics: AiUsageMetricsDto;

@@ -11,7 +11,6 @@ import {
   parseErrorFromResponse,
   getErrorCodeFromResponse,
   isTokenExpiredError,
-  retryWithBackoff,
 } from '../utils/errorHandler';
 import {
   convertFilesToDataUris,
@@ -20,6 +19,7 @@ import {
 import { parseSseLine, splitSseBuffer } from '../utils/sseParser';
 import { getApiAuthHeaders, clearDiagLinkSession } from '../utils/apiAuth';
 import { parseTechnicalVisuals } from '../utils/technicalVisuals';
+import { parseTechnicalSources } from '../utils/technicalSources';
 
 /**
  * ChatService handles all chat-related API operations.
@@ -91,12 +91,11 @@ export class ChatService {
   }
 
   /**
-   * Prepare message payload with optional file attachments.
-   * Converts files to data URIs and separates images from documents.
+   * Prepare a Claude Direct message payload with optional PNG/JPEG images.
    * 
    * @param text - Message text content
-   * @param files - Optional array of files (images and documents)
-   * @returns Payload with content, image URIs, file attachments, and attachment metadata
+   * @param files - Optional array of images
+   * @returns Payload with content, image URIs, and attachment metadata
    */
   private async prepareMessagePayload(
     text: string,
@@ -104,27 +103,16 @@ export class ChatService {
   ): Promise<{
     content: string;
     imageDataUris: string[];
-    fileDataUris: Array<{ dataUri: string; fileName: string; mimeType: string }>;
     attachments: IChatItem['attachments'];
   }> {
     let imageDataUris: string[] = [];
-    let fileDataUris: Array<{ dataUri: string; fileName: string; mimeType: string }> = [];
     let attachments: IChatItem['attachments'] = undefined;
 
     if (files && files.length > 0) {
       try {
         const results = await convertFilesToDataUris(files);
         
-        // Separate images from documents
-        const imageResults = results.filter((r) => r.mimeType.startsWith('image/'));
-        const fileResults = results.filter((r) => !r.mimeType.startsWith('image/'));
-        
-        imageDataUris = imageResults.map((r) => r.dataUri);
-        fileDataUris = fileResults.map((r) => ({
-          dataUri: r.dataUri,
-          fileName: r.name,
-          mimeType: r.mimeType,
-        }));
+        imageDataUris = results.map((r) => r.dataUri);
         
         // Create attachment metadata for UI display
         attachments = createAttachmentMetadata(results);
@@ -135,7 +123,7 @@ export class ChatService {
       }
     }
 
-    return { content: text, imageDataUris, fileDataUris, attachments };
+    return { content: text, imageDataUris, attachments };
   }
 
   /**
@@ -144,14 +132,12 @@ export class ChatService {
    * @param message - User message text
    * @param conversationId - Current conversation ID (null for new conversations)
    * @param imageDataUris - Array of base64 data URIs for images
-   * @param fileDataUris - Array of file attachments with metadata
    * @returns Request body object
    */
   private constructRequestBody(
     message: string,
     conversationId: string | null,
     imageDataUris: string[],
-    fileDataUris: Array<{ dataUri: string; fileName: string; mimeType: string }>,
     machineId?: string
   ): Record<string, unknown> {
     return {
@@ -161,7 +147,6 @@ export class ChatService {
       // conversation's machine is re-derived server-side from SQL, never from the client.
       machineId: conversationId ? undefined : machineId,
       imageDataUris: imageDataUris.length > 0 ? imageDataUris : undefined,
-      fileDataUris: fileDataUris.length > 0 ? fileDataUris : undefined,
     };
   }
 
@@ -242,7 +227,7 @@ export class ChatService {
       throw error;
     }
 
-    const { content, imageDataUris, fileDataUris, attachments } = await this.prepareMessagePayload(
+    const { content, imageDataUris, attachments } = await this.prepareMessagePayload(
       messageText,
       files
     );
@@ -271,7 +256,6 @@ export class ChatService {
       messageText,
       currentConversationId,
       imageDataUris,
-      fileDataUris,
       machineId
     );
 
@@ -454,6 +438,14 @@ export class ChatService {
               break;
             }
 
+            case 'sources':
+              this.dispatch({
+                type: 'CHAT_STREAM_SOURCES',
+                messageId,
+                sources: event.data.sources,
+              });
+              break;
+
             case 'toolUse':
               if (event.data.toolName) {
                 this.dispatch({
@@ -464,20 +456,10 @@ export class ChatService {
               }
               break;
 
-            case 'mcpApprovalRequest':
-              if (event.data.approvalRequest) {
-                this.dispatch({
-                  type: 'CHAT_MCP_APPROVAL_REQUEST',
-                  messageId,
-                  approvalRequest: event.data.approvalRequest,
-                  previousResponseId: event.data.approvalRequest.previousResponseId ?? '',
-                });
-              }
-              break;
-
             case 'usage':
               this.dispatch({
-                type: 'CHAT_STREAM_COMPLETE',
+                type: 'CHAT_STREAM_USAGE',
+                messageId,
                 usage: {
                   promptTokens: event.data.promptTokens,
                   completionTokens: event.data.completionTokens,
@@ -486,13 +468,13 @@ export class ChatService {
                   completed: event.data.completed,
                   model: event.data.model,
                   modelSource: event.data.modelSource,
-                  agentVersion: event.data.agentVersion,
                   duration: event.data.duration,
                 },
               });
               break;
 
             case 'done':
+              this.dispatch({ type: 'CHAT_STREAM_COMPLETE', messageId });
               return;
 
             case 'error': {
@@ -505,6 +487,10 @@ export class ChatService {
             }
           }
         }
+      }
+
+      if (!this.streamCancelled) {
+        throw createAppError(new Error(`Stream ended before done for message ${messageId}`), 'STREAM');
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError' && this.streamCancelled) {
@@ -529,78 +515,6 @@ export class ChatService {
       } catch {
         // Reader may already be released
       }
-    }
-  }
-
-  /**
-   * Send approval response for an MCP tool call.
-   * 
-   * @param approvalRequestId - ID of the approval request
-   * @param approved - Whether the tool call was approved
-   * @param previousResponseId - Response ID to continue from
-   * @param conversationId - Current conversation ID
-   */
-  async sendMcpApproval(
-    approvalRequestId: string,
-    approved: boolean,
-    previousResponseId: string,
-    conversationId: string
-  ): Promise<void> {
-    try {
-      const authHeaders = await this.getAuthHeaders();
-
-      const assistantMessageId = Date.now().toString();
-      this.dispatch({ type: 'CHAT_ADD_ASSISTANT_MESSAGE', messageId: assistantMessageId });
-      this.dispatch({
-        type: 'CHAT_START_STREAM',
-        conversationId,
-        messageId: assistantMessageId,
-      });
-
-      this.currentStreamAbort = new AbortController();
-      this.streamCancelled = false;
-
-      const requestBody = {
-        message: approved ? 'Approved' : 'Rejected',
-        conversationId,
-        previousResponseId,
-        mcpApproval: {
-          approvalRequestId,
-          approved,
-        },
-      };
-
-      const response = await retryWithBackoff(
-        async () =>
-          this.initiateStream(
-            `${this.apiUrl}/chat/stream`,
-            authHeaders,
-            requestBody,
-            this.currentStreamAbort!.signal
-          ),
-        3,
-        1000
-      );
-
-      await this.processStream(response, assistantMessageId, conversationId);
-      this.currentStreamAbort = undefined;
-      this.streamCancelled = false;
-    } catch (error) {
-      this.currentStreamAbort = undefined;
-      this.streamCancelled = false;
-
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        return;
-      }
-
-      trackException(error instanceof Error ? error : new Error(String(error)), { context: 'sendMcpApproval' });
-
-      const appError: AppError = isAppError(error)
-        ? error
-        : createAppError(error, getErrorCodeFromMessage(error));
-
-      this.dispatch({ type: 'CHAT_ERROR', error: appError });
-      throw error;
     }
   }
 
@@ -633,27 +547,6 @@ export class ChatService {
     }
   }
 
-  async downloadFile(fileId: string, fileName?: string, containerId?: string): Promise<void> {
-    const authHeaders = await this.getAuthHeaders();
-    const params = containerId ? `?containerId=${encodeURIComponent(containerId)}` : '';
-    const response = await fetch(`${this.apiUrl}/files/${encodeURIComponent(fileId)}${params}`, {
-      headers: authHeaders,
-    });
-    if (!response.ok) {
-      this.handleUnauthorized(response);
-      throw new Error(`File download failed: ${response.status}`);
-    }
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName || fileId;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 100);
-  }
-
   async getTechnicalVisualBlob(visualId: number, signal?: AbortSignal): Promise<Blob> {
     const authHeaders = await this.getAuthHeaders();
     const response = await fetch(`${this.apiUrl}/chat/visuals/${encodeURIComponent(String(visualId))}`, {
@@ -665,6 +558,35 @@ export class ChatService {
       throw createAppError(new Error(`Technical visual request failed: ${response.status}`), 'API');
     }
     return response.blob();
+  }
+
+  async getTechnicalSourcePdfBlob(sourceReferenceId: number, signal?: AbortSignal): Promise<Blob> {
+    try {
+      const authHeaders = await this.getAuthHeaders();
+      const response = await fetch(
+        `${this.apiUrl}/chat/sources/${encodeURIComponent(String(sourceReferenceId))}/document`,
+        { headers: authHeaders, signal },
+      );
+      if (!response.ok) {
+        this.handleUnauthorized(response);
+        const message = response.status === 401
+          ? 'Votre session a expiré. Reconnectez-vous pour ouvrir cette source.'
+          : response.status === 403
+            ? 'Vous n’avez plus accès à cette source.'
+            : response.status === 404
+              ? 'Cette source n’est plus disponible.'
+              : 'Le document source n’a pas pu être chargé.';
+        const error = createAppError(new Error(message), response.status === 401 ? 'AUTH' : 'API');
+        throw { ...error, message };
+      }
+      return response.blob();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error;
+      if (isAppError(error)) throw error;
+      const message = 'Le document source n’a pas pu être chargé.';
+      const appError = createAppError(new Error(message), 'NETWORK');
+      throw { ...appError, message };
+    }
   }
 
   /**
@@ -708,10 +630,12 @@ export class ChatService {
     const messages = await response.json() as Array<Record<string, unknown>>;
     return messages.map(message => {
       const visuals = parseTechnicalVisuals(message.visuals);
+      const sources = parseTechnicalSources(message.sources);
       return {
         role: typeof message.role === 'string' ? message.role : '',
         content: typeof message.content === 'string' ? message.content : '',
         ...(visuals.length > 0 ? { visuals } : {}),
+        sources,
       };
     });
   }
@@ -733,36 +657,5 @@ export class ChatService {
     }
   }
 
-  /**
-   * Get a summary of files uploaded by this web app that are still stored in the Foundry project.
-   * Scoped to files whose names begin with the web-app upload prefix (see backend).
-   */
-  async getUploadedFilesInfo(): Promise<{ count: number; totalBytes: number }> {
-    const authHeaders = await this.getAuthHeaders();
-    const response = await fetch(`${this.apiUrl}/files/uploaded`, {
-      headers: authHeaders,
-    });
-    if (!response.ok) {
-      this.handleUnauthorized(response);
-      throw createAppError(new Error(`Failed to list uploaded files: ${response.status}`), 'API');
-    }
-    return response.json();
-  }
-
-  /**
-   * Delete every uploaded file that this web app previously uploaded for image attachments.
-   */
-  async cleanupUploadedFiles(): Promise<{ deleted: number; failed: number }> {
-    const authHeaders = await this.getAuthHeaders();
-    const response = await fetch(`${this.apiUrl}/files/cleanup`, {
-      method: 'POST',
-      headers: authHeaders,
-    });
-    if (!response.ok) {
-      this.handleUnauthorized(response);
-      throw createAppError(new Error(`Failed to clean up uploaded files: ${response.status}`), 'API');
-    }
-    return response.json();
-  }
 }
 

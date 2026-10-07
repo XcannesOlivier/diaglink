@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authentication;
+﻿using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
@@ -124,19 +124,19 @@ authenticationBuilder.AddMicrosoftIdentityWebApi(options =>
         options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
     }, options => builder.Configuration.Bind("AzureAd", options));
 
-// Additional scheme for DiagLink OTP sessions (X-DiagLink-Session header) — registered so it exists
+// Additional scheme for DiagLink OTP sessions (X-DiagLink-Session header) â€” registered so it exists
 // side-by-side with the Microsoft JWT bearer scheme. Chat endpoints accept either (see ChatAccessRequirement
 // below); the canonical UserObjectId for either path is resolved by UserIdentityService, not GetObjectId() directly.
 authenticationBuilder.AddScheme<AuthenticationSchemeOptions, DiagLinkSessionAuthenticationHandler>(
     DiagLinkAuthenticationDefaults.Scheme, _ => { });
 
 // Enriches Microsoft JWT principals with the same Role/CompanyId/Email claims the DiagLink session
-// handler already attaches — see DiagLinkUserClaimsTransformation for why this is a claims transform.
+// handler already attaches â€” see DiagLinkUserClaimsTransformation for why this is a claims transform.
 builder.Services.AddScoped<IClaimsTransformation, DiagLinkUserClaimsTransformation>();
 
 builder.Services.AddAuthorization(options =>
 {
-    // Dual-auth: a valid DiagLink session OR a Microsoft JWT bearer with Chat.ReadWrite — see
+    // Dual-auth: a valid DiagLink session OR a Microsoft JWT bearer with Chat.ReadWrite â€” see
     // ChatAccessRequirement/ChatAccessAuthorizationHandler. Kept under the same policy name so every
     // existing .RequireAuthorization(ScopePolicyName) call site on chat endpoints picks this up automatically.
     options.AddPolicy(ScopePolicyName, policy =>
@@ -146,7 +146,7 @@ builder.Services.AddAuthorization(options =>
         policy.Requirements.Add(new ChatAccessRequirement());
     });
 
-    // Role policies — additive, not yet used by any screen/endpoint besides GET /api/auth/me. Same
+    // Role policies â€” additive, not yet used by any screen/endpoint besides GET /api/auth/me. Same
     // dual-scheme setup as RequireChatScope so both DiagLink sessions and Microsoft JWTs are eligible;
     // whether a given principal actually carries a role claim depends on DiagLinkUserLookupService
     // finding an active dbo.Users row (see DiagLinkSessionAuthenticationHandler / DiagLinkUserClaimsTransformation).
@@ -162,27 +162,42 @@ builder.Services.AddAuthorization(options =>
     AddRolePolicy("SuperAdminOnly", DiagLinkRoles.SuperAdmin);
     AddRolePolicy("SupportContact", DiagLinkRoles.Technician, DiagLinkRoles.CompanyAdmin);
 
-    // Strictly company_admin — excludes diaglink_super_admin on purpose. A super-admin's company_id
+    // Strictly company_admin â€” excludes diaglink_super_admin on purpose. A super-admin's company_id
     // claim isn't a meaningful tenant, so endpoints scoped by that claim (technician provisioning,
     // machine assignment) must never be reachable by that role; the super-admin equivalents take an
     // explicit companyId route parameter instead (see /api/companies/{companyId}/... endpoints).
     AddRolePolicy("CompanyAdminOnly", DiagLinkRoles.CompanyAdmin);
 });
 
-// Register Foundry Agent Service (v2 Agents API)
-// Uses Azure.AI.Projects SDK which works with v2 Agents API (/agents/ endpoint with human-readable IDs).
+// Register the single Claude Direct runtime and its machine-scoped tools.
 builder.Services.AddHttpClient();
-builder.Services.AddHttpClient(ClaudeDirectChatService.HttpClientName);
+#pragma warning disable EXTEXP0001
+builder.Services
+    .AddHttpClient(ClaudeDirectChatService.HttpClientName, client =>
+    {
+        client.Timeout = TimeSpan.FromMinutes(2);
+    })
+    .RemoveAllResilienceHandlers();
+#pragma warning restore EXTEXP0001
+builder.Services.AddHttpClient(ClaudeConversationSummarizer.HttpClientName);
 builder.Services.Configure<ClaudeDirectChatOptions>(
     builder.Configuration.GetSection(ClaudeDirectChatOptions.SectionName));
-builder.Services.AddSingleton<Azure.Core.TokenCredential>(_ => new Azure.Identity.DefaultAzureCredential());
+builder.Services.AddSingleton<Azure.Core.TokenCredential>(_ =>
+{
+    var managedIdentityClientId = builder.Configuration["MANAGED_IDENTITY_CLIENT_ID"];
+
+    return !string.IsNullOrWhiteSpace(managedIdentityClientId)
+        ? new Azure.Identity.ManagedIdentityCredential(
+            Azure.Identity.ManagedIdentityId.FromUserAssignedClientId(managedIdentityClientId))
+        : new Azure.Identity.DefaultAzureCredential();
+});
 builder.Services.AddSingleton<ITechnicalAssistantPromptProvider, TechnicalAssistantPromptProvider>();
-builder.Services.AddScoped<AgentFrameworkService>();
-builder.Services.AddScoped<AiPricingIdentityResolver>();
-builder.Services.AddSingleton<IAiChatRuntimeSelector, AiChatRuntimeSelector>();
+builder.Services.AddSingleton<ClaudeDirectAgentMetadataFactory>();
+builder.Services.AddScoped<IConversationSummarizer, ClaudeConversationSummarizer>();
+builder.Services.AddSingleton<ClaudeDirectChatAttachmentValidator>();
 builder.Services.AddSingleton<MachineAssistantReadiness>();
 
-// Conversation-history persistence — isolated 'chat' schema in the shared 'diaglink' Azure SQL database.
+// Conversation-history persistence â€” isolated 'chat' schema in the shared 'diaglink' Azure SQL database.
 builder.Services.AddDbContext<DiagLinkDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DiagLink")
@@ -265,6 +280,11 @@ builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationH
         builder.Services.AddScoped<WebApp.Api.Services.BlobStorageService>();
         builder.Services.AddScoped<WebApp.Api.Services.ITechnicalVisualBlobReader>(services =>
             services.GetRequiredService<WebApp.Api.Services.BlobStorageService>());
+        builder.Services.AddScoped<WebApp.Api.Services.ITechnicalDocumentBlobReader>(services =>
+            services.GetRequiredService<WebApp.Api.Services.BlobStorageService>());
+        builder.Services.AddScoped<WebApp.Api.Services.TechnicalPageMapResolver>();
+        builder.Services.AddScoped<WebApp.Api.Services.TechnicalSourceReferenceResolver>();
+        builder.Services.AddScoped<WebApp.Api.Services.TechnicalSourceAccessService>();
         builder.Services.AddScoped<WebApp.Api.Services.IClaudeDirectChatService, WebApp.Api.Services.ClaudeDirectChatService>();
         builder.Services.AddScoped<WebApp.Api.Services.IClaudeDirectToolboxMarkerReader, WebApp.Api.Services.AzureClaudeDirectToolboxMarkerReader>();
         builder.Services.AddScoped<WebApp.Api.Services.IClaudeDirectMachineConfigurationResolver, WebApp.Api.Services.ClaudeDirectMachineConfigurationResolver>();
@@ -315,6 +335,7 @@ app.MapPublicMachineRequests();
 app.MapPublicContact();
 app.MapSupportContact();
 app.MapTechnicalVisualEndpoints(ScopePolicyName);
+app.MapTechnicalSourceEndpoints(ScopePolicyName);
 app.MapAdditionalMachineRequests();
 app.MapAdditionalDocumentsRequests();
 app.MapAdminMachineRequests();
@@ -325,7 +346,7 @@ app.MapPost("/api/stripe/webhooks/machine-additions", StripeSubscriptionWebhook.
 app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
 .WithName("GetHealth");
 
-// POST /api/files/upload — accepts companyName, machineName and PDF files (multipart/form-data)
+// POST /api/files/upload â€” accepts companyName, machineName and PDF files (multipart/form-data)
 app.MapPost("/api/files/upload", async (HttpContext httpContext, DiagLinkDbContext db, CancellationToken cancellationToken) =>
 {
     var blobService = httpContext.RequestServices.GetService<WebApp.Api.Services.BlobStorageService>();
@@ -442,7 +463,7 @@ app.MapPost("/api/auth/check-email", (
 .WithName("CheckEmail");
 
 // Public pre-auth endpoint: issues a one-time login code for an active dbo.Users record.
-// Intentionally has no .RequireAuthorization() — must be callable before any Microsoft sign-in.
+// Intentionally has no .RequireAuthorization() â€” must be callable before any Microsoft sign-in.
 // Response is always the same generic shape whether the email is unknown, inactive, or valid.
 app.MapPost("/api/auth/request-code", async (
     RequestCodeRequest request,
@@ -476,7 +497,7 @@ app.MapPost("/api/auth/request-code", async (
             return Results.Ok(new RequestCodeResponse { Success = true });
         }
 
-        // Invalidate prior unused codes first — only one code can ever be usable at a time per user.
+        // Invalidate prior unused codes first â€” only one code can ever be usable at a time per user.
         var previousUnusedCodes = await db.LoginCodes
             .Where(c => c.UserId == user.Id && c.UsedAtUtc == null)
             .ToListAsync(cancellationToken);
@@ -487,7 +508,7 @@ app.MapPost("/api/auth/request-code", async (
             previousCode.UsedAtUtc = now;
         }
 
-        // Cryptographically secure 6-digit code — "D6" preserves any leading zeros.
+        // Cryptographically secure 6-digit code â€” "D6" preserves any leading zeros.
         var code = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
 
         var otpPepper = configuration["Auth:OtpPepper"]
@@ -509,7 +530,7 @@ app.MapPost("/api/auth/request-code", async (
 
         await db.SaveChangesAsync(cancellationToken);
 
-        // DEV ONLY — never log the plaintext code outside Development.
+        // DEV ONLY â€” never log the plaintext code outside Development.
         if (environment.IsDevelopment())
         {
             logger.LogInformation("DEV ONLY: login code for {Email} is {Code}", normalizedEmail, code);
@@ -521,7 +542,7 @@ app.MapPost("/api/auth/request-code", async (
         }
         catch (Exception ex)
         {
-            // Sending failed — the stored code would be unusable (never delivered), so invalidate it
+            // Sending failed â€” the stored code would be unusable (never delivered), so invalidate it
             // rather than leaving an active code the user can never receive.
             db.LoginCodes.Remove(newLoginCode);
             await db.SaveChangesAsync(cancellationToken);
@@ -615,7 +636,7 @@ app.MapPost("/api/auth/verify-code", async (
         return Results.Ok(new VerifyCodeResponse { Success = false });
     }
 
-    // Session DiagLink : durée selon le rôle, token opaque aléatoire, seul son hash est persisté.
+    // Session DiagLink : durÃ©e selon le rÃ´le, token opaque alÃ©atoire, seul son hash est persistÃ©.
     var sessionTokenBytes = RandomNumberGenerator.GetBytes(32);
     var sessionToken = Convert.ToBase64String(sessionTokenBytes)
         .TrimEnd('=')
@@ -694,7 +715,7 @@ app.MapPost("/api/auth/validate-session", async (
 })
 .WithName("ValidateSession");
 
-// Returns the caller's own identity — Role/CompanyId/Email come exclusively from claims resolved
+// Returns the caller's own identity â€” Role/CompanyId/Email come exclusively from claims resolved
 // server-side (dbo.Users), never from anything the client supplies. Protected by TechnicianOrAbove:
 // any authenticated principal without a resolvable dbo.Users role/company gets 403, not 200 with nulls.
 app.MapGet("/api/auth/me", async (
@@ -737,7 +758,7 @@ app.MapGet("/api/auth/me", async (
 .RequireAuthorization("TechnicianOrAbove")
 .WithName("GetCurrentUser");
 
-// GET /api/companies — every DiagLink client company. Reserved to diaglink_super_admin.
+// GET /api/companies â€” every DiagLink client company. Reserved to diaglink_super_admin.
 app.MapGet("/api/companies", async (CompanyDirectoryService companyDirectoryService, CancellationToken cancellationToken) =>
 {
     var companies = await companyDirectoryService.GetAllCompaniesAsync(cancellationToken);
@@ -746,8 +767,8 @@ app.MapGet("/api/companies", async (CompanyDirectoryService companyDirectoryServ
 .RequireAuthorization("SuperAdminOnly")
 .WithName("GetCompanies");
 
-// POST /api/companies — creates a company alone (no admin). Reserved to diaglink_super_admin. The
-// client only ever supplies Name — Id/Status/timestamps are always generated server-side.
+// POST /api/companies â€” creates a company alone (no admin). Reserved to diaglink_super_admin. The
+// client only ever supplies Name â€” Id/Status/timestamps are always generated server-side.
 app.MapPost("/api/companies", async (CreateCompanyRequest request, CompanyOnboardingService companyOnboardingService, CancellationToken cancellationToken) =>
 {
     var outcome = await companyOnboardingService.CreateCompanyAsync(request.Name, cancellationToken);
@@ -758,7 +779,7 @@ app.MapPost("/api/companies", async (CreateCompanyRequest request, CompanyOnboar
 .RequireAuthorization("SuperAdminOnly")
 .WithName("CreateCompany");
 
-// POST /api/companies/{companyId}/admins — creates the first (or an additional) company_admin for an
+// POST /api/companies/{companyId}/admins â€” creates the first (or an additional) company_admin for an
 // existing company. Role/Status/CompanyId are always forced server-side; the client can never send them.
 app.MapPost("/api/companies/{companyId:guid}/admins", async (Guid companyId, CreateCompanyAdminRequest request, CompanyOnboardingService companyOnboardingService, CancellationToken cancellationToken) =>
 {
@@ -770,7 +791,7 @@ app.MapPost("/api/companies/{companyId:guid}/admins", async (Guid companyId, Cre
 .RequireAuthorization("SuperAdminOnly")
 .WithName("CreateCompanyAdmin");
 
-// POST /api/companies/onboard — transactional: creates the company and its first company_admin together.
+// POST /api/companies/onboard â€” transactional: creates the company and its first company_admin together.
 // Preferred entry point from the frontend (CompaniesView "Ajouter une entreprise" dialog) since dbo.Companies
 // and dbo.Users share the same Azure SQL database, so both inserts can commit or roll back as one unit.
 app.MapPost("/api/companies/onboard", async (OnboardCompanyRequest request, CompanyOnboardingService companyOnboardingService, CancellationToken cancellationToken) =>
@@ -783,7 +804,7 @@ app.MapPost("/api/companies/onboard", async (OnboardCompanyRequest request, Comp
 .RequireAuthorization("SuperAdminOnly")
 .WithName("OnboardCompany");
 
-// GET /api/company — the caller's own company, resolved exclusively from the company_id claim.
+// GET /api/company â€” the caller's own company, resolved exclusively from the company_id claim.
 // The client never supplies a CompanyId here.
 app.MapGet("/api/company", async (HttpContext httpContext, CompanyDirectoryService companyDirectoryService, CancellationToken cancellationToken) =>
 {
@@ -811,7 +832,7 @@ app.MapGet("/api/company/users", async (HttpContext httpContext, CompanyDirector
 .RequireAuthorization("CompanyAdminOnly")
 .WithName("GetCurrentCompanyUsers");
 
-// POST /api/company/users — company_admin only, creates a technician/company_admin in the caller's
+// POST /api/company/users â€” company_admin only, creates a technician/company_admin in the caller's
 // OWN company (resolved from the company_id claim, never from the request body).
 app.MapPost("/api/company/users", async (CreateTechnicianRequest request, HttpContext httpContext, UserProvisioningService userProvisioningService, CancellationToken cancellationToken) =>
 {
@@ -859,7 +880,7 @@ app.MapPatch("/api/companies/{companyId:guid}/users/{userId:guid}", async (Guid 
 .RequireAuthorization("SuperAdminOnly")
 .WithName("UpdateCompanyUserProfileForCompany");
 
-// DELETE /api/company/users/{userId} — company_admin only, soft-deletes (Status -> inactive) a user
+// DELETE /api/company/users/{userId} â€” company_admin only, soft-deletes (Status -> inactive) a user
 // in the caller's OWN company. Never reachable for diaglink_super_admin targets or self.
 app.MapDelete("/api/company/users/{userId:guid}", async (Guid userId, HttpContext httpContext, UserProvisioningService userProvisioningService, CancellationToken cancellationToken) =>
 {
@@ -875,7 +896,7 @@ app.MapDelete("/api/company/users/{userId:guid}", async (Guid userId, HttpContex
 .RequireAuthorization("CompanyAdminOnly")
 .WithName("DeleteCompanyUser");
 
-// DELETE /api/companies/{companyId}/users/{userId} — diaglink_super_admin only, soft-deletes
+// DELETE /api/companies/{companyId}/users/{userId} â€” diaglink_super_admin only, soft-deletes
 // (Status -> inactive) a user of an explicitly targeted company.
 app.MapDelete("/api/companies/{companyId:guid}/users/{userId:guid}", async (Guid companyId, Guid userId, HttpContext httpContext, UserProvisioningService userProvisioningService, CancellationToken cancellationToken) =>
 {
@@ -886,7 +907,7 @@ app.MapDelete("/api/companies/{companyId:guid}/users/{userId:guid}", async (Guid
 .RequireAuthorization("SuperAdminOnly")
 .WithName("DeleteCompanyUserForCompany");
 
-// POST /api/company/users/{userId}/reactivate — company_admin only, reverses the soft-delete above
+// POST /api/company/users/{userId}/reactivate â€” company_admin only, reverses the soft-delete above
 // (Status -> active) for a user in the caller's OWN company.
 app.MapPost("/api/company/users/{userId:guid}/reactivate", async (Guid userId, HttpContext httpContext, UserProvisioningService userProvisioningService, CancellationToken cancellationToken) =>
 {
@@ -902,7 +923,7 @@ app.MapPost("/api/company/users/{userId:guid}/reactivate", async (Guid userId, H
 .RequireAuthorization("CompanyAdminOnly")
 .WithName("ReactivateCompanyUser");
 
-// POST /api/companies/{companyId}/users/{userId}/reactivate — diaglink_super_admin only.
+// POST /api/companies/{companyId}/users/{userId}/reactivate â€” diaglink_super_admin only.
 app.MapPost("/api/companies/{companyId:guid}/users/{userId:guid}/reactivate", async (Guid companyId, Guid userId, HttpContext httpContext, UserProvisioningService userProvisioningService, CancellationToken cancellationToken) =>
 {
     TryGetUserIdClaim(httpContext.User, out var callerUserId);
@@ -912,9 +933,9 @@ app.MapPost("/api/companies/{companyId:guid}/users/{userId:guid}/reactivate", as
 .RequireAuthorization("SuperAdminOnly")
 .WithName("ReactivateCompanyUserForCompany");
 
-// DELETE /api/company/users/{userId}/permanent — company_admin only. Irreversible: unlike the
+// DELETE /api/company/users/{userId}/permanent â€” company_admin only. Irreversible: unlike the
 // soft-delete above, this removes the dbo.Users row (plus its UserMachines/UserSessions/LoginCodes)
-// entirely. Conversations are never touched — see PermanentlyDeleteUserAsync doc comment.
+// entirely. Conversations are never touched â€” see PermanentlyDeleteUserAsync doc comment.
 app.MapDelete("/api/company/users/{userId:guid}/permanent", async (Guid userId, HttpContext httpContext, UserProvisioningService userProvisioningService, CancellationToken cancellationToken) =>
 {
     if (!TryGetCompanyIdClaim(httpContext.User, out var companyId))
@@ -929,7 +950,7 @@ app.MapDelete("/api/company/users/{userId:guid}/permanent", async (Guid userId, 
 .RequireAuthorization("CompanyAdminOnly")
 .WithName("PermanentlyDeleteCompanyUser");
 
-// DELETE /api/companies/{companyId}/users/{userId}/permanent — diaglink_super_admin only.
+// DELETE /api/companies/{companyId}/users/{userId}/permanent â€” diaglink_super_admin only.
 app.MapDelete("/api/companies/{companyId:guid}/users/{userId:guid}/permanent", async (Guid companyId, Guid userId, HttpContext httpContext, UserProvisioningService userProvisioningService, CancellationToken cancellationToken) =>
 {
     TryGetUserIdClaim(httpContext.User, out var callerUserId);
@@ -939,7 +960,7 @@ app.MapDelete("/api/companies/{companyId:guid}/users/{userId:guid}/permanent", a
 .RequireAuthorization("SuperAdminOnly")
 .WithName("PermanentlyDeleteCompanyUserForCompany");
 
-// GET /api/company/users/{userId}/machines — every machine of the caller's company, flagged with
+// GET /api/company/users/{userId}/machines â€” every machine of the caller's company, flagged with
 // whether userId already has access. userId must belong to the caller's own company_id claim.
 app.MapGet("/api/company/users/{userId:guid}/machines", async (Guid userId, HttpContext httpContext, MachineAssignmentService machineAssignmentService, CancellationToken cancellationToken) =>
 {
@@ -954,7 +975,7 @@ app.MapGet("/api/company/users/{userId:guid}/machines", async (Guid userId, Http
 .RequireAuthorization("CompanyAdminOnly")
 .WithName("GetCompanyUserMachines");
 
-// PUT /api/company/users/{userId}/machines/{machineId} — grants access; idempotent (succeeds if already granted).
+// PUT /api/company/users/{userId}/machines/{machineId} â€” grants access; idempotent (succeeds if already granted).
 app.MapPut("/api/company/users/{userId:guid}/machines/{machineId:guid}", async (Guid userId, Guid machineId, HttpContext httpContext, MachineAssignmentService machineAssignmentService, CancellationToken cancellationToken) =>
 {
     if (!TryGetCompanyIdClaim(httpContext.User, out var companyId))
@@ -968,7 +989,7 @@ app.MapPut("/api/company/users/{userId:guid}/machines/{machineId:guid}", async (
 .RequireAuthorization("CompanyAdminOnly")
 .WithName("AssignCompanyUserMachine");
 
-// DELETE /api/company/users/{userId}/machines/{machineId} — revokes access; idempotent (succeeds if already absent).
+// DELETE /api/company/users/{userId}/machines/{machineId} â€” revokes access; idempotent (succeeds if already absent).
 app.MapDelete("/api/company/users/{userId:guid}/machines/{machineId:guid}", async (Guid userId, Guid machineId, HttpContext httpContext, MachineAssignmentService machineAssignmentService, CancellationToken cancellationToken) =>
 {
     if (!TryGetCompanyIdClaim(httpContext.User, out var companyId))
@@ -982,9 +1003,9 @@ app.MapDelete("/api/company/users/{userId:guid}/machines/{machineId:guid}", asyn
 .RequireAuthorization("CompanyAdminOnly")
 .WithName("UnassignCompanyUserMachine");
 
-// PUT /api/company/users/{userId}/machines — replaces the technician's ENTIRE machine access set in one
+// PUT /api/company/users/{userId}/machines â€” replaces the technician's ENTIRE machine access set in one
 // transaction. Preferred entry point from the frontend's checkbox UI (see UsersView "Enregistrer les
-// accès" button) over per-machine PUT/DELETE calls, since a checkbox grid naturally produces a full
+// accÃ¨s" button) over per-machine PUT/DELETE calls, since a checkbox grid naturally produces a full
 // desired-state list rather than a stream of individual toggle events.
 app.MapPut("/api/company/users/{userId:guid}/machines", async (Guid userId, ReplaceUserMachinesRequest request, HttpContext httpContext, MachineAssignmentService machineAssignmentService, CancellationToken cancellationToken) =>
 {
@@ -999,7 +1020,7 @@ app.MapPut("/api/company/users/{userId:guid}/machines", async (Guid userId, Repl
 .RequireAuthorization("CompanyAdminOnly")
 .WithName("ReplaceCompanyUserMachines");
 
-// GET /api/companies/{companyId}/users — diaglink_super_admin, dbo.Users rows for an explicitly targeted company.
+// GET /api/companies/{companyId}/users â€” diaglink_super_admin, dbo.Users rows for an explicitly targeted company.
 app.MapGet("/api/companies/{companyId:guid}/users", async (Guid companyId, CompanyDirectoryService companyDirectoryService, CancellationToken cancellationToken) =>
 {
     var users = await companyDirectoryService.GetCompanyUsersAsync(companyId, cancellationToken);
@@ -1008,7 +1029,7 @@ app.MapGet("/api/companies/{companyId:guid}/users", async (Guid companyId, Compa
 .RequireAuthorization("SuperAdminOnly")
 .WithName("GetUsersForCompany");
 
-// GET /api/companies/{companyId}/users/{userId}/machines — diaglink_super_admin equivalent of the
+// GET /api/companies/{companyId}/users/{userId}/machines â€” diaglink_super_admin equivalent of the
 // company_admin endpoint above; companyId comes from the route since the super-admin has no tenant claim.
 app.MapGet("/api/companies/{companyId:guid}/users/{userId:guid}/machines", async (Guid companyId, Guid userId, MachineAssignmentService machineAssignmentService, CancellationToken cancellationToken) =>
 {
@@ -1018,7 +1039,7 @@ app.MapGet("/api/companies/{companyId:guid}/users/{userId:guid}/machines", async
 .RequireAuthorization("SuperAdminOnly")
 .WithName("GetCompanyUserMachinesForCompany");
 
-// PUT /api/companies/{companyId}/users/{userId}/machines — diaglink_super_admin replace-all, same
+// PUT /api/companies/{companyId}/users/{userId}/machines â€” diaglink_super_admin replace-all, same
 // transactional semantics as the company_admin version.
 app.MapPut("/api/companies/{companyId:guid}/users/{userId:guid}/machines", async (Guid companyId, Guid userId, ReplaceUserMachinesRequest request, MachineAssignmentService machineAssignmentService, CancellationToken cancellationToken) =>
 {
@@ -1028,7 +1049,7 @@ app.MapPut("/api/companies/{companyId:guid}/users/{userId:guid}/machines", async
 .RequireAuthorization("SuperAdminOnly")
 .WithName("ReplaceCompanyUserMachinesForCompany");
 
-// GET /api/machines — role-scoped list (see MachineAccessService); never filtered by anything the client sends.
+// GET /api/machines â€” role-scoped list (see MachineAccessService); never filtered by anything the client sends.
 app.MapGet("/api/machines", async (HttpContext httpContext, MachineAccessService machineAccessService, MachineAssistantReadiness assistantReadiness, DiagLinkDbContext db, CancellationToken cancellationToken) =>
 {
     var machines = await machineAccessService.GetAccessibleMachinesAsync(httpContext.User, cancellationToken);
@@ -1046,7 +1067,7 @@ app.MapGet("/api/machines", async (HttpContext httpContext, MachineAccessService
 .RequireAuthorization("TechnicianOrAbove")
 .WithName("GetMachines");
 
-// GET /api/machines/{id} — 404 (not 403) when inaccessible, so a caller can't use the status code to
+// GET /api/machines/{id} â€” 404 (not 403) when inaccessible, so a caller can't use the status code to
 // tell "doesn't exist" apart from "exists in a company/machine they can't see".
 app.MapGet("/api/machines/{machineId:guid}/documents", async (Guid machineId, HttpContext httpContext, MachineAccessService machineAccessService, DiagLinkDbContext db, CancellationToken cancellationToken) =>
 {
@@ -1141,8 +1162,7 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// Streaming Chat endpoint: Streams agent response via SSE (conversationId → chunks → usage → done)
-// Supports MCP tool approval flow with previousResponseId and mcpApproval parameters
+// Streaming Chat endpoint: Streams agent response via SSE (conversationId â†’ chunks â†’ usage â†’ done)
 app.MapGet("/api/machines/{machineId:guid}/ai-credit", async (Guid machineId, HttpContext context,
     MachineAccessService access, AiCreditAccessService credits, CancellationToken ct) =>
 {
@@ -1153,11 +1173,10 @@ app.MapPost("/api/chat/stream", async (
     ChatRequest request,
     AiUsagePersistenceBillingService usagePersistenceBilling,
     AiCreditAccessService creditAccess,
-    AgentFrameworkService agentService,
     ConversationHistoryRepository historyRepository,
     ConversationSummaryService conversationSummaryService,
     MachineAssistantResolutionService assistantResolutionService,
-    IAiChatRuntimeSelector runtimeSelector,
+    ClaudeDirectChatAttachmentValidator attachmentValidator,
     UserIdentityService userIdentityService,
     HttpContext httpContext,
     IHostEnvironment environment,
@@ -1166,10 +1185,8 @@ app.MapPost("/api/chat/stream", async (
 {
     var userObjectId = await userIdentityService.GetCanonicalUserObjectIdAsync(httpContext.User, cancellationToken);
 
-    // Resolved strictly server-side from SQL — never trust a client-supplied agent/project. Stays null
-    // only for legacy pre-machine-scoping conversations, in which case AgentFrameworkService falls back
-    // to the globally-configured (env var) agent.
-    ResolvedAssistantConfiguration? resolvedConfig = null;
+    // Resolved strictly server-side from SQL. Legacy conversations without a machine are rejected
+    // before credit, runtime, provider, or persistence work.
     WebApp.Api.Models.Entities.Machine? resolvedMachine = null;
     Guid? boundMachineId = null;
     var isNewConversation = request.ConversationId is null;
@@ -1194,7 +1211,7 @@ app.MapPost("/api/chat/stream", async (
     }
     else
     {
-        // Ownership can't be verified without a canonical user id — refuse rather than trust the request.
+        // Ownership can't be verified without a canonical user id â€” refuse rather than trust the request.
         if (string.IsNullOrEmpty(userObjectId))
         {
             return Results.NotFound();
@@ -1206,6 +1223,18 @@ app.MapPost("/api/chat/stream", async (
             return Results.NotFound();
         }
 
+        if (!ownership.MachineId.HasValue)
+        {
+            return Results.Json(
+                new
+                {
+                    error = "legacy_conversation_not_resumable",
+                    code = "legacy_conversation_not_resumable",
+                    message = "Cette ancienne conversation ne peut plus Ãªtre poursuivie. DÃ©marrez une nouvelle conversation avec une machine."
+                },
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         if (ownership.MachineId.HasValue)
         {
             if (request.MachineId.HasValue && request.MachineId.Value != ownership.MachineId.Value)
@@ -1213,7 +1242,7 @@ app.MapPost("/api/chat/stream", async (
                 return Results.BadRequest(new { error = "machine_id_mismatch", message = "machineId does not match this conversation's bound machine." });
             }
 
-            // Re-verified on every message, not just at creation — access revoked mid-conversation must
+            // Re-verified on every message, not just at creation â€” access revoked mid-conversation must
             // refuse immediately rather than keep streaming against a machine the user can no longer see.
             var resolution = await assistantResolutionService.ResolveMachineAsync(httpContext.User, ownership.MachineId.Value, cancellationToken);
             var earlyExit = MapMachineResolutionFailure(resolution);
@@ -1234,22 +1263,18 @@ app.MapPost("/api/chat/stream", async (
 
     // Runtime choice is made only from the server-resolved machine, after access, entitlement and
     // credit admission. The request contract contains no runtime selector.
-    var selectedRuntime = runtimeSelector.Select(resolvedMachine);
-    logger.LogInformation(
-        "Chat runtime selected. Runtime={Runtime}, MachineId={MachineId}",
-        selectedRuntime,
-        boundMachineId);
-
-    if (selectedRuntime == AiChatRuntime.HostedAgent && resolvedMachine is not null)
+    IReadOnlyList<ClaudeDirectUserImage> claudeDirectImages;
+    try
     {
-        var hostedResolution = assistantResolutionService.ResolveHostedAgent(resolvedMachine);
-        var earlyExit = MapResolutionFailure(hostedResolution);
-        if (earlyExit is not null)
-        {
-            return earlyExit;
-        }
-
-        resolvedConfig = hostedResolution.Configuration;
+        claudeDirectImages = attachmentValidator.ValidateForClaudeDirect(
+            request.ImageDataUris,
+            request.FileDataUris);
+    }
+    catch (ChatAttachmentValidationException exception)
+    {
+        return Results.Json(
+            new { error = exception.Code, code = exception.Code, message = exception.Message },
+            statusCode: StatusCodes.Status400BadRequest);
     }
 
     try
@@ -1258,10 +1283,7 @@ app.MapPost("/api/chat/stream", async (
         httpContext.Response.Headers.Append("Cache-Control", "no-cache");
         httpContext.Response.Headers.Append("Connection", "keep-alive");
 
-        var conversationId = request.ConversationId
-            ?? (selectedRuntime == AiChatRuntime.ClaudeDirect
-                ? $"claude-direct-{Guid.NewGuid():N}"
-                : await agentService.CreateConversationAsync(request.Message, resolvedConfig?.ProjectEndpoint, cancellationToken));
+        var conversationId = request.ConversationId ?? $"claude-direct-{Guid.NewGuid():N}";
 
         await WriteConversationIdEvent(httpContext.Response, conversationId, cancellationToken);
 
@@ -1271,9 +1293,7 @@ app.MapPost("/api/chat/stream", async (
             {
                 if (!string.IsNullOrEmpty(userObjectId))
                 {
-                    var agentName = selectedRuntime == AiChatRuntime.ClaudeDirect
-                        ? "Claude Direct"
-                        : (await agentService.GetAgentMetadataAsync(resolvedConfig, cancellationToken)).Name;
+                    var agentName = $"Assistant-Technique-{resolvedMachine!.Name}";
                     await historyRepository.CreateConversationAsync(conversationId, userObjectId, agentName, boundMachineId, cancellationToken);
                 }
                 else
@@ -1283,22 +1303,22 @@ app.MapPost("/api/chat/stream", async (
             }
             catch (Exception ex)
             {
-                // Best-effort: SQL persistence failures must never break the Foundry chat stream.
+                // Best-effort: SQL persistence failures must never break the Claude Direct chat stream.
                 logger.LogError(ex, "Failed to persist new conversation {ConversationId}", conversationId);
             }
         }
 
         // Best-effort: build the model-bound message from SQL memory (TechnicalSummary + recent
-        // non-summarized messages) BEFORE saving request.Message below — this guarantees the current
+        // non-summarized messages) BEFORE saving request.Message below â€” this guarantees the current
         // question is never present twice (once live, once re-read back from its own just-saved row).
         var messageForModel = request.Message;
-        if (request.McpApproval is null && !string.IsNullOrEmpty(userObjectId))
+        if (!string.IsNullOrEmpty(userObjectId))
         {
             try
             {
                 var technicalSummary = await historyRepository.GetTechnicalSummaryForUserAsync(conversationId, userObjectId, cancellationToken);
                 var recentMessages = await historyRepository.GetRecentUnsummarizedMessagesForUserAsync(
-                    conversationId, userObjectId, ConversationSummaryService.KeepRawMessageCount, cancellationToken);
+                    conversationId, userObjectId, ConversationSummaryService.MaxContextMessageCount, cancellationToken);
                 messageForModel = ConversationContextBuilder.BuildMessage(technicalSummary, recentMessages, request.Message);
             }
             catch (Exception ex)
@@ -1307,8 +1327,7 @@ app.MapPost("/api/chat/stream", async (
             }
         }
 
-        // Skip MCP-approval resumes ("Approved"/"Rejected") — not a real user message.
-        if (request.McpApproval is null && !string.IsNullOrEmpty(userObjectId))
+        if (!string.IsNullOrEmpty(userObjectId))
         {
             try
             {
@@ -1323,6 +1342,7 @@ app.MapPost("/api/chat/stream", async (
         var startTime = DateTime.UtcNow;
         var assistantText = new StringBuilder();
         var assistantVisuals = new TechnicalVisualAccumulator();
+        var assistantSources = new List<TechnicalSourceReference>();
         Guid? sqlConversationId = null;
         // Captured from the authorized machine, never the caller's company claim.
         var machineCompanyId = resolvedMachine?.CompanyId;
@@ -1330,7 +1350,7 @@ app.MapPost("/api/chat/stream", async (
             ? (Guid?)parsedUserId : null;
         try
         {
-            sqlConversationId = await historyRepository.GetConversationIdByFoundryIdAsync(conversationId, cancellationToken);
+            sqlConversationId = await historyRepository.GetConversationIdByPublicIdAsync(conversationId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1340,36 +1360,22 @@ app.MapPost("/api/chat/stream", async (
         var measurement = new AiUsageMeasurement(sqlUserId, machineCompanyId, boundMachineId,
             sqlConversationId, conversationId, null,
             new AiResponseUsage(AiUsageType.ChatResponse, null, false, null, null, null,
-                null, null, null, DateTimeOffset.UtcNow));
+                null, null, DateTimeOffset.UtcNow));
         measurements[measurement.EventId] = measurement;
         httpContext.Items[typeof(AiUsageMeasurement)] = measurements;
 
-        var runtimeChunks = AiChatRuntimeDispatch.SelectStream(
-            selectedRuntime,
-            () => agentService.StreamMessageAsync(
-                conversationId,
+        var runtimeChunks = httpContext.RequestServices
+            .GetRequiredService<IClaudeDirectChatRuntime>()
+            .StreamMessageAsync(
+                resolvedMachine ?? throw new InvalidOperationException(
+                    "Claude Direct requires a server-resolved machine."),
                 messageForModel,
-                request.ImageDataUris,
-                request.FileDataUris,
-                request.PreviousResponseId,
-                request.McpApproval,
-                resolvedConfig,
-                cancellationToken),
-            () => httpContext.RequestServices
-                .GetRequiredService<IClaudeDirectChatRuntime>()
-                .StreamMessageAsync(
-                    resolvedMachine ?? throw new InvalidOperationException(
-                        "Claude Direct requires a server-resolved machine."),
-                    messageForModel,
-                    cancellationToken));
+                cancellationToken,
+                claudeDirectImages);
 
         await foreach (var chunk in runtimeChunks)
         {
-            if (chunk.VisionUsage is { } vision)
-            {
-                measurements[vision.EventId] = vision.WithContext(measurement);
-            }
-            else if (chunk.Usage is not null)
+            if (chunk.Usage is not null)
             {
                 measurement = measurement with { Response = chunk.Usage };
                 measurements[measurement.EventId] = measurement;
@@ -1377,6 +1383,10 @@ app.MapPost("/api/chat/stream", async (
             else if (chunk.HasVisuals && chunk.Visuals != null)
             {
                 assistantVisuals.AddRange(chunk.Visuals);
+            }
+            else if (chunk.HasSources && chunk.Sources != null)
+            {
+                assistantSources.AddRange(chunk.Sources);
             }
             else if (chunk.IsText && chunk.TextDelta != null)
             {
@@ -1386,10 +1396,6 @@ app.MapPost("/api/chat/stream", async (
             else if (chunk.HasAnnotations && chunk.Annotations != null)
             {
                 await WriteAnnotationsEvent(httpContext.Response, chunk.Annotations, cancellationToken);
-            }
-            else if (chunk.IsMcpApprovalRequest && chunk.McpApprovalRequest != null)
-            {
-                await WriteMcpApprovalRequestEvent(httpContext.Response, chunk.McpApprovalRequest, cancellationToken);
             }
             else if (chunk.IsToolUse && chunk.ToolName != null)
             {
@@ -1408,6 +1414,7 @@ app.MapPost("/api/chat/stream", async (
                     "assistant",
                     assistantText.ToString(),
                     assistantVisuals.Items,
+                    assistantSources,
                     cancellationToken);
                 measurement = measurement with { AssistantMessageId = persistedAssistantMessage?.MessageId };
                 measurements[measurement.EventId] = measurement;
@@ -1432,12 +1439,12 @@ app.MapPost("/api/chat/stream", async (
             }
             else
             {
-                logger.LogWarning("No SQL row found for FoundryConversationId {ConversationId}; skipping summarization.", conversationId);
+                logger.LogWarning("No SQL row found for ConversationPublicId {ConversationId}; skipping summarization.", conversationId);
             }
         }
         catch (Exception ex)
         {
-            // Best-effort: summarization failures must never break the Foundry chat stream.
+            // Best-effort: summarization failures must never break the Claude Direct chat stream.
             logger.LogError(ex, "Conversation summarization failed for conversation {ConversationId}", conversationId);
         }
 
@@ -1451,6 +1458,7 @@ app.MapPost("/api/chat/stream", async (
         await TechnicalVisualSseWriter.WriteBeforeDoneAsync(
             httpContext.Response,
             persistedAssistantMessage?.Visuals ?? [],
+            persistedAssistantMessage?.Sources ?? [],
             cancellationToken,
             WriteDoneEvent);
     }
@@ -1493,14 +1501,6 @@ app.MapPost("/api/chat/stream", async (
     // Maps a non-Configured resolution outcome to its HTTP response; returns null when Configured
     // (meaning the caller should proceed). 404 for inaccessible (anti-enumeration, matches
     // /api/machines/{id}); 409 for a real-but-unusable machine, never leaking AgentId/ProjectEndpoint.
-    static IResult? MapResolutionFailure(MachineAssistantResolution resolution) => resolution.Kind switch
-    {
-        MachineAssistantResolutionKind.MachineNotAccessible => Results.NotFound(),
-        MachineAssistantResolutionKind.AssistantNotConfigured or MachineAssistantResolutionKind.AssistantDisabled =>
-            Results.Json(new { error = "assistant_not_configured", message = "No assistant is configured for this machine yet." }, statusCode: 409),
-        _ => null,
-    };
-
     static IResult? MapMachineResolutionFailure(MachineResolution resolution) => resolution.Kind switch
     {
         MachineResolutionKind.MachineNotAccessible => Results.NotFound(),
@@ -1544,30 +1544,11 @@ static async Task WriteAnnotationsEvent(HttpResponse response, List<WebApp.Api.M
             label = a.Label,
             url = a.Url,
             fileId = a.FileId,
-            containerId = a.ContainerId,
             textToReplace = a.TextToReplace,
             startIndex = a.StartIndex,
             endIndex = a.EndIndex,
             quote = a.Quote
         })
-    });
-    await response.WriteAsync($"data: {json}\n\n", ct);
-    await response.Body.FlushAsync(ct);
-}
-
-static async Task WriteMcpApprovalRequestEvent(HttpResponse response, WebApp.Api.Models.McpApprovalRequest approval, CancellationToken ct)
-{
-    var json = System.Text.Json.JsonSerializer.Serialize(new
-    {
-        type = "mcpApprovalRequest",
-        approvalRequest = new
-        {
-            id = approval.Id,
-            toolName = approval.ToolName,
-            serverLabel = approval.ServerLabel,
-            arguments = approval.Arguments,
-            previousResponseId = approval.PreviousResponseId
-        }
     });
     await response.WriteAsync($"data: {json}\n\n", ct);
     await response.Body.FlushAsync(ct);
@@ -1585,8 +1566,7 @@ static async Task WriteUsageEvent(HttpResponse response, double duration, AiResp
         completionTokens = usage.OutputTokens,
         totalTokens = usage.TotalTokens,
         model = usage.Model,
-        modelSource = usage.ModelSource,
-        agentVersion = usage.AgentVersion
+        modelSource = usage.ModelSource
     });
     await response.WriteAsync($"data: {json}\n\n", ct);
     await response.Body.FlushAsync(ct);
@@ -1611,19 +1591,22 @@ app.MapGet("/api/agent", async (
     HttpContext httpContext,
     Guid machineId,
     MachineAssistantResolutionService assistantResolutionService,
-    AgentFrameworkService agentService,
+    ClaudeDirectAgentMetadataFactory claudeDirectMetadataFactory,
     IHostEnvironment environment,
     CancellationToken cancellationToken) =>
 {
     try
     {
-        var resolution = await assistantResolutionService.ResolveAsync(httpContext.User, machineId, cancellationToken);
+        var machineResolution = await assistantResolutionService.ResolveMachineAsync(
+            httpContext.User,
+            machineId,
+            cancellationToken);
 
         // Same mapping as /api/chat/stream: 404 anti-enumeration, 409 for a real-but-unusable machine.
-        var earlyExit = resolution.Kind switch
+        var earlyExit = machineResolution.Kind switch
         {
-            MachineAssistantResolutionKind.MachineNotAccessible => Results.NotFound(),
-            MachineAssistantResolutionKind.AssistantNotConfigured or MachineAssistantResolutionKind.AssistantDisabled =>
+            MachineResolutionKind.MachineNotAccessible => Results.NotFound(),
+            MachineResolutionKind.MachineDisabled =>
                 Results.Json(new { error = "assistant_not_configured", message = "No assistant is configured for this machine yet." }, statusCode: 409),
             _ => (IResult?)null,
         };
@@ -1632,11 +1615,7 @@ app.MapGet("/api/agent", async (
             return earlyExit;
         }
 
-        var metadata = await agentService.GetAgentMetadataAsync(
-            resolution.Configuration,
-            cancellationToken);
-
-        return Results.Ok(metadata);
+        return Results.Ok(claudeDirectMetadataFactory.Create(machineResolution.Machine!));
     }
     catch (Exception ex)
     {
@@ -1656,41 +1635,8 @@ app.MapGet("/api/agent", async (
 .RequireAuthorization(ScopePolicyName)
 .WithName("GetAgentMetadata");
 
-// Get agent info (for debugging)
-app.MapGet("/api/agent/info", async (
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var agentInfo = await agentService.GetAgentInfoAsync(cancellationToken);
-        return Results.Ok(new
-        {
-            info = agentInfo,
-            status = "ready"
-        });
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(
-            ex, 
-            500, 
-            environment.IsDevelopment());
-        
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-})
-.RequireAuthorization(ScopePolicyName)
-.WithName("GetAgentInfo");
-
-// List conversations — reads the SQL history (source of truth for the UI), strictly scoped to the
-// authenticated user's oid. Foundry itself remains the source of truth for the live chat conversation.
+// List conversations â€” reads the SQL history (source of truth for the UI), strictly scoped to the
+// authenticated user's oid. SQL remains the source of truth for conversation history and context.
 app.MapGet("/api/conversations", async (
     ConversationHistoryRepository historyRepository,
     HttpContext httpContext,
@@ -1728,7 +1674,7 @@ app.MapGet("/api/conversations", async (
 .RequireAuthorization(ScopePolicyName)
 .WithName("ListConversations");
 
-// Get conversation messages — reads the SQL history. {conversationId} is the FoundryConversationId.
+// Get conversation messages â€” reads SQL history by ConversationPublicId.
 // Ownership (UserObjectId) is checked in the same query as the lookup; a missing or
 // not-owned conversation both yield 404, so existence of another user's conversation is never revealed.
 app.MapGet("/api/conversations/{conversationId}/messages", async (
@@ -1772,127 +1718,16 @@ app.MapGet("/api/conversations/{conversationId}/messages", async (
 // Delete conversation
 app.MapDelete("/api/conversations/{conversationId}", async (
     string conversationId,
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
     CancellationToken cancellationToken) =>
 {
-    try
-    {
-        await agentService.DeleteConversationAsync(conversationId, cancellationToken);
-        return Results.NoContent();
-    }
-    catch (NotSupportedException)
-    {
-        return Results.Problem(
-            title: "Not Implemented",
-            detail: "Conversation deletion is not yet supported by the Azure.AI.Projects SDK.",
-            statusCode: 501
-        );
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(ex, 500, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
+    await Task.CompletedTask;
+    return Results.Problem(
+        title: "Not Implemented",
+        detail: "Conversation deletion is not yet supported.",
+        statusCode: 501);
 })
 .RequireAuthorization(ScopePolicyName)
 .WithName("DeleteConversation");
-
-// File download endpoint for code interpreter outputs
-app.MapGet("/api/files/{fileId}", async (
-    string fileId,
-    string? containerId,
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var (content, fileName) = await agentService.DownloadFileAsync(fileId, containerId, cancellationToken);
-        var contentType = GetMimeType(fileName);
-        return Results.File(content.ToArray(), contentType, fileName);
-    }
-    catch (HttpRequestException httpEx)
-    {
-        var statusCode = (int?)httpEx.StatusCode ?? 502;
-        var errorResponse = ErrorResponseFactory.CreateFromException(httpEx, statusCode, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(ex, 500, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-})
-.RequireAuthorization(ScopePolicyName)
-.WithName("DownloadFile");
-
-// Uploaded-files cleanup endpoints — inspect & delete image files previously uploaded by
-// this web app. Uses the WebAppUploadFilenamePrefix tag applied on upload to scope the
-// operation to our own files, because the Foundry Files API does not expose a typed
-// expires_after parameter in the GA SDK (see README "Known limitations").
-app.MapGet("/api/files/uploaded", async (
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var info = await agentService.ListUploadedFilesAsync(cancellationToken);
-        return Results.Ok(info);
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(ex, 500, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-})
-.RequireAuthorization(ScopePolicyName)
-.WithName("ListUploadedFiles");
-
-app.MapPost("/api/files/cleanup", async (
-    AgentFrameworkService agentService,
-    IHostEnvironment environment,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var result = await agentService.CleanupUploadedFilesAsync(cancellationToken);
-        return Results.Ok(result);
-    }
-    catch (Exception ex)
-    {
-        var errorResponse = ErrorResponseFactory.CreateFromException(ex, 500, environment.IsDevelopment());
-        return Results.Problem(
-            title: errorResponse.Title,
-            detail: errorResponse.Detail,
-            statusCode: errorResponse.Status,
-            extensions: errorResponse.Extensions
-        );
-    }
-})
-.RequireAuthorization(ScopePolicyName)
-.WithName("CleanupUploadedFiles");
 
 // Fallback route for SPA - serve index.html for any non-API routes
 app.MapFallbackToFile("index.html");
@@ -1900,28 +1735,28 @@ app.MapFallbackToFile("index.html");
 app.MapGet("/api/admin/usage/summary", async (string? from, string? to, string? usageType, AiUsageQueryService service, CancellationToken ct) =>
 {
     if (!AiUsageFilter.TryParse(from, to, usageType, out var filter))
-        return Results.BadRequest(new { error = "Période, type ou identifiant invalide. Utiliser des dates ISO 8601 avec fuseau et des GUID ou unassigned." });
+        return Results.BadRequest(new { error = "PÃ©riode, type ou identifiant invalide. Utiliser des dates ISO 8601 avec fuseau et des GUID ou unassigned." });
     return Results.Ok(await service.SummaryAsync(filter, ct));
 }).RequireAuthorization("SuperAdminOnly");
 
 app.MapGet("/api/admin/usage/companies", async (string? from, string? to, string? usageType, AiUsageQueryService service, CancellationToken ct) =>
 {
     if (!AiUsageFilter.TryParse(from, to, usageType, out var filter))
-        return Results.BadRequest(new { error = "Période, type ou identifiant invalide. Utiliser des dates ISO 8601 avec fuseau et des GUID ou unassigned." });
+        return Results.BadRequest(new { error = "PÃ©riode, type ou identifiant invalide. Utiliser des dates ISO 8601 avec fuseau et des GUID ou unassigned." });
     return Results.Ok(await service.CompaniesAsync(filter, ct));
 }).RequireAuthorization("SuperAdminOnly");
 
 app.MapGet("/api/admin/usage/companies/{companyId}/machines", async (string companyId, string? from, string? to, string? usageType, AiUsageQueryService service, CancellationToken ct) =>
 {
     if (!AiUsageFilter.TryParse(from, to, usageType, out var filter) || !AiUsageFilter.TryScope(companyId, out var company))
-        return Results.BadRequest(new { error = "Période, type ou identifiant invalide. Utiliser des dates ISO 8601 avec fuseau et des GUID ou unassigned." });
+        return Results.BadRequest(new { error = "PÃ©riode, type ou identifiant invalide. Utiliser des dates ISO 8601 avec fuseau et des GUID ou unassigned." });
     return Results.Ok(await service.MachinesAsync(filter, company, ct));
 }).RequireAuthorization("SuperAdminOnly");
 
 app.MapGet("/api/admin/usage/machines/{machineId}/users", async (string machineId, string? companyId, string? from, string? to, string? usageType, AiUsageQueryService service, CancellationToken ct) =>
 {
     if (!AiUsageFilter.TryParse(from, to, usageType, out var filter) || !AiUsageFilter.TryScope(companyId, out var company) || !AiUsageFilter.TryScope(machineId, out var machine))
-        return Results.BadRequest(new { error = "Période, type ou identifiant invalide. Utiliser des dates ISO 8601 avec fuseau et des GUID ou unassigned." });
+        return Results.BadRequest(new { error = "PÃ©riode, type ou identifiant invalide. Utiliser des dates ISO 8601 avec fuseau et des GUID ou unassigned." });
     return Results.Ok(await service.UsersAsync(filter, company, machine, ct));
 }).RequireAuthorization("SuperAdminOnly");
 
@@ -1930,7 +1765,7 @@ app.MapGet("/api/company/usage/summary", async (HttpContext httpContext, string?
 {
     if (!TryGetCompanyIdClaim(httpContext.User, out var companyId)) return Results.Forbid();
     if (httpContext.Request.Query.ContainsKey("companyId"))
-        return Results.BadRequest(new { error = "Le périmètre entreprise est imposé par l'identité serveur." });
+        return Results.BadRequest(new { error = "Le pÃ©rimÃ¨tre entreprise est imposÃ© par l'identitÃ© serveur." });
     if (!AiUsageFilter.TryParse(from, to, usageType, out var filter)) return Results.BadRequest();
 
     return Results.Ok(await service.CompanySummaryAsync(filter, companyId, ct));
@@ -1940,7 +1775,7 @@ app.MapGet("/api/company/usage/machines", async (HttpContext httpContext, string
 {
     if (!TryGetCompanyIdClaim(httpContext.User, out var companyId)) return Results.Forbid();
     if (httpContext.Request.Query.ContainsKey("companyId"))
-        return Results.BadRequest(new { error = "Le périmètre entreprise est imposé par l'identité serveur." });
+        return Results.BadRequest(new { error = "Le pÃ©rimÃ¨tre entreprise est imposÃ© par l'identitÃ© serveur." });
     if (!AiUsageFilter.TryParse(from, to, usageType, out var filter)) return Results.BadRequest();
 
     return Results.Ok(await service.MachinesAsync(filter, companyId, ct));
@@ -1950,7 +1785,7 @@ app.MapGet("/api/company/usage/machines/{machineId}/users", async (string machin
 {
     if (!TryGetCompanyIdClaim(httpContext.User, out var companyId)) return Results.Forbid();
     if (httpContext.Request.Query.ContainsKey("companyId"))
-        return Results.BadRequest(new { error = "Le périmètre entreprise est imposé par l'identité serveur." });
+        return Results.BadRequest(new { error = "Le pÃ©rimÃ¨tre entreprise est imposÃ© par l'identitÃ© serveur." });
     if (!AiUsageFilter.TryParse(from, to, usageType, out var filter)) return Results.BadRequest();
 
     if (!AiUsageFilter.TryScope(machineId, out var machine)) return Results.BadRequest();
@@ -1967,11 +1802,11 @@ static IResult OtpRateLimitExceeded(HttpContext httpContext, OtpRateLimitDecisio
 {
     var retryAfterSeconds = Math.Max(1, (int)Math.Ceiling((decision.RetryAfter ?? TimeSpan.FromMinutes(1)).TotalSeconds));
     httpContext.Response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
-    return Results.Json(new { error = "Trop de tentatives. Veuillez réessayer plus tard." },
+    return Results.Json(new { error = "Trop de tentatives. Veuillez rÃ©essayer plus tard." },
         statusCode: StatusCodes.Status429TooManyRequests);
 }
 
-// Maps a Company entity to its API contract — never expose EF entities directly.
+// Maps a Company entity to its API contract â€” never expose EF entities directly.
 static CompanyDto ToCompanyDto(Company company) => new()
 {
     Id = company.Id.ToString(),
@@ -1979,7 +1814,7 @@ static CompanyDto ToCompanyDto(Company company) => new()
     Status = company.Status,
 };
 
-// Minimal dbo.Users projection — deliberately excludes EntraObjectId.
+// Minimal dbo.Users projection â€” deliberately excludes EntraObjectId.
 static CompanyUserDto ToCompanyUserDto(User user) => new()
 {
     Id = user.Id.ToString(),
@@ -2017,7 +1852,7 @@ static bool TryGetUserIdClaim(ClaimsPrincipal user, out Guid? userId)
     return false;
 }
 
-// Maps a CompanyOnboardingService validation/conflict outcome to its HTTP status — never leaks SQL details.
+// Maps a CompanyOnboardingService validation/conflict outcome to its HTTP status â€” never leaks SQL details.
 static IResult MapOnboardingError(CompanyOnboardingErrorKind kind, string message) => kind switch
 {
     CompanyOnboardingErrorKind.CompanyNotFound => Results.NotFound(new { error = message }),
@@ -2040,7 +1875,7 @@ static IResult MapUserProfileUpdateError(UserProfileUpdateErrorKind kind, string
 };
 
 // UserNotFound uses 404 (anti-enumeration, matches /api/companies/{id}); the two "can't delete this
-// target" cases use 409 — the resource exists but the operation is refused, never a 403 that would
+// target" cases use 409 â€” the resource exists but the operation is refused, never a 403 that would
 // hint whether the target exists to a caller who otherwise wouldn't be able to tell.
 static IResult MapUserDeactivationError(UserDeactivationErrorKind kind, string message) => kind switch
 {
@@ -2055,27 +1890,4 @@ static IResult MapMachineAssignmentError(MachineAssignmentErrorKind kind, string
     MachineAssignmentErrorKind.UserNotFound or MachineAssignmentErrorKind.MachineNotFound => Results.NotFound(new { error = message }),
     _ => Results.BadRequest(new { error = message }),
 };
-
-// Helper to determine MIME type from file extension
-static string GetMimeType(string fileName)
-{
-    var ext = Path.GetExtension(fileName).ToLowerInvariant();
-    return ext switch
-    {
-        ".png" => "image/png",
-        ".jpg" or ".jpeg" => "image/jpeg",
-        ".gif" => "image/gif",
-        ".webp" => "image/webp",
-        ".svg" => "image/svg+xml",
-        ".pdf" => "application/pdf",
-        ".csv" => "text/csv",
-        ".json" => "application/json",
-        ".txt" => "text/plain",
-        ".md" => "text/markdown",
-        ".html" => "text/html",
-        ".py" => "text/x-python",
-        ".js" => "text/javascript",
-        _ => "application/octet-stream",
-    };
-}
 

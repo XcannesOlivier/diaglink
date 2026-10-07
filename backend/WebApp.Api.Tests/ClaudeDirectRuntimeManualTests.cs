@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -36,7 +36,6 @@ public sealed class ClaudeDirectRuntimeManualTests
     private const string Dx10zBlobPrefix = "develon/excavatrice-doosan-dx10z";
     private const string Dx10zProjectEndpoint =
         "https://diaglink-foundry-prod.services.ai.azure.com/api/projects/develon";
-    private const string Dx10zHostedAgent = "Assistant-Technique-excavatrice-doosan-dx10z";
     private const string OfflineProjectEndpoint =
         "https://resource.test/api/projects/company";
     private const string Question =
@@ -51,7 +50,6 @@ public sealed class ClaudeDirectRuntimeManualTests
         using var scope = factory.Services.CreateScope();
         var services = scope.ServiceProvider;
 
-        Assert.IsNotNull(services.GetRequiredService<IAiChatRuntimeSelector>());
         Assert.IsNotNull(services.GetRequiredService<MachineAssistantResolutionService>());
         Assert.IsNotNull(services.GetRequiredService<IClaudeDirectChatRuntime>());
         Assert.IsNotNull(services.GetRequiredService<IClaudeDirectChatRequestFactory>());
@@ -59,6 +57,8 @@ public sealed class ClaudeDirectRuntimeManualTests
         Assert.IsNotNull(services.GetRequiredService<ConversationHistoryRepository>());
         Assert.IsNotNull(services.GetRequiredService<AiUsagePersistenceBillingService>());
         Assert.IsNotNull(services.GetRequiredService<MachineRequestStorageService>());
+        var conversationSummarizer = services.GetRequiredService<IConversationSummarizer>();
+        Assert.IsInstanceOfType<ClaudeConversationSummarizer>(conversationSummarizer);
         Assert.AreEqual(0, factory.TokenCredential.AccessAttempts);
         Assert.AreEqual(0, factory.MachineRequestBlobClient.AccessAttempts);
     }
@@ -120,15 +120,11 @@ public sealed class ClaudeDirectRuntimeManualTests
     }
 
     [TestMethod]
-    public async Task ClaudeDirectEnabledMachine_WithoutHostedAgentIdentity_ReachesClaudeDirectRuntime()
+    public async Task ConfiguredMachine_ReachesClaudeDirectRuntime()
     {
         var machineId = Guid.NewGuid();
         await using var factory = new RuntimeApplicationFactory(machineId, offlineValidation: true);
         var machine = await SeedOfflineMachineAsync(factory.Services, machineId);
-        Assert.IsNull(machine.FoundryAgentId);
-        Assert.IsNull(machine.AgentVersion);
-        Assert.AreEqual(AiChatRuntime.ClaudeDirect,
-            factory.Services.GetRequiredService<IAiChatRuntimeSelector>().Select(machine));
 
         var token = factory.AddIdentity(DiagLinkRoles.SuperAdmin, machine.CompanyId, Guid.NewGuid());
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
@@ -151,7 +147,7 @@ public sealed class ClaudeDirectRuntimeManualTests
         Assert.AreEqual(
             HttpStatusCode.OK,
             response.StatusCode,
-            $"A ClaudeDirect-enabled machine must not be rejected only because FoundryAgentId and AgentVersion are null. Body: {body}");
+            $"A configured machine must reach Claude Direct. Body: {body}");
         Assert.AreEqual(1, factory.OfflineClaudeDirectChatService.CallCount);
         Assert.AreEqual(
             "company/machine/.foundry/toolbox.json",
@@ -160,14 +156,181 @@ public sealed class ClaudeDirectRuntimeManualTests
     }
 
     [TestMethod]
-    public async Task HostedAgentMachine_WithoutFoundryAgentId_RemainsNotConfigured()
+    public async Task ClaudeDirectAgentMetadata_UsesLocalMachineMetadata()
+    {
+        var machineId = Guid.NewGuid();
+        await using var factory = new RuntimeApplicationFactory(machineId, offlineValidation: true);
+        var machine = await SeedOfflineMachineAsync(factory.Services, machineId);
+        var token = factory.AddIdentity(DiagLinkRoles.SuperAdmin, machine.CompanyId, Guid.NewGuid());
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/agent?machineId={machine.Id}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.AreEqual($"claude-direct-{machine.Id:N}", body.RootElement.GetProperty("id").GetString());
+        Assert.AreEqual($"Assistant-Technique-{machine.Name}", body.RootElement.GetProperty("name").GetString());
+        Assert.AreEqual("claude-sonnet-5", body.RootElement.GetProperty("model").GetString());
+        Assert.AreEqual("Avatar_Default.svg", body.RootElement.GetProperty("metadata").GetProperty("logo").GetString());
+        var capabilities = body.RootElement.GetProperty("capabilities");
+        Assert.IsTrue(capabilities.GetProperty("imageAttachments").GetBoolean());
+        Assert.IsFalse(capabilities.GetProperty("fileAttachments").GetBoolean());
+    }
+
+    [TestMethod]
+    public async Task ClaudeDirectAgentMetadata_DoesNotReadToolboxOrBlob()
+    {
+        var machineId = Guid.NewGuid();
+        await using var factory = new RuntimeApplicationFactory(machineId, offlineValidation: true);
+        var machine = await SeedOfflineMachineAsync(factory.Services, machineId);
+        var token = factory.AddIdentity(DiagLinkRoles.SuperAdmin, machine.CompanyId, Guid.NewGuid());
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/agent?machineId={machine.Id}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request);
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.HasCount(0, factory.OfflineToolboxMarkerReader.RequestedBlobNames);
+        Assert.AreEqual(0, factory.TokenCredential.AccessAttempts);
+        Assert.AreEqual(0, factory.MachineRequestBlobClient.AccessAttempts);
+    }
+
+    [TestMethod]
+    public async Task AgentMetadata_InaccessibleMachine_RemainsNotFound()
+    {
+        var machineId = Guid.NewGuid();
+        await using var factory = new RuntimeApplicationFactory(machineId, offlineValidation: true);
+        _ = await SeedOfflineMachineAsync(factory.Services, machineId);
+        var token = factory.AddIdentity(DiagLinkRoles.CompanyAdmin, Guid.NewGuid(), Guid.NewGuid());
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/agent?machineId={machineId}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request);
+
+        Assert.AreEqual(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task AgentMetadata_IneligibleMachine_RemainsNotConfigured()
+    {
+        var machineId = Guid.NewGuid();
+        await using var factory = new RuntimeApplicationFactory(machineId, offlineValidation: true);
+        var machine = await SeedOfflineMachineAsync(factory.Services, machineId);
+        await UpdateMachineAsync(factory.Services, machineId, item => item.Status = "inactive");
+        var token = factory.AddIdentity(DiagLinkRoles.SuperAdmin, machine.CompanyId, Guid.NewGuid());
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/agent?machineId={machineId}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
+        StringAssert.Contains(body, "assistant_not_configured");
+    }
+
+    [TestMethod]
+    public async Task ClaudeDirectUserImage_ReachesRuntimeAsValidatedEphemeralImage()
+    {
+        var machineId = Guid.NewGuid();
+        await using var factory = new RuntimeApplicationFactory(machineId, offlineValidation: true);
+        var machine = await SeedOfflineMachineAsync(factory.Services, machineId);
+        var token = factory.AddIdentity(DiagLinkRoles.SuperAdmin, machine.CompanyId, Guid.NewGuid());
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat/stream")
+        {
+            Content = JsonContent.Create(new ChatRequest
+            {
+                Message = "Inspecte cette image",
+                MachineId = machine.Id,
+                ImageDataUris = ["data:image/png;base64,iVBORw0KGgo="]
+            })
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request);
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        var image = factory.OfflineClaudeDirectChatService.Request!.Messages.Single().Images!.Single();
+        Assert.AreEqual("image/png", image.MediaType);
+        Assert.AreEqual("iVBORw0KGgo=", image.Base64Data);
+        Assert.AreEqual(0, factory.TokenCredential.AccessAttempts);
+        Assert.AreEqual(0, factory.MachineRequestBlobClient.AccessAttempts);
+    }
+
+    [TestMethod]
+    public async Task ClaudeDirectFileAttachment_IsRejectedBeforeClaudeCall()
+    {
+        var machineId = Guid.NewGuid();
+        await using var factory = new RuntimeApplicationFactory(machineId, offlineValidation: true);
+        var machine = await SeedOfflineMachineAsync(factory.Services, machineId);
+        var token = factory.AddIdentity(DiagLinkRoles.SuperAdmin, machine.CompanyId, Guid.NewGuid());
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat/stream")
+        {
+            Content = JsonContent.Create(new ChatRequest
+            {
+                Message = "Lis ce PDF",
+                MachineId = machine.Id,
+                FileDataUris =
+                [
+                    new FileAttachment
+                    {
+                        DataUri = "data:application/pdf;base64,JVBERg==",
+                        FileName = "manual.pdf",
+                        MimeType = "application/pdf"
+                    }
+                ]
+            })
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        StringAssert.Contains(body, "chat_file_attachments_not_supported");
+        StringAssert.Contains(body, "Les fichiers PDF et texte ne sont pas encore pris en charge dans le chat.");
+        Assert.AreEqual(0, factory.OfflineClaudeDirectChatService.CallCount);
+    }
+
+    [TestMethod]
+    public async Task ClaudeDirectInvalidImage_IsRejectedBeforeClaudeCall()
+    {
+        var machineId = Guid.NewGuid();
+        await using var factory = new RuntimeApplicationFactory(machineId, offlineValidation: true);
+        var machine = await SeedOfflineMachineAsync(factory.Services, machineId);
+        var token = factory.AddIdentity(DiagLinkRoles.SuperAdmin, machine.CompanyId, Guid.NewGuid());
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat/stream")
+        {
+            Content = JsonContent.Create(new ChatRequest
+            {
+                Message = "Inspecte cette image",
+                MachineId = machine.Id,
+                ImageDataUris = ["data:image/png;base64,not-base64!"]
+            })
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        StringAssert.Contains(body, "chat_image_invalid_base64");
+        Assert.AreEqual(0, factory.OfflineClaudeDirectChatService.CallCount);
+    }
+
+    [TestMethod]
+    public async Task EveryEligibleMachine_UsesClaudeDirect()
     {
         var machineId = Guid.NewGuid();
         await using var factory = new RuntimeApplicationFactory(null, offlineValidation: true);
         var machine = await SeedOfflineMachineAsync(factory.Services, machineId);
-        Assert.AreEqual(AiChatRuntime.HostedAgent,
-            factory.Services.GetRequiredService<IAiChatRuntimeSelector>().Select(machine));
-
         var token = factory.AddIdentity(DiagLinkRoles.SuperAdmin, machine.CompanyId, Guid.NewGuid());
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -177,7 +340,7 @@ public sealed class ClaudeDirectRuntimeManualTests
         {
             Content = JsonContent.Create(new ChatRequest
             {
-                Message = "Question de test Hosted Agent",
+                Message = "Question de test Claude Direct",
                 MachineId = machine.Id
             })
         };
@@ -186,14 +349,57 @@ public sealed class ClaudeDirectRuntimeManualTests
         using var response = await client.SendAsync(request);
         var body = await response.Content.ReadAsStringAsync();
 
-        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode);
-        StringAssert.Contains(body, "assistant_not_configured");
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, body);
+        Assert.AreEqual(1, factory.OfflineClaudeDirectChatService.CallCount);
+        Assert.HasCount(1, factory.OfflineToolboxMarkerReader.RequestedBlobNames);
+    }
+
+    [TestMethod]
+    public async Task LegacyConversationWithoutMachineId_ReturnsConflictBeforeCreditOrRuntime()
+    {
+        await using var factory = new RuntimeApplicationFactory(null, offlineValidation: true);
+        var companyId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        const string conversationId = "legacy-conversation-without-machine";
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DiagLinkDbContext>();
+            db.Conversations.Add(new Conversation
+            {
+                Id = Guid.NewGuid(),
+                ConversationPublicId = conversationId,
+                UserObjectId = userId.ToString(),
+                MachineId = null,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var token = factory.AddIdentity(DiagLinkRoles.SuperAdmin, companyId, userId);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat/stream")
+        {
+            Content = JsonContent.Create(new ChatRequest
+            {
+                Message = "Tentative de reprise",
+                ConversationId = conversationId
+            })
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.AreEqual(HttpStatusCode.Conflict, response.StatusCode, body);
+        StringAssert.Contains(body, "legacy_conversation_not_resumable");
+        StringAssert.Contains(body, "Cette ancienne conversation ne peut plus Ãªtre poursuivie");
         Assert.AreEqual(0, factory.OfflineClaudeDirectChatService.CallCount);
         Assert.HasCount(0, factory.OfflineToolboxMarkerReader.RequestedBlobNames);
     }
 
     [TestMethod]
-    public async Task MachineListAndDetail_ClaudeDirectWithoutHostedAgentIdentity_IsConfigured()
+    public async Task MachineListAndDetail_ClaudeDirectConfiguration_IsConfigured()
     {
         var machineId = Guid.NewGuid();
         await using var factory = new RuntimeApplicationFactory(machineId, offlineValidation: true);
@@ -243,15 +449,11 @@ public sealed class ClaudeDirectRuntimeManualTests
         Console.WriteLine($"Reference={machine.Reference ?? "<null>"}");
         Console.WriteLine($"BlobPrefix={machine.BlobPrefix}");
         Console.WriteLine($"ProjectEndpoint={machine.ProjectEndpoint}");
-        Console.WriteLine($"FoundryAgentId={machine.FoundryAgentId ?? "<null>"}");
-        Console.WriteLine($"AgentVersion={machine.AgentVersion ?? "<null>"}");
         Console.WriteLine($"VectorStoreId={machine.VectorStoreId ?? "<null>"}");
         Console.WriteLine($"Status={machine.Status}");
 
         Assert.AreEqual(Dx10zBlobPrefix, machine.BlobPrefix);
         Assert.AreEqual(Dx10zProjectEndpoint, machine.ProjectEndpoint);
-        if (!string.IsNullOrWhiteSpace(machine.FoundryAgentId))
-            Assert.AreEqual(Dx10zHostedAgent, machine.FoundryAgentId);
     }
 
     [TestMethod]
@@ -272,9 +474,6 @@ public sealed class ClaudeDirectRuntimeManualTests
         var before = await FinancialSnapshot.LoadAsync(discoveryFactory.Services, machine);
 
         await using var factory = new RuntimeApplicationFactory(machine.Id);
-        Assert.AreEqual(
-            AiChatRuntime.ClaudeDirect,
-            factory.Services.GetRequiredService<IAiChatRuntimeSelector>().Select(machine));
         var token = factory.AddIdentity(DiagLinkRoles.SuperAdmin, machine.CompanyId, Guid.NewGuid());
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -425,8 +624,6 @@ public sealed class ClaudeDirectRuntimeManualTests
             ProjectEndpoint = OfflineProjectEndpoint,
             BlobPrefix = "company/machine",
             VectorStoreId = "vs_marker123",
-            FoundryAgentId = null,
-            AgentVersion = null,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         };
@@ -444,6 +641,19 @@ public sealed class ClaudeDirectRuntimeManualTests
         return machine;
     }
 
+    private static async Task UpdateMachineAsync(
+        IServiceProvider services,
+        Guid machineId,
+        Action<Machine> update)
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DiagLinkDbContext>();
+        var machine = await db.Machines.SingleAsync(item => item.Id == machineId);
+        update(machine);
+        machine.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
     private static async Task<PersistenceSnapshot> LoadPersistenceAsync(
         IServiceProvider services,
         string conversationId)
@@ -451,14 +661,14 @@ public sealed class ClaudeDirectRuntimeManualTests
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<DiagLinkDbContext>();
         var conversation = await db.Conversations.AsNoTracking()
-            .SingleAsync(item => item.FoundryConversationId == conversationId);
+            .SingleAsync(item => item.ConversationPublicId == conversationId);
         var messages = await db.ConversationMessages.AsNoTracking()
             .Include(item => item.Visuals)
             .Where(item => item.ConversationId == conversation.Id)
             .OrderBy(item => item.Id)
             .ToListAsync();
         var usages = await db.AiUsageRecords.AsNoTracking()
-            .Where(item => item.FoundryConversationId == conversationId)
+            .Where(item => item.ConversationPublicId == conversationId)
             .ToListAsync();
         return new(conversation, messages, usages);
     }
@@ -532,8 +742,6 @@ public sealed class ClaudeDirectRuntimeManualTests
                 builder.ConfigureAppConfiguration((_, configuration) =>
                 {
                     var overrides = new Dictionary<string, string?>();
-                    if (enabledMachineId.HasValue)
-                        overrides["ClaudeDirectChat:EnabledMachineIds:0"] = enabledMachineId.Value.ToString();
                     if (offlineValidation)
                     {
                         overrides["ConnectionStrings:DiagLink"] = "Server=(local);Database=offline-validation";
@@ -577,13 +785,16 @@ public sealed class ClaudeDirectRuntimeManualTests
                 services.AddSingleton(new BlobServiceClient(new Uri(blobServiceUri), credential));
                 services.AddScoped<BlobStorageService>();
                 services.AddScoped<ITechnicalVisualBlobReader>(provider => provider.GetRequiredService<BlobStorageService>());
+                services.AddScoped<ITechnicalDocumentBlobReader>(provider => provider.GetRequiredService<BlobStorageService>());
+                services.AddScoped<TechnicalPageMapResolver>();
+                services.AddScoped<TechnicalSourceReferenceResolver>();
+                services.AddScoped<TechnicalSourceAccessService>();
                 services.AddScoped<IClaudeDirectToolboxMarkerReader, AzureClaudeDirectToolboxMarkerReader>();
                 services.AddScoped<IClaudeDirectMachineConfigurationResolver, ClaudeDirectMachineConfigurationResolver>();
                 services.AddScoped<IClaudeDirectChatRequestFactory, ClaudeDirectChatRequestFactory>();
                 services.AddScoped<IClaudeDirectChatRuntime, ClaudeDirectChatRuntime>();
                 services.AddScoped<IMachineRequestBlobClient>(_ => MachineRequestBlobClient);
                 services.AddScoped<MachineRequestStorageService>();
-
                 services.RemoveAll<IClaudeDirectChatService>();
                 services.AddScoped<ClaudeDirectChatService>();
                 services.AddSingleton<ClaudeResultCapture>();
@@ -626,14 +837,17 @@ public sealed class ClaudeDirectRuntimeManualTests
     private sealed class OfflineClaudeDirectChatService : IClaudeDirectChatService
     {
         public int CallCount { get; private set; }
+        public ClaudeDirectChatRequest? Request { get; private set; }
 
         public Task<ClaudeDirectChatResult> CompleteAsync(
             ClaudeDirectChatRequest request,
             CancellationToken cancellationToken = default)
         {
             CallCount++;
+            Request = request;
             return Task.FromResult(new ClaudeDirectChatResult(
-                "Réponse ClaudeDirect hors ligne.",
+                "RÃ©ponse ClaudeDirect hors ligne.",
+                [],
                 [],
                 [],
                 [],

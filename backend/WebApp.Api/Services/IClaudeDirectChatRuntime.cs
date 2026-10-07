@@ -8,5 +8,6 @@ public interface IClaudeDirectChatRuntime
     IAsyncEnumerable<StreamChunk> StreamMessageAsync(
         Machine machine,
         string message,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<ClaudeDirectUserImage>? userImages = null);
 }

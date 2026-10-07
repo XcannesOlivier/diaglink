@@ -2,8 +2,8 @@ using WebApp.Api.Models.Entities;
 
 namespace WebApp.Api.Services;
 
-/// <summary>Computes the fast SQL-backed assistant indicator for the selected transitional runtime.</summary>
-public sealed class MachineAssistantReadiness(IAiChatRuntimeSelector runtimeSelector)
+/// <summary>Computes the fast SQL-backed Claude Direct assistant indicator.</summary>
+public sealed class MachineAssistantReadiness
 {
     public bool IsAssistantConfigured(Machine machine, bool eligible)
     {
@@ -14,9 +14,7 @@ public sealed class MachineAssistantReadiness(IAiChatRuntimeSelector runtimeSele
             return false;
         }
 
-        return runtimeSelector.Select(machine) == AiChatRuntime.ClaudeDirect
-            ? !string.IsNullOrWhiteSpace(machine.BlobPrefix) &&
-              !string.IsNullOrWhiteSpace(machine.VectorStoreId)
-            : !string.IsNullOrWhiteSpace(machine.FoundryAgentId);
+        return !string.IsNullOrWhiteSpace(machine.BlobPrefix) &&
+               !string.IsNullOrWhiteSpace(machine.VectorStoreId);
     }
 }

@@ -45,8 +45,6 @@ vi.mock('../../services/chatService', () => ({
     clearChat() {}
     deleteConversation() { return Promise.resolve(); }
     sendMessage() { return Promise.resolve(); }
-    sendMcpApproval() { return Promise.resolve(); }
-    downloadFile() { return Promise.resolve(); }
     listConversations(limit: number, machineId?: string, signal?: AbortSignal) {
       return mocks.listConversations(limit, machineId, signal);
     }
@@ -151,20 +149,25 @@ describe('AgentChat machine-scoped conversation history', () => {
     expect(loaded).toEqual([expect.objectContaining({ conversationId: 'conversation-2' })]);
   });
 
-  it('preserves technical visuals when rebuilding assistant history', async () => {
+  it('preserves technical visuals and sources when rebuilding assistant history', async () => {
     const summaries: ConversationSummary[] = [
       { id: 'conversation', title: 'One', createdAt: 1, machineId: 'machine-a', machineName: 'Machine A' },
     ];
     mocks.state = makeState('company_admin', 'machine-a', summaries);
     mocks.getConversationMessages.mockResolvedValue([{ role: 'assistant', content: 'Réponse', visuals: [
       { id: 12, documentId: 'manual', page: 71, assetType: 'tile', tile: 'r02-c01', name: 'tile.png', displayOrder: 0 },
+    ], sources: [
+      { id: 21, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: 0, endIndex: 5, displayOrder: 0 },
     ] }]);
     await render();
     await act(async () => host.querySelector<HTMLButtonElement>('button')?.click());
 
     expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: 'CHAT_LOAD_CONVERSATION',
-      messages: [expect.objectContaining({ visuals: [expect.objectContaining({ id: 12 })] })],
+      messages: [expect.objectContaining({
+        visuals: [expect.objectContaining({ id: 12 })],
+        sources: [expect.objectContaining({ id: 21, pdfPage: 74 })],
+      })],
     }));
   });
 });

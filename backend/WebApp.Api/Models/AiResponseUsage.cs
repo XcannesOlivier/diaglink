@@ -1,6 +1,12 @@
 namespace WebApp.Api.Models;
 
-public enum AiUsageType { ChatResponse, ConversationSummary, VisionTool }
+public enum AiUsageType
+{
+    ChatResponse,
+    ConversationSummary,
+    // Historical read-only value. New Claude Direct code must not emit this usage type.
+    VisionTool
+}
 
 /// <summary>One provider response, never a total across retries, tools or summaries.</summary>
 public record AiResponseUsage(
@@ -12,13 +18,18 @@ public record AiResponseUsage(
     int? TotalTokens,
     string? Model,
     string? ModelSource,
-    string? AgentVersion,
     DateTimeOffset TimestampUtc)
 {
     public string? CallId { get; init; }
     public string? ParentResponseId { get; init; }
     public string? Provider { get; init; }
     public string? Deployment { get; init; }
+    public string? CallBreakdownJson { get; init; }
+    public int? CacheReadInputTokens { get; init; }
+    public int? CacheCreationInputTokens { get; init; }
+    public int? CacheCreation5mInputTokens { get; init; }
+    public int? CacheCreation1hInputTokens { get; init; }
+    public int WebSearchRequests { get; init; }
 
     public bool Available => InputTokens.HasValue && OutputTokens.HasValue && TotalTokens.HasValue;
 }
@@ -29,7 +40,7 @@ public record AiUsageMeasurement(
     Guid? CompanyId,
     Guid? MachineId,
     Guid? SqlConversationId,
-    string FoundryConversationId,
+    string ConversationPublicId,
     long? AssistantMessageId,
     AiResponseUsage Response)
 {
@@ -38,9 +49,3 @@ public record AiUsageMeasurement(
 }
 
 public record AiSummaryResult(string Text, AiResponseUsage Usage);
-
-public record VisionUsageCapture(Guid EventId, AiResponseUsage Usage)
-{
-    public AiUsageMeasurement WithContext(AiUsageMeasurement context) =>
-        context with { EventId = EventId, AssistantMessageId = null, Response = Usage };
-}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   ChatInput as ChatInputFluent,
   ImperativeControlPlugin,
@@ -10,13 +10,17 @@ import { FilePreview } from './FilePreview';
 import { MachineDocuments } from './MachineDocuments';
 import { VoiceInput } from './VoiceInput';
 import { MessageQueue } from './MessageQueue';
-import { validateFile, validateFileCount } from '../../utils/fileAttachments';
+import {
+  getFileInputAccept,
+  getMaximumAttachmentCount,
+  validateFile,
+  validateFileCount,
+} from '../../utils/fileAttachments';
 import styles from './ChatInput.module.css';
 
 const CHAR_WARNING_THRESHOLD = 3000;
 const CHAR_DANGER_THRESHOLD = 3500;
 const CHAR_MAX_RECOMMENDED = 4000;
-
 const useCharCounterStyles = makeStyles({
   container: {
     display: 'flex',
@@ -114,12 +118,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const controlRef = useRef<ImperativeControlPluginRef>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
+  const processedDroppedFilesRef = useRef<File[] | undefined>(undefined);
   
   const toasterId = useId("toaster");
   const { dispatchToast } = useToastController(toasterId);
   const charCounterId = useId("char-counter");
   const counterStyles = useCharCounterStyles();
-
   const charCount = inputText.length;
   const showCounter = charCount >= CHAR_WARNING_THRESHOLD;
   
@@ -192,42 +196,89 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     prevEditingRef.current = isEditing;
   }, [isEditing]);
 
-  // Accept files from drag-drop via parent
-  useEffect(() => {
-    if (droppedFiles && droppedFiles.length > 0) {
-      const countValidation = validateFileCount(droppedFiles, selectedFiles.length);
-      if (!countValidation.valid) {
-        dispatchToast(
-          <Toast>
-            <ToastTitle>{countValidation.error}</ToastTitle>
-          </Toast>,
-          { intent: 'warning' },
-        );
-      } else {
-        const validFiles: File[] = [];
-        for (const file of droppedFiles) {
-          const validation = validateFile(file);
-          if (validation.valid) {
-            validFiles.push(file);
-          } else {
-            dispatchToast(
-              <Toast>
-                <ToastTitle>{validation.error}</ToastTitle>
-              </Toast>,
-              { intent: 'error' },
-            );
-          }
-        }
-        if (validFiles.length > 0) {
-          setSelectedFiles(prev => [...prev, ...validFiles]);
-        }
-      }
-      onDroppedFilesConsumed?.();
+  const addFiles = useCallback((files: File[]) => {
+    const countValidation = validateFileCount(
+      files,
+      selectedFiles.length,
+    );
+    if (!countValidation.valid) {
+      dispatchToast(
+        <Toast><ToastTitle>{countValidation.error}</ToastTitle></Toast>,
+        { intent: 'warning' },
+      );
+      return;
     }
-  }, [droppedFiles, onDroppedFilesConsumed, selectedFiles.length, dispatchToast]);
+
+    const validFiles: File[] = [];
+    for (const file of files) {
+      const validation = validateFile(file);
+      if (validation.valid) {
+        validFiles.push(file);
+      } else {
+        dispatchToast(
+          <Toast><ToastTitle>{validation.error}</ToastTitle></Toast>,
+          { intent: 'error' },
+        );
+      }
+    }
+
+    if (validFiles.length > 0) {
+      setSelectedFiles(previous => [...previous, ...validFiles]);
+    }
+  }, [dispatchToast, selectedFiles.length]);
+
+  // Accept files from drag-drop via parent through the same validator as the picker and clipboard.
+  useEffect(() => {
+    if (droppedFiles && droppedFiles.length > 0 && processedDroppedFilesRef.current !== droppedFiles) {
+      processedDroppedFilesRef.current = droppedFiles;
+      addFiles(droppedFiles);
+      onDroppedFilesConsumed?.();
+    } else if (!droppedFiles) {
+      processedDroppedFilesRef.current = undefined;
+    }
+  }, [addFiles, droppedFiles, onDroppedFilesConsumed]);
+
+  // Keep recovered selections within the Claude Direct attachment contract.
+  useEffect(() => {
+    const individuallyCompatible = selectedFiles.filter(
+      file => validateFile(file).valid,
+    );
+    const maxCount = getMaximumAttachmentCount();
+    const compatibleFiles = individuallyCompatible.slice(0, maxCount);
+
+    if (compatibleFiles.length !== selectedFiles.length) {
+      setSelectedFiles(compatibleFiles);
+      dispatchToast(
+        <Toast>
+          <ToastTitle>Les pièces jointes incompatibles avec la nouvelle machine ont été retirées.</ToastTitle>
+        </Toast>,
+        { intent: 'info' },
+      );
+    }
+  }, [
+    dispatchToast,
+    selectedFiles,
+  ]);
 
   const handleSubmit = () => {
     if (inputText && inputText.trim() !== "") {
+      const countValidation = validateFileCount(
+        selectedFiles,
+        0,
+      );
+      const invalidFile = selectedFiles.find(
+        file => !validateFile(file).valid,
+      );
+      if (!countValidation.valid || invalidFile) {
+        const validation = invalidFile
+          ? validateFile(invalidFile)
+          : countValidation;
+        dispatchToast(
+          <Toast><ToastTitle>{validation.error}</ToastTitle></Toast>,
+          { intent: 'error' },
+        );
+        return;
+      }
       onSubmit(inputText.trim(), selectedFiles.length > 0 ? selectedFiles : undefined);
       setInputText("");
       setSelectedFiles([]);
@@ -243,40 +294,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     
-    // Validate file count first
-    const countValidation = validateFileCount(files, selectedFiles.length);
-    if (!countValidation.valid) {
-      dispatchToast(
-        <Toast>
-          <ToastTitle>{countValidation.error}</ToastTitle>
-        </Toast>,
-        { intent: 'warning' }
-      );
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-      return;
-    }
-
-    // Validate each file
-    const validFiles: File[] = [];
-    for (const file of files) {
-      const validation = validateFile(file);
-      if (!validation.valid) {
-        dispatchToast(
-          <Toast>
-            <ToastTitle>{validation.error}</ToastTitle>
-          </Toast>,
-          { intent: 'error' }
-        );
-      } else {
-        validFiles.push(file);
-      }
-    }
-
-    if (validFiles.length > 0) {
-      setSelectedFiles(prev => [...prev, ...validFiles]);
-    }
+    addFiles(files);
     
     // Reset input value so same file can be selected again
     if (fileInputRef.current) {
@@ -309,39 +327,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
     if (files.length === 0) return;
 
-    // Validate file count
-    const countValidation = validateFileCount(files, selectedFiles.length);
-    if (!countValidation.valid) {
-      event.preventDefault();
-      dispatchToast(
-        <Toast>
-          <ToastTitle>{countValidation.error}</ToastTitle>
-        </Toast>,
-        { intent: 'warning' }
-      );
-      return;
-    }
-
-    // Validate each file
-    const validFiles: File[] = [];
-    for (const file of files) {
-      const validation = validateFile(file);
-      if (!validation.valid) {
-        dispatchToast(
-          <Toast>
-            <ToastTitle>{validation.error}</ToastTitle>
-          </Toast>,
-          { intent: 'error' }
-        );
-      } else {
-        validFiles.push(file);
-      }
-    }
-
-    if (validFiles.length > 0) {
-      event.preventDefault();
-      setSelectedFiles(prev => [...prev, ...validFiles]);
-    }
+    event.preventDefault();
+    addFiles(files);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -454,7 +441,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         multiple
         style={{ display: 'none' }}
         onChange={handleFileSelect}
-        accept="image/*,.pdf,.txt,.md,.csv,.json,.html,.xml"
+        accept={getFileInputAccept()}
         aria-label="Téléverser des fichiers"
       />
     </div>

@@ -9,6 +9,41 @@ namespace WebApp.Api.Tests;
 public class AdminConsumptionReaderTests
 {
  [TestMethod]
+ public async Task MachineTokenHistoryReturnsStructuredCallsAndToleratesLegacyOrInvalidBreakdown()
+ {
+  await using var f=new Fixture();await f.Seed();await using var db=f.Db();
+  var now=DateTime.UtcNow;
+  db.AiUsageRecords.RemoveRange(db.AiUsageRecords);
+  db.AiUsageRecords.AddRange(
+   new(){Id=Guid.NewGuid(),MachineId=f.MachineId,CompanyId=f.CompanyId,CreatedAtUtc=now,UsageType=AiUsageType.ChatResponse,
+    Provider="Anthropic",Model="claude-sonnet-5",Available=true,Completed=true,InputTokens=30,OutputTokens=7,TotalTokens=37,
+    CacheReadInputTokens=12,CacheCreationInputTokens=9,CacheCreation5mInputTokens=7,CacheCreation1hInputTokens=2,
+    CallBreakdownJson="""[{"callNumber":1,"inputTokens":10,"outputTokens":2,"cacheReadInputTokens":12,"cacheCreationInputTokens":9,"cacheCreation5mInputTokens":7,"cacheCreation1hInputTokens":2,"totalTokens":12,"model":"claude-sonnet-5","stopReason":"tool_use","tools":["file_search"]}]"""},
+   new(){Id=Guid.NewGuid(),MachineId=f.MachineId,CompanyId=f.CompanyId,CreatedAtUtc=now.AddMinutes(-1),UsageType=AiUsageType.ChatResponse,
+    Provider="Anthropic",Model="claude-sonnet-5",Available=true,Completed=true,InputTokens=20,OutputTokens=5,TotalTokens=25,CallBreakdownJson=null},
+   new(){Id=Guid.NewGuid(),MachineId=f.MachineId,CompanyId=f.CompanyId,CreatedAtUtc=now.AddMinutes(-2),UsageType=AiUsageType.ChatResponse,
+    Provider="Anthropic",Model="claude-sonnet-5",Available=true,Completed=true,InputTokens=1,OutputTokens=1,TotalTokens=2,CallBreakdownJson="invalid"});
+  await db.SaveChangesAsync();db.ChangeTracker.Clear();
+
+  var response=(AdminConsumptionReader.MachineTokenHistoryResponse)((IValueHttpResult)await AdminConsumptionReader.ReadMachineTokenHistoryAsync(
+   f.CompanyId,f.MachineId,0,20,db,default)).Value!;
+
+  Assert.HasCount(3,response.Items);
+  var current=response.Items[0];
+  Assert.AreEqual(30,current.InputTokens);Assert.AreEqual(7,current.OutputTokens);Assert.AreEqual(37,current.TotalTokens);
+  Assert.AreEqual(12,current.CacheReadInputTokens);Assert.AreEqual(9,current.CacheCreationInputTokens);
+  Assert.AreEqual(7,current.CacheCreation5mInputTokens);Assert.AreEqual(2,current.CacheCreation1hInputTokens);
+  Assert.AreEqual("claude-sonnet-5",current.Model);Assert.AreEqual("Anthropic",current.Provider);
+  Assert.IsNotNull(current.Calls);Assert.HasCount(1,current.Calls);
+  var call=current.Calls[0];
+  Assert.AreEqual(1,call.CallNumber);Assert.AreEqual(10L,call.InputTokens);Assert.AreEqual(2L,call.OutputTokens);Assert.AreEqual(12L,call.TotalTokens);
+  Assert.AreEqual(12L,call.CacheReadInputTokens);Assert.AreEqual(9L,call.CacheCreationInputTokens);
+  Assert.AreEqual("claude-sonnet-5",call.Model);Assert.AreEqual("tool_use",call.StopReason);CollectionAssert.AreEqual(new[]{"file_search"},call.Tools);
+  Assert.IsNull(response.Items[1].Calls);
+  Assert.IsNull(response.Items[2].Calls);
+ }
+
+ [TestMethod]
  public async Task IsolatesCompanyMachineUserAndSeparatesLedgerFromProviderCost()
  {
   await using var f=new Fixture();await f.Seed();await using var db=f.Db();

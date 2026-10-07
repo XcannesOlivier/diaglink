@@ -24,7 +24,7 @@ vi.mock('@fluentui/react-components',()=>({
 vi.mock('../../hooks/useAppState',()=>({useAppState:()=>({chat:mocks.state.chat,state:mocks.state})}));
 vi.mock('../../contexts/AppContext',()=>({useAppContext:()=>({dispatch:mocks.dispatch})}));
 vi.mock('../../hooks/useAuth',()=>({useAuth:()=>({getAccessToken:async()=>null})}));
-vi.mock('../../services/chatService',()=>({ChatService:class{clearError(){}cancelStream(){}clearChat(){}deleteConversation(){return Promise.resolve();}sendMessage(){return Promise.resolve();}sendMcpApproval(){return Promise.resolve();}downloadFile(){return Promise.resolve();}listConversations(){return Promise.resolve({conversations:[],hasMore:false});}getConversationMessages(){return Promise.resolve([]);}}}));
+vi.mock('../../services/chatService',()=>({ChatService:class{clearError(){}cancelStream(){}clearChat(){}deleteConversation(){return Promise.resolve();}sendMessage(){return Promise.resolve();}listConversations(){return Promise.resolve({conversations:[],hasMore:false});}getConversationMessages(){return Promise.resolve([]);}}}));
 vi.mock('../../services/machineService',()=>({getMachines:vi.fn()}));
 vi.mock('../../services/telemetry',()=>({trackFeedback:vi.fn()}));
 vi.mock('../ConversationSidebar',()=>({ConversationSidebar:()=>null}));

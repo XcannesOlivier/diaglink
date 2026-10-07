@@ -7,7 +7,7 @@ namespace WebApp.Api.Services;
 /// Builds the full text sent to the Foundry agent from SQL alone: the conversation's condensed
 /// <see cref="Conversation.TechnicalSummary"/>, its most recent non-summarized messages, and the
 /// current question. SQL is the only source of conversational memory here — Foundry itself is
-/// called statelessly (see <see cref="AgentFrameworkService.StreamMessageAsync"/>) and never
+/// called statelessly by the Claude Direct runtime and never
 /// supplies history back into this context. Never persisted to SQL and never shown to the user —
 /// the raw <c>request.Message</c> is what gets saved and displayed.
 /// </summary>

@@ -1,7 +1,6 @@
 import { useRef, useEffect, useState, useDeferredValue, useCallback, type ReactNode } from "react";
 import { AssistantMessage } from "./chat/AssistantMessage";
 import { UserMessage } from "./chat/UserMessage";
-import { McpApprovalCard } from "./chat/McpApprovalCard";
 import { StarterMessages } from "./chat/StarterMessages";
 import { ChatInput } from "./chat/ChatInput";
 import { DropZone } from "./chat/DropZone";
@@ -23,7 +22,6 @@ interface ChatInterfaceProps {
   recoveredAttachments?: import('../types/chat').IFileAttachment[];
   pendingMessages?: Array<{ text: string; files?: File[] }>;
   onSendMessage: (text: string, files?: File[]) => void;
-  onMcpApproval?: (approvalRequestId: string, approved: boolean, previousResponseId: string, conversationId: string) => void;
   onClearError?: () => void;
   onRecoveredInputConsumed?: () => void;
   onDequeueMessage?: (index: number) => void;
@@ -35,22 +33,20 @@ interface ChatInterfaceProps {
   onCancelEdit?: () => void;
   isEditing?: boolean;
   onFeedback?: (messageId: string, rating: 'positive' | 'negative') => void;
-  onDownloadFile?: (fileId: string, fileName: string, containerId?: string) => void;
   onLoadTechnicalVisual?: (visualId: number, signal?: AbortSignal) => Promise<Blob>;
+  onLoadTechnicalSource?: (sourceReferenceId: number, signal?: AbortSignal) => Promise<Blob>;
   hasMessages?: boolean;
   disabled: boolean;
   agentName?: string;
   agentDescription?: string;
-  agentLogo?: string;
   starterPrompts?: string[];
   starterAccessory?: ReactNode;
-  conversationId?: string | null;
   onChangeMachine?: () => void;
   machineId?: string;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
-  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onMcpApproval, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onDownloadFile, onLoadTechnicalVisual, hasMessages, disabled, agentName, agentDescription, agentLogo, starterPrompts, starterAccessory, conversationId, onChangeMachine } = props;
+  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onLoadTechnicalVisual, onLoadTechnicalSource, hasMessages, disabled, agentName, agentDescription, starterPrompts, starterAccessory, onChangeMachine } = props;
   const deferredMessages = useDeferredValue(messages);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [liveRegionMessage, setLiveRegionMessage] = useState<string>('');
@@ -214,30 +210,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
               </div>
               {(() => {
                 return deferredMessages.map((message) => {
-                return message.role === "approval" ? (
-                  <McpApprovalCard
-                    key={message.id}
-                    toolName={message.mcpApproval?.toolName || ''}
-                    serverLabel={message.mcpApproval?.serverLabel || ''}
-                    arguments={message.mcpApproval?.arguments}
-                    resolved={message.mcpApproval?.resolved}
-                    onApprove={() => onMcpApproval?.(
-                      message.mcpApproval!.id,
-                      true,
-                      message.mcpApproval!.previousResponseId || '',
-                      conversationId || ''
-                    )}
-                    onReject={() => onMcpApproval?.(
-                      message.mcpApproval!.id,
-                      false,
-                      message.mcpApproval!.previousResponseId || '',
-                      conversationId || ''
-                    )}
-                    disabled={isBusy}
-                    agentName={agentName}
-                    agentLogo={agentLogo}
-                  />
-                ) : message.role === "user" ? (
+                return message.role === "user" ? (
                   <UserMessage 
                     key={message.id} 
                     message={message}
@@ -251,8 +224,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                     agentName={agentName}
                     onRegenerate={onRegenerate}
                     onFeedback={onFeedback}
-                    onDownloadFile={onDownloadFile}
                     onLoadTechnicalVisual={onLoadTechnicalVisual}
+                    onLoadTechnicalSource={onLoadTechnicalSource}
                     onSuggestedPromptClick={handleStarterPromptClick}
                   />
                 );

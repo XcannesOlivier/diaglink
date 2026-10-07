@@ -2,7 +2,9 @@ namespace WebApp.Api.Models;
 
 public record AiUsageMetricsDto(long EventCount, long ChatResponseCount, long ConversationSummaryCount, long VisionToolCount,
     long KnownUsageCount, long UnknownUsageCount, long CompletedCount, long NotCompletedCount,
-    long? InputTokens, long? OutputTokens, long? TotalTokens);
+    long? InputTokens, long? OutputTokens, long? TotalTokens,
+    long? CacheReadInputTokens, long? CacheCreationInputTokens,
+    long? CacheCreation5mInputTokens, long? CacheCreation1hInputTokens);
 public record AiUsageSummaryDto(DateTimeOffset? From, DateTimeOffset To, string? UsageType,
     AiUsageMetricsDto Metrics, long UnassignedCompanyCount, long UnassignedMachineCount, long UnassignedUserCount);
 public record CompanyUsageDto(Guid? CompanyId, string CompanyName, long MachineCountUsed, long UserCountUsed, AiUsageMetricsDto Metrics);

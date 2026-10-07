@@ -1,5 +1,10 @@
 namespace WebApp.Api.Models;
 
+public sealed record AgentCapabilities(bool ImageAttachments, bool FileAttachments)
+{
+    public static AgentCapabilities ClaudeDirect { get; } = new(true, false);
+}
+
 /// <summary>
 /// Agent metadata response model matching Azure sample pattern
 /// </summary>
@@ -20,4 +25,5 @@ public record AgentMetadataResponse
     /// Configure in Microsoft Foundry portal under agent Configuration > Starter prompts.
     /// </summary>
     public List<string>? StarterPrompts { get; init; }
+    public AgentCapabilities Capabilities { get; init; } = new(false, false);
 }

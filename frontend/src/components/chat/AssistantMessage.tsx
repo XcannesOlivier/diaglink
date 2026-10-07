@@ -1,15 +1,19 @@
-import { Suspense, memo, useMemo, useCallback } from 'react';
+import { Suspense, lazy, memo, useMemo, useCallback, useState } from 'react';
 import { Spinner, Tooltip, Text } from '@fluentui/react-components';
 import { CopilotMessage } from '@fluentui-copilot/react-copilot-chat';
-import { DocumentRegular, GlobeRegular, FolderRegular, OpenRegular, ArrowSyncRegular } from '@fluentui/react-icons';
+import { DocumentRegular, GlobeRegular, OpenRegular, ArrowSyncRegular } from '@fluentui/react-icons';
 import { Markdown } from '../core/Markdown';
 import { MessageActions } from './MessageActions';
 import { TechnicalVisualGallery } from './TechnicalVisualGallery';
 import { useFormatTimestamp } from '../../hooks/useFormatTimestamp';
 import { parseContentWithCitations } from '../../utils/citationParser';
 import { extractTrailingQuestions } from '../../utils/extractTrailingQuestions';
-import type { IChatItem, IAnnotation } from '../../types/chat';
+import type { IChatItem, IAnnotation, TechnicalSourceReference } from '../../types/chat';
 import styles from './AssistantMessage.module.css';
+
+const TechnicalSourcePdfDialog = lazy(() => import('./TechnicalSourcePdfDialog').then(module => ({
+  default: module.TechnicalSourcePdfDialog,
+})));
 
 function getToolUseLabel(toolName: string): string {
   switch (toolName) {
@@ -31,8 +35,8 @@ interface AssistantMessageProps {
   disabled?: boolean;
   onRegenerate?: () => void;
   onFeedback?: (messageId: string, rating: 'positive' | 'negative') => void;
-  onDownloadFile?: (fileId: string, fileName: string, containerId?: string) => void;
   onLoadTechnicalVisual?: (visualId: number, signal?: AbortSignal) => Promise<Blob>;
+  onLoadTechnicalSource?: (sourceReferenceId: number, signal?: AbortSignal) => Promise<Blob>;
   onSuggestedPromptClick?: (prompt: string) => void;
 }
 
@@ -42,17 +46,28 @@ function AssistantMessageComponent({
   isStreaming = false,
   disabled = false,
   onRegenerate,
-  onDownloadFile,
   onLoadTechnicalVisual,
+  onLoadTechnicalSource,
   onSuggestedPromptClick,
 }: AssistantMessageProps) {
   const formatTimestamp = useFormatTimestamp();
+  const [selectedSource, setSelectedSource] = useState<TechnicalSourceReference>();
   const timestamp = message.more?.time ? formatTimestamp(new Date(message.more.time)) : '';
   
   // Show custom loading indicator when streaming with no content
   const showLoadingDots = isStreaming && !message.content && !message.retryAttempt;
   const isRetrying = isStreaming && !!message.retryAttempt;
   const hasAnnotations = message.annotations && message.annotations.length > 0;
+
+  const webCitations = useMemo(() => {
+    const citationsByUrl = new Map<string, IAnnotation>();
+    message.annotations?.forEach((annotation) => {
+      if (annotation.type === 'uri_citation' && annotation.url && !citationsByUrl.has(annotation.url)) {
+        citationsByUrl.set(annotation.url, annotation);
+      }
+    });
+    return Array.from(citationsByUrl.values());
+  }, [message.annotations]);
   
   // Parse content with citations for consistent numbering between inline and footnotes
   const parsedContent = useMemo(() => {
@@ -120,8 +135,6 @@ function AssistantMessageComponent({
       switch (annotation.type) {
         case 'uri_citation':
           return <GlobeRegular className={styles.citationIcon} />;
-        case 'file_path':
-          return <FolderRegular className={styles.citationIcon} />;
         default:
           return <DocumentRegular className={styles.citationIcon} />;
       }
@@ -132,14 +145,11 @@ function AssistantMessageComponent({
       ? `${annotation.label}${count > 1 ? ` (référencé ${count} fois)` : ''}\n\n"${annotation.quote.slice(0, 200)}${annotation.quote.length > 200 ? '...' : ''}"`
       : `${annotation.label}${count > 1 ? ` (référencé ${count} fois)` : ''}`;
 
-    const hasFileDownload = (annotation.type === 'file_path' || annotation.type === 'container_file_citation') && annotation.fileId;
-    const isClickable = (annotation.type === 'uri_citation' && annotation.url) || hasFileDownload;
+    const isClickable = annotation.type === 'uri_citation' && !!annotation.url;
 
     const handleClick = () => {
       if (annotation.type === 'uri_citation' && annotation.url) {
         window.open(annotation.url, '_blank', 'noopener,noreferrer');
-      } else if (hasFileDownload && annotation.fileId) {
-        onDownloadFile?.(annotation.fileId, annotation.label, annotation.containerId);
       }
     };
 
@@ -164,7 +174,7 @@ function AssistantMessageComponent({
           onClick={isClickable ? handleClick : undefined}
           onKeyDown={isClickable ? handleKeyDown : undefined}
           role={isClickable ? 'button' : undefined}
-          aria-label={isClickable ? (hasFileDownload ? `Télécharger ${annotation.label}` : `Ouvrir ${annotation.label}`) : undefined}
+          aria-label={isClickable ? `Ouvrir ${annotation.label}` : undefined}
           tabIndex={isClickable ? 0 : undefined}
         >
           <span className={styles.citationNumber}>{citationNumber}</span>
@@ -179,9 +189,9 @@ function AssistantMessageComponent({
     );
   };
 
-  const citations = indexedCitations.map(({ index, annotation, count }) => 
-    renderCitation(annotation, index, count)
-  );
+  const citations = indexedCitations
+    .filter(({ annotation }) => annotation.type !== 'uri_citation' || !annotation.url)
+    .map(({ index, annotation, count }) => renderCitation(annotation, index, count));
   
   return (
     <CopilotMessage
@@ -193,7 +203,7 @@ function AssistantMessageComponent({
       disclaimer={null}
       footnote={
         <div className={styles.footnoteContainer}>
-          {hasAnnotations && !isStreaming && (
+          {citations.length > 0 && !isStreaming && (
             <div className={styles.citationList}>
               {citations}
             </div>
@@ -239,7 +249,8 @@ function AssistantMessageComponent({
               content={visibleContent} 
               annotations={message.annotations}
               onCitationClick={handleCitationClick}
-              onDownloadFile={onDownloadFile}
+              sources={message.sources}
+              onTechnicalSourceClick={onLoadTechnicalSource ? setSelectedSource : undefined}
             />
           </Suspense>
           {isStreaming && message.activeToolUse && (
@@ -250,6 +261,35 @@ function AssistantMessageComponent({
           )}
           {message.visuals && message.visuals.length > 0 && onLoadTechnicalVisual && (
             <TechnicalVisualGallery visuals={message.visuals} loadVisual={onLoadTechnicalVisual} />
+          )}
+          {!isStreaming && webCitations.length > 0 && (
+            <section
+              className={styles.webSources}
+              aria-labelledby={`web-sources-${message.id}`}
+            >
+              <h3 id={`web-sources-${message.id}`} className={styles.webSourcesTitle}>
+                Sources Web
+              </h3>
+              <ul className={styles.webSourceList}>
+                {webCitations.map((citation) => (
+                  <li key={citation.url} className={styles.webSourceItem}>
+                    <a
+                      className={styles.webSourceLink}
+                      href={citation.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <GlobeRegular aria-hidden="true" />
+                      <span>{citation.label || citation.url}</span>
+                      <OpenRegular aria-hidden="true" />
+                    </a>
+                    {citation.quote && (
+                      <p className={styles.webSourceQuote}>{citation.quote}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
           {suggestedPrompts.length > 0 && onSuggestedPromptClick && (
             <div className={styles.suggestedPrompts}>
@@ -266,6 +306,15 @@ function AssistantMessageComponent({
               ))}
             </div>
           )}
+          {selectedSource && onLoadTechnicalSource && (
+            <Suspense fallback={null}>
+              <TechnicalSourcePdfDialog
+                source={selectedSource}
+                loadPdf={onLoadTechnicalSource}
+                onClose={() => setSelectedSource(undefined)}
+              />
+            </Suspense>
+          )}
         </>
       )}
     </CopilotMessage>
@@ -281,7 +330,9 @@ export const AssistantMessage = memo(AssistantMessageComponent, (prev, next) => 
     prev.message.more?.usage === next.message.more?.usage &&
     prev.message.annotations?.length === next.message.annotations?.length &&
     prev.message.visuals === next.message.visuals &&
+    prev.message.sources === next.message.sources &&
     prev.onLoadTechnicalVisual === next.onLoadTechnicalVisual &&
+    prev.onLoadTechnicalSource === next.onLoadTechnicalSource &&
     prev.message.retryAttempt === next.message.retryAttempt &&
     prev.message.activeToolUse === next.message.activeToolUse
   );

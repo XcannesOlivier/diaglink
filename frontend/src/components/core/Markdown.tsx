@@ -12,7 +12,8 @@ import { CopyRegular, CheckmarkRegular } from '@fluentui/react-icons';
 import { memo, useState, useMemo } from 'react';
 import { CitationMarker } from '../chat/CitationMarker';
 import { parseContentWithCitations } from '../../utils/citationParser';
-import type { IAnnotation } from '../../types/chat';
+import type { IAnnotation, TechnicalSourceReference } from '../../types/chat';
+import { createTechnicalSourceRemarkPlugin, prepareTechnicalSourceContent } from '../../utils/technicalSources';
 import styles from './Markdown.module.css';
 
 interface MarkdownProps {
@@ -21,8 +22,9 @@ interface MarkdownProps {
   annotations?: IAnnotation[];
   /** Callback when a citation marker is clicked */
   onCitationClick?: (index: number, annotation?: IAnnotation) => void;
-  /** Callback to download a file by ID (for sandbox: links) */
-  onDownloadFile?: (fileId: string, fileName: string, containerId?: string) => void;
+  /** Verified private PDF references using offsets in the raw content. */
+  sources?: TechnicalSourceReference[];
+  onTechnicalSourceClick?: (source: TechnicalSourceReference) => void;
 }
 
 interface CodeBlockProps
@@ -110,7 +112,7 @@ const CodeBlock = memo<CodeBlockProps>(
 CodeBlock.displayName = 'CodeBlock';
 
 // Default link component (no download capability)
-const Link: Components['a'] = ({ href, children }) => {
+const Link = ({ href, children }: { href?: string; children?: React.ReactNode }) => {
   if (!href || href.startsWith('sandbox:')) {
     return <span className={styles.link}>{children}</span>;
   }
@@ -128,61 +130,6 @@ const Image: Components['img'] = ({ src, alt }) => {
   }
   return <img src={src} alt={alt ?? ''} className={styles.image} />;
 };
-
-/** Find an annotation whose label matches the filename in a sandbox: URL */
-function findAnnotationByFilename(sandboxUrl: string, annotationMap: Map<string, IAnnotation>): IAnnotation | undefined {
-  const filename = sandboxUrl.split('/').pop()?.toLowerCase();
-  return filename ? annotationMap.get(filename) : undefined;
-}
-
-/** Create Link/Image components that trigger file downloads for sandbox: URLs */
-function createDownloadableComponents(
-  annotations?: IAnnotation[],
-  onDownloadFile?: (fileId: string, fileName: string, containerId?: string) => void,
-) {
-  // Pre-compute filename → annotation map for O(1) lookups
-  const annotationMap = new Map<string, IAnnotation>();
-  if (annotations) {
-    for (const a of annotations) {
-      if ((a.type === 'container_file_citation' || a.type === 'file_path') && a.fileId && a.label) {
-        annotationMap.set(a.label.toLowerCase(), a);
-      }
-    }
-  }
-
-  const DownloadLink: Components['a'] = ({ href, children }) => {
-    if (!href || href.startsWith('sandbox:')) {
-      const match = href ? findAnnotationByFilename(href, annotationMap) : undefined;
-      if (match?.fileId && onDownloadFile) {
-        return (
-          <a
-            href="#"
-            className={styles.link}
-            aria-label={`Télécharger ${match.label}`}
-            onClick={(e) => { e.preventDefault(); onDownloadFile(match.fileId!, match.label, match.containerId); }}
-          >
-            {children}
-          </a>
-        );
-      }
-      return <span className={styles.link}>{children}</span>;
-    }
-    return (
-      <a href={href} className={styles.link} target="_blank" rel="noopener noreferrer">
-        {children}
-      </a>
-    );
-  };
-
-  const DownloadImage: Components['img'] = ({ src, alt }) => {
-    if (!src || src.startsWith('sandbox:')) {
-      return null;
-    }
-    return <img src={src} alt={alt ?? ''} className={styles.image} />;
-  };
-
-  return { a: DownloadLink, img: DownloadImage };
-}
 
 // Custom list components
 const UnorderedList: Components['ul'] = ({ children }) => {
@@ -260,36 +207,67 @@ function ContentWithCitations({
   content, 
   annotations,
   onCitationClick,
-  onDownloadFile,
+  sources,
+  onTechnicalSourceClick,
 }: { 
   content: string; 
   annotations?: IAnnotation[];
   onCitationClick?: (index: number, annotation?: IAnnotation) => void;
-  onDownloadFile?: (fileId: string, fileName: string, containerId?: string) => void;
+  sources?: TechnicalSourceReference[];
+  onTechnicalSourceClick?: (source: TechnicalSourceReference) => void;
 }) {
-  const parsed = useMemo(
-    () => parseContentWithCitations(content, annotations),
-    [content, annotations]
+  const preparedContent = useMemo(
+    () => prepareTechnicalSourceContent(content, sources),
+    [content, sources]
   );
-
-  // Build components with download support for sandbox: URLs
-  const components = useMemo(() => {
-    if (onDownloadFile && annotations?.length) {
-      const downloadable = createDownloadableComponents(annotations, onDownloadFile);
-      return { ...baseComponents, ...downloadable };
-    }
-    return baseComponents;
-  }, [annotations, onDownloadFile]);
+  const parsed = useMemo(
+    () => parseContentWithCitations(preparedContent.content, annotations),
+    [preparedContent.content, annotations]
+  );
+  const sourceByHref = useMemo(
+    () => new Map(preparedContent.preparedSources.map(prepared => [
+      `#${prepared.marker}`,
+      prepared.source,
+    ])),
+    [preparedContent.preparedSources]
+  );
+  const technicalSourceRemarkPlugin = useMemo(
+    () => createTechnicalSourceRemarkPlugin(preparedContent.preparedSources),
+    [preparedContent.preparedSources]
+  );
+  const components = useMemo<Components>(() => ({
+    p: Paragraph,
+    ...baseComponents,
+    a: ({ href, children }) => {
+      const source = href ? sourceByHref.get(href) : undefined;
+      if (!source) return <Link href={href}>{children}</Link>;
+      if (!onTechnicalSourceClick) return <span>{children}</span>;
+      return (
+        <button
+          type="button"
+          className={styles.technicalSourceLink}
+          onClick={() => onTechnicalSourceClick(source)}
+          aria-label={`Ouvrir la source page ${source.displayPage}`}
+        >
+          {children}
+        </button>
+      );
+    },
+  }), [onTechnicalSourceClick, sourceByHref]);
+  const remarkPlugins = useMemo(
+    () => [remarkGfm, remarkBreaks, technicalSourceRemarkPlugin],
+    [technicalSourceRemarkPlugin]
+  );
 
   // If no citations, render plain markdown
   if (parsed.citations.length === 0) {
     return (
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={remarkPlugins}
         rehypePlugins={[rehypeSanitizeConfig]}
-        components={{ p: Paragraph, ...components }}
+        components={components}
       >
-        {content}
+        {preparedContent.content}
       </ReactMarkdown>
     );
   }
@@ -339,23 +317,24 @@ function ContentWithCitations({
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkBreaks]}
+      remarkPlugins={remarkPlugins}
       rehypePlugins={[rehypeSanitizeConfig]}
-      components={{ p: TextWithCitations, ...components }}
+      components={{ ...components, p: TextWithCitations }}
     >
       {parsed.processedText}
     </ReactMarkdown>
   );
 }
 
-export function Markdown({ content, annotations, onCitationClick, onDownloadFile }: MarkdownProps) {
+export function Markdown({ content, annotations, onCitationClick, sources, onTechnicalSourceClick }: MarkdownProps) {
   return (
     <div className={styles.markdown}>
       <ContentWithCitations 
         content={content} 
         annotations={annotations}
         onCitationClick={onCitationClick}
-        onDownloadFile={onDownloadFile}
+        sources={sources}
+        onTechnicalSourceClick={onTechnicalSourceClick}
       />
     </div>
   );

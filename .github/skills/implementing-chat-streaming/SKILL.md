@@ -1,205 +1,33 @@
 ---
 name: implementing-chat-streaming
-description: Provides SSE streaming patterns for the chat API and frontend. Use when implementing or modifying chat streaming, handling SSE events, or troubleshooting message flow between frontend and backend.
+description: Implement or review DiagLink Claude Direct chat streaming and SSE behavior.
 ---
 
-# Chat Streaming Implementation
+# Chat streaming
 
-## Backend: SSE Endpoint
+The only production chat runtime is `IClaudeDirectChatRuntime`.
 
-```csharp
-app.MapPost("/api/chat/stream", async (
-    ChatRequest request,
-    AgentFrameworkService agentService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    httpContext.Response.Headers.Append("Content-Type", "text/event-stream");
-    httpContext.Response.Headers.Append("Cache-Control", "no-cache");
-    
-    var conversationId = request.ConversationId 
-        ?? await agentService.CreateConversationAsync(request.Message, cancellationToken);
-    
-    // Send conversation ID first
-    await httpContext.Response.WriteAsync(
-        $"data: {{\"type\":\"conversationId\",\"conversationId\":\"{conversationId}\"}}\n\n", 
-        cancellationToken);
-    await httpContext.Response.Body.FlushAsync(cancellationToken);
-    
-    // Stream chunks
-    await foreach (var chunk in agentService.StreamMessageAsync(
-        conversationId, request.Message, request.ImageDataUris, cancellationToken))
-    {
-        var json = JsonSerializer.Serialize(new { type = "chunk", content = chunk });
-        await httpContext.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
-        await httpContext.Response.Body.FlushAsync(cancellationToken);
-    }
-    
-    await httpContext.Response.WriteAsync("data: {\"type\":\"done\"}\n\n", cancellationToken);
-})
-.RequireAuthorization("RequireChatScope");
-```
+Request flow:
 
-## Backend: IAsyncEnumerable Service
+1. authenticate and resolve the canonical user;
+2. resolve machine access and entitlement;
+3. reject non-resumable historical conversations;
+4. validate credit and PNG/JPEG attachments;
+5. rebuild context from SQL;
+6. resolve machine `toolbox.json`;
+7. call Claude Sonnet directly;
+8. stream text/tools/citations/visuals through SSE;
+9. persist messages, visuals, summaries and usage.
 
-**Actual return type**: `IAsyncEnumerable<StreamChunk>` (not raw strings)
+Preserve Toolbox MCP, File Search, machine Vector Stores and `get_page_image`. Never accept
+client-supplied machine AI configuration. Keep provider errors behind the existing SSE error mapping.
 
-**Why direct SDK?** Uses `ProjectResponsesClient` directly because we need typed access to MCP approvals, file search quotes, and citation annotations. See `.github/skills/researching-azure-ai-sdk/SKILL.md` for full rationale.
+Primary files:
 
-```csharp
-public async IAsyncEnumerable<StreamChunk> StreamMessageAsync(
-    string conversationId,
-    string message,
-    List<string>? imageDataUris = null,
-    [EnumeratorCancellation] CancellationToken cancellationToken = default)
-{
-    ObjectDisposedException.ThrowIf(_disposed, this);
-    
-    // Stream response - yields StreamChunk with text deltas OR annotations
-    await foreach (var update in responsesClient.CreateResponseStreamingAsync(...))
-    {
-        if (update is StreamingResponseOutputTextDeltaUpdate deltaUpdate)
-        {
-            yield return StreamChunk.Text(deltaUpdate.Delta);
-        }
-        else if (update is StreamingResponseOutputItemDoneUpdate itemDoneUpdate)
-        {
-            var annotations = ExtractAnnotations(itemDoneUpdate.Item, fileSearchQuotes);
-            if (annotations.Count > 0)
-            {
-                yield return StreamChunk.WithAnnotations(annotations);
-            }
-        }
-    }
-}
-```
-
-**StreamChunk model** (`backend/WebApp.Api/Models/StreamChunk.cs`):
-- `IsText` / `TextDelta` - Text content
-- `HasAnnotations` / `Annotations` - Citation metadata
-
-## Frontend: Action Flow
-
-```text
-CHAT_SEND_MESSAGE 
-  → CHAT_ADD_ASSISTANT_MESSAGE 
-  → CHAT_START_STREAM 
-  → (repeat CHAT_STREAM_CHUNK) 
-  → CHAT_STREAM_ANNOTATIONS (optional, for citations)
-  → CHAT_STREAM_COMPLETE (with usage metrics)
-```
-
-If user cancels: `CHAT_CANCEL_STREAM` sets status to `idle`.
-
-## Frontend: ChatService Pattern
-
-See: `frontend/src/services/ChatService.ts`
-
-Key patterns:
-- AbortController for cancellation
-- EventSource or fetch with ReadableStream
-- Parse SSE `data:` lines
-- Dispatch actions for each event type
-
-## Image Validation
-
-**Backend limits** (see `AzureAIAgentService.cs`):
-- Max 5 images per request
-- Max 5MB per image (decoded)
-- Allowed: `image/png`, `image/jpeg`, `image/gif`, `image/webp`
-
-**Frontend limits** (see `frontend/src/utils/fileAttachments.ts`):
-- Same limits with user-friendly error messages
-- Toast notifications for validation feedback
-
----
-
-## Project-Specific: Full Endpoint Implementation
-
-```csharp
-app.MapPost("/api/chat/stream", async (
-    ChatRequest request,
-    AgentFrameworkService agentService,
-    HttpContext httpContext,
-    IHostEnvironment env,
-    CancellationToken cancellationToken) =>
-{
-    httpContext.Response.Headers.Append("Content-Type", "text/event-stream");
-    httpContext.Response.Headers.Append("Cache-Control", "no-cache");
-    
-    var conversationId = request.ConversationId 
-        ?? await agentService.CreateConversationAsync(request.Message, cancellationToken);
-    
-    await httpContext.Response.WriteAsync(
-        $"data: {{\"type\":\"conversationId\",\"conversationId\":\"{conversationId}\"}}\n\n", 
-        cancellationToken);
-    await httpContext.Response.Body.FlushAsync(cancellationToken);
-    
-    await foreach (var chunk in agentService.StreamMessageAsync(
-        conversationId, request.Message, request.ImageDataUris, cancellationToken))
-    {
-        var json = System.Text.Json.JsonSerializer.Serialize(new { type = "chunk", content = chunk });
-        await httpContext.Response.WriteAsync($"data: {json}\n\n", cancellationToken);
-        await httpContext.Response.Body.FlushAsync(cancellationToken);
-    }
-    
-    await httpContext.Response.WriteAsync("data: {\"type\":\"done\"}\n\n", cancellationToken);
-})
-.RequireAuthorization("RequireChatScope")
-.WithName("StreamChatMessage");
-```
-
-## Project-Specific: Service Implementation
-
-**See**: `backend/WebApp.Api/Services/AgentFrameworkService.cs`
-
-**Key patterns in `StreamMessageAsync`**:
-- Disposal guard before processing
-- Multi-modal message support (text + image data URIs)
-- `IAsyncEnumerable<StreamChunk>` with `[EnumeratorCancellation]`
-- `StreamingResponseOutputTextDeltaUpdate` for text content
-- `StreamingResponseOutputItemDoneUpdate` for annotations
-- Collects file search quotes via `FileSearchCallResponseItem` for citation context
-- Usage captured from `StreamingResponseCompletedUpdate`
-
-## Project-Specific: Frontend State Flow
-
-```text
-CHAT_SEND_MESSAGE 
-  → CHAT_ADD_ASSISTANT_MESSAGE 
-  → CHAT_START_STREAM 
-  → (repeat CHAT_STREAM_CHUNK) 
-  → CHAT_STREAM_ANNOTATIONS (optional, for citations)
-  → CHAT_STREAM_COMPLETE (with usage: promptTokens, completionTokens, totalTokens, duration)
-```
-
-**Cancel**: `CHAT_CANCEL_STREAM` sets status to `idle` and re-enables input.
-
-**Error**: `CHAT_ERROR` with `AppError` containing message, optional retry action, timestamp.
-
-## SSE Event Types
-
-| Event Type | Payload | Description |
-|------------|---------|-------------|
-| `conversationId` | `{ conversationId: string }` | Sent first for new conversations |
-| `chunk` | `{ content: string }` | Text delta from agent response |
-| `annotations` | `{ annotations: [...] }` | Citations (uri_citation, file_citation, etc.) |
-| `usage` | `{ duration, promptTokens, completionTokens, totalTokens }` | Token metrics |
-| `done` | `{}` | Stream complete |
-| `error` | `{ message: string }` | Error occurred |
-
-## Project-Specific: Dev Logging
-
-Each state change prints (dev only):
-
-```text
-🔄 [HH:MM:SS] ACTION_TYPE
-Action: { … }
-Changes: { field: before → after }
-```
-
-## Related Skills
-
-- **writing-csharp-code** - Backend coding standards and AgentFrameworkService patterns
-- **writing-typescript-code** - Frontend React patterns and ChatService implementation
-- **troubleshooting-authentication** - Token acquisition for authenticated streaming
+- `backend/WebApp.Api/Program.cs`
+- `backend/WebApp.Api/Services/ClaudeDirectChatRuntime.cs`
+- `backend/WebApp.Api/Services/ClaudeDirectChatService.cs`
+- `backend/WebApp.Api/Services/ClaudeDirectMachineConfigurationResolver.cs`
+- `backend/WebApp.Api/Repositories/ConversationHistoryRepository.cs`
+- `frontend/src/services/chatService.ts`
+- `frontend/src/utils/sseParser.ts`

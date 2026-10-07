@@ -11,7 +11,6 @@ public class Machine
 
     // Columns present in the legacy dbo.Machines table we need to reuse
     public string? Reference { get; set; }
-    public string? FoundryAgentId { get; set; }
     public string? VectorStoreId { get; set; }
     public string? BlobPrefix { get; set; }
 
@@ -19,9 +18,8 @@ public class Machine
     public DateTime CreatedAtUtc { get; set; }
     public DateTime UpdatedAtUtc { get; set; }
     
-    // New legacy columns for Foundry configuration
+    // Machine-scoped Claude Direct configuration
     public string? ProjectEndpoint { get; set; }
-    public string? AgentVersion { get; set; }
 
     public Company? Company { get; set; }
 }

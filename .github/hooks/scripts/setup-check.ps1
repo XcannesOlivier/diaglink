@@ -78,12 +78,6 @@ try {
             if ($content -notmatch 'AzureAd__ClientId=\S') {
                 $issues += "AzureAd__ClientId is empty in backend/.env"
             }
-            if ($content -notmatch 'AI_AGENT_ENDPOINT=\S') {
-                $issues += "AI_AGENT_ENDPOINT is empty in backend/.env (backend will crash on first API call)"
-            }
-            if ($content -notmatch 'AI_AGENT_ID=\S') {
-                $issues += "AI_AGENT_ID is empty in backend/.env (backend will crash on first API call)"
-            }
         }
     }
 

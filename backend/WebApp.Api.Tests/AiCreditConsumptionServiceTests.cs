@@ -31,7 +31,7 @@ public class AiCreditConsumptionServiceTests
             await db.Database.EnsureCreatedAsync();
             // Legacy tables are excluded from EF migrations and need a local-only schema.
             await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Companies (Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Status TEXT NOT NULL, CreatedAt TEXT NOT NULL, UpdatedAt TEXT NOT NULL)");
-            await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Machines (Id TEXT PRIMARY KEY, CompanyId TEXT NOT NULL, Name TEXT NOT NULL, Status TEXT NOT NULL, Reference TEXT, FoundryAgentId TEXT, VectorStoreId TEXT, BlobPrefix TEXT, ProjectEndpoint TEXT, AgentVersion TEXT, CreatedAt TEXT NOT NULL, UpdatedAt TEXT NOT NULL)");
+            await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Machines (Id TEXT PRIMARY KEY, CompanyId TEXT NOT NULL, Name TEXT NOT NULL, Status TEXT NOT NULL, Reference TEXT, VectorStoreId TEXT, BlobPrefix TEXT, ProjectEndpoint TEXT, CreatedAt TEXT NOT NULL, UpdatedAt TEXT NOT NULL)");
             db.Companies.Add(new Company { Id=CompanyId, Name="test", Status="Active" });
             db.Machines.Add(new Machine { Id=MachineId, CompanyId=CompanyId, Name="test", Status="Active" });
             db.AiUsageRecords.Add(Usage(UsageId));

@@ -8,7 +8,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WebApp.Api\WebApp.Api.csproj" />
-    <Content Include="..\WebApp.Api\appsettings.json" Link="pricing-identity-settings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

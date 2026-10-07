@@ -74,6 +74,26 @@ public class AiUsageQueryServiceTests
     }
 
     [TestMethod]
+    public async Task SummaryExposesCacheTokenCategoriesAndTreatsLegacyNullsAsZero()
+    {
+        await using var db = Db();
+        var cached = Record();
+        cached.CacheReadInputTokens = 10;
+        cached.CacheCreationInputTokens = 50;
+        cached.CacheCreation5mInputTokens = 20;
+        cached.CacheCreation1hInputTokens = 30;
+        db.AddRange(cached, Record());
+        await db.SaveChangesAsync();
+
+        var metrics = (await new AiUsageQueryService(db).SummaryAsync(Filter, default)).Metrics;
+
+        Assert.AreEqual(10L, metrics.CacheReadInputTokens);
+        Assert.AreEqual(50L, metrics.CacheCreationInputTokens);
+        Assert.AreEqual(20L, metrics.CacheCreation5mInputTokens);
+        Assert.AreEqual(30L, metrics.CacheCreation1hInputTokens);
+    }
+
+    [TestMethod]
     public async Task MixedUsageAndHalfOpenPeriodAndType()
     {
         await using var db = Db(); var service = new AiUsageQueryService(db);

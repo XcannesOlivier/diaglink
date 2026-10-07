@@ -15,4 +15,5 @@ public class ConversationMessage
 
     public Conversation? Conversation { get; set; }
     public ICollection<ConversationMessageVisual> Visuals { get; set; } = new List<ConversationMessageVisual>();
+    public ICollection<ConversationMessageSourceReference> Sources { get; set; } = new List<ConversationMessageSourceReference>();
 }

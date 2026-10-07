@@ -28,13 +28,12 @@ describe('parseSseLine', () => {
     });
 
     it('preserves unknown usage separately from a measured zero', () => {
-      const unknown = parseSseLine('data: {"type":"usage","available":false,"completed":true,"promptTokens":null,"completionTokens":null,"totalTokens":null,"model":"deployment-a","agentVersion":"2"}');
+      const unknown = parseSseLine('data: {"type":"usage","available":false,"completed":true,"promptTokens":null,"completionTokens":null,"totalTokens":null,"model":"deployment-a"}');
       expect(unknown?.data.available).toBe(false);
       expect(unknown?.data.promptTokens).toBeNull();
       expect(unknown?.data.completionTokens).toBeNull();
       expect(unknown?.data.totalTokens).toBeNull();
       expect(unknown?.data.model).toBe('deployment-a');
-      expect(unknown?.data.agentVersion).toBe('2');
       const zero = parseSseLine('data: {"type":"usage","available":true,"promptTokens":0,"completionTokens":0,"totalTokens":0}');
       expect(zero?.data.available).toBe(true);
       expect(zero?.data.totalTokens).toBe(0);
@@ -60,24 +59,44 @@ describe('parseSseLine', () => {
     });
 
     it('parses an annotations event', () => {
-      const line = 'data: {"type":"annotations","annotations":[{"type":"uri_citation","label":"Test"}]}';
+      const line = 'data: {"type":"annotations","annotations":[{"type":"uri_citation","label":"Technical article","url":"https://example.test/article","quote":"Quoted passage"}]}';
       const result = parseSseLine(line);
 
       expect(result?.type).toBe('annotations');
       expect(result?.data.annotations).toHaveLength(1);
+      expect(result?.data.annotations[0]).toEqual({
+        type: 'uri_citation',
+        label: 'Technical article',
+        url: 'https://example.test/article',
+        quote: 'Quoted passage',
+      });
     });
 
-    it('parses a mcpApprovalRequest event', () => {
-      const line = 'data: {"type":"mcpApprovalRequest","id":"approval-123","toolName":"read_file","serverLabel":"FileSystem","arguments":"{\\"path\\":\\"/test\\"}","previousResponseId":"resp-456"}';
-      const result = parseSseLine(line);
+    it('parses and validates one source reference', () => {
+      const result = parseSseLine('data: {"type":"sources","sources":[{"id":123,"pdfPage":74,"displayPage":"72","label":"p. 72","startIndex":9,"endIndex":14,"displayOrder":0}]}');
 
-      expect(result?.type).toBe('mcpApprovalRequest');
-      expect(result?.data.id).toBe('approval-123');
-      expect(result?.data.toolName).toBe('read_file');
-      expect(result?.data.serverLabel).toBe('FileSystem');
-      expect(result?.data.arguments).toBe('{"path":"/test"}');
-      expect(result?.data.previousResponseId).toBe('resp-456');
+      expect(result?.type).toBe('sources');
+      expect(result?.data.sources).toEqual([expect.objectContaining({ id: 123, pdfPage: 74 })]);
     });
+
+    it('orders multiple sources and removes invalid private data', () => {
+      const result = parseSseLine('data: {"type":"sources","sources":[{"id":124,"pdfPage":75,"displayPage":"73","label":"p. 73","startIndex":22,"endIndex":27,"displayOrder":1},{"id":123,"pdfPage":74,"displayPage":"72","label":"p. 72","startIndex":9,"endIndex":14,"displayOrder":0,"sourceBlob":"private.pdf"}]}');
+
+      expect(result?.data.sources.map((source: { id: number }) => source.id)).toEqual([123, 124]);
+      expect(result?.data.sources[0]).not.toHaveProperty('sourceBlob');
+    });
+
+    it('normalizes empty or malformed sources to an empty list', () => {
+      expect(parseSseLine('data: {"type":"sources","sources":[]}')?.data.sources).toEqual([]);
+      expect(parseSseLine('data: {"type":"sources","sources":"invalid"}')?.data.sources).toEqual([]);
+    });
+
+    it('continues to tolerate unknown event types', () => {
+      const result = parseSseLine('data: {"type":"futureEvent","value":1}');
+
+      expect(result).toEqual({ type: 'futureEvent', data: { value: 1 } });
+    });
+
   });
 
   describe('invalid SSE lines', () => {

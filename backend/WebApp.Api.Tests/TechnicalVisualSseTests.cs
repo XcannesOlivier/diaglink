@@ -32,6 +32,17 @@ public class TechnicalVisualSseTests
         DisplayOrder = 1
     };
 
+    private static readonly ConversationMessageSourceReferenceInfo Source = new()
+    {
+        Id = 921,
+        PdfPage = 72,
+        DisplayPage = "70",
+        Label = "p. 70",
+        StartIndex = 123,
+        EndIndex = 128,
+        DisplayOrder = 0
+    };
+
     [TestMethod]
     public async Task NoVisuals_WritesNoVisualsEventAndPreservesDone()
     {
@@ -105,6 +116,54 @@ public class TechnicalVisualSseTests
         Assert.AreEqual("texte", chunk.RootElement.GetProperty("content").GetString());
         using var usage = JsonDocument.Parse(Events(response)[1]);
         Assert.AreEqual(12, usage.RootElement.GetProperty("duration").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task SourcesEvent_IsAfterVisualsAndBeforeDone()
+    {
+        var response = Response();
+
+        await TechnicalVisualSseWriter.WriteBeforeDoneAsync(
+            response,
+            [Full],
+            [Source],
+            default,
+            WriteDoneAsync);
+
+        CollectionAssert.AreEqual(new[] { "visuals", "sources", "done" }, EventTypes(response));
+        using var json = JsonDocument.Parse(Events(response)[1]);
+        var source = json.RootElement.GetProperty("sources")[0];
+        Assert.AreEqual(921, source.GetProperty("id").GetInt64());
+        Assert.AreEqual(72, source.GetProperty("pdfPage").GetInt32());
+        Assert.AreEqual("70", source.GetProperty("displayPage").GetString());
+        Assert.AreEqual("p. 70", source.GetProperty("label").GetString());
+        Assert.AreEqual(123, source.GetProperty("startIndex").GetInt32());
+        Assert.AreEqual(128, source.GetProperty("endIndex").GetInt32());
+        Assert.AreEqual(0, source.GetProperty("displayOrder").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task SourcesEvent_ContainsNoPrivateDocumentOrStorageData()
+    {
+        var response = Response();
+
+        await TechnicalVisualSseWriter.WriteBeforeDoneAsync(
+            response,
+            [],
+            [Source],
+            default,
+            WriteDoneAsync);
+
+        var payload = Events(response).Single(item => item.Contains("\"type\":\"sources\"", StringComparison.Ordinal));
+        using var json = JsonDocument.Parse(payload);
+        var source = json.RootElement.GetProperty("sources")[0];
+        CollectionAssert.AreEquivalent(
+            new[] { "id", "pdfPage", "displayPage", "label", "startIndex", "endIndex", "displayOrder" },
+            source.EnumerateObject().Select(property => property.Name).ToArray());
+        foreach (var forbidden in new[] { "documentId", "sourceBlob", "blob", "https://", "sig=", "sas", "foundry" })
+        {
+            Assert.IsFalse(payload.Contains(forbidden, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     private static HttpResponse Response()

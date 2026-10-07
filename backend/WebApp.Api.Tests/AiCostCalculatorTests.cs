@@ -25,6 +25,8 @@ public class AiCostCalculatorTests
     {
         Id = Guid.NewGuid(), Provider = "TestProvider", Model = "test-model", UsageType = type,
         InputPricePerMillion = 2m, OutputPricePerMillion = 5m, Currency = "USD",
+        CacheReadPricePerMillion = 0.2m, CacheCreation5mPricePerMillion = 2.5m,
+        CacheCreation1hPricePerMillion = 4m,
         EffectiveFromUtc = start ?? At.AddDays(-1), EffectiveToUtc = end, CreatedAtUtc = At
     };
     private static async Task Seed(DiagLinkDbContext db, params AiPricing[] prices)
@@ -39,6 +41,7 @@ public class AiCostCalculatorTests
         Assert.AreEqual(reason, result.FailureReason);
         Assert.IsNull(result.InputCost);
         Assert.IsNull(result.OutputCost);
+        Assert.IsNull(result.WebSearchCost);
         Assert.IsNull(result.RealAiCost);
     }
 
@@ -139,6 +142,7 @@ public class AiCostCalculatorTests
     [DataRow("InputTokensMissing")]
     [DataRow("OutputTokensMissing")]
     [DataRow("NegativeTokenCount")]
+    [DataRow("NegativeWebSearchRequestCount")]
     [DataRow("BlankProvider")]
     [DataRow("BlankModel")]
     public async Task InvalidUsageFailsBeforeAnyPricingQuery(string condition)
@@ -154,6 +158,7 @@ public class AiCostCalculatorTests
             case "InputTokensMissing": usage.InputTokens = null; break;
             case "OutputTokensMissing": usage.OutputTokens = null; break;
             case "NegativeTokenCount": usage.OutputTokens = -1; break;
+            case "NegativeWebSearchRequestCount": usage.WebSearchRequests = -1; break;
             case "BlankProvider": usage.Provider = " "; break;
             case "BlankModel": usage.Model = ""; break;
         }
@@ -225,5 +230,232 @@ public class AiCostCalculatorTests
         }
         await Seed(db, price);
         Failed(await new AiCostCalculator(db).CalculateAsync(usage), reason);
+    }
+
+    [TestMethod]
+    public async Task CacheCategoriesUseTheirOwnRatesAlongsideNormalInputAndOutput()
+    {
+        await using var db = Db();
+        await Seed(db, Price());
+        var usage = Usage();
+        usage.InputTokens = 1_000_000;
+        usage.OutputTokens = 1_000_000;
+        usage.CacheReadInputTokens = 1_000_000;
+        usage.CacheCreationInputTokens = 2_000_000;
+        usage.CacheCreation5mInputTokens = 1_000_000;
+        usage.CacheCreation1hInputTokens = 1_000_000;
+
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+
+        Assert.IsTrue(result.IsValuable);
+        Assert.AreEqual(2m, result.InputCost);
+        Assert.AreEqual(5m, result.OutputCost);
+        Assert.AreEqual(0.2m, result.CacheReadCost);
+        Assert.AreEqual(2.5m, result.CacheCreation5mCost);
+        Assert.AreEqual(4m, result.CacheCreation1hCost);
+        Assert.AreEqual(13.7m, result.RealAiCost);
+    }
+
+    [TestMethod]
+    public async Task ClaudeSonnet5CacheRatesProduceExpectedExactCost()
+    {
+        await using var db = Db();
+        var price = Price();
+        price.InputPricePerMillion = 2m;
+        price.OutputPricePerMillion = 10m;
+        price.CacheReadPricePerMillion = 0.2m;
+        price.CacheCreation5mPricePerMillion = 2.5m;
+        price.CacheCreation1hPricePerMillion = 4m;
+        await Seed(db, price);
+        var usage = Usage();
+        usage.InputTokens = 1_000_000;
+        usage.OutputTokens = 1_000_000;
+        usage.CacheReadInputTokens = 1_000_000;
+        usage.CacheCreationInputTokens = 2_000_000;
+        usage.CacheCreation5mInputTokens = 1_000_000;
+        usage.CacheCreation1hInputTokens = 1_000_000;
+
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+
+        Assert.IsTrue(result.IsValuable);
+        Assert.AreEqual(18.7m, result.RealAiCost);
+    }
+
+    [TestMethod]
+    public async Task LegacyUsageAndPricingWithoutCacheFieldsRemainValuable()
+    {
+        await using var db = Db();
+        var price = Price();
+        price.CacheReadPricePerMillion = null;
+        price.CacheCreation5mPricePerMillion = null;
+        price.CacheCreation1hPricePerMillion = null;
+        await Seed(db, price);
+        var usage = Usage();
+
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+
+        Assert.IsTrue(result.IsValuable);
+        Assert.AreEqual(0m, result.CacheReadCost);
+        Assert.AreEqual(0m, result.CacheCreation5mCost);
+        Assert.AreEqual(0m, result.CacheCreation1hCost);
+        Assert.AreEqual(0, result.CacheReadInputTokens);
+        Assert.AreEqual(0, result.CacheCreationInputTokens);
+    }
+
+    [TestMethod]
+    public async Task CacheReadIsNotFreeWithoutAnExplicitRate()
+    {
+        await using var db = Db();
+        var price = Price();
+        price.CacheReadPricePerMillion = null;
+        await Seed(db, price);
+        var usage = Usage();
+        usage.CacheReadInputTokens = 1;
+
+        Failed(await new AiCostCalculator(db).CalculateAsync(usage), "CacheReadPricingMissing");
+    }
+
+    [TestMethod]
+    public async Task ZeroWebSearchRequestsDoNotRequirePriceOrChangeExistingCost()
+    {
+        await using var db = Db();
+        await Seed(db, Price());
+        var usage = Usage();
+
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+
+        Assert.IsTrue(result.IsValuable);
+        Assert.AreEqual(0, result.WebSearchRequests);
+        Assert.AreEqual(0m, result.WebSearchCost);
+        Assert.AreEqual(0.0003m, result.RealAiCost);
+    }
+
+    [TestMethod]
+    public async Task WebSearchPriceCanBeNullOrPersistedWithoutChangingLegacyValuation()
+    {
+        await using var db = Db();
+        var legacy = Price();
+        legacy.Model = "legacy-model";
+        var configured = Price();
+        configured.Model = "configured-model";
+        configured.WebSearchPricePerRequest = 0.01234567m;
+        await Seed(db, legacy, configured);
+
+        var stored = await db.AiPricing.AsNoTracking().OrderBy(price => price.Model).ToArrayAsync();
+        Assert.AreEqual(0.01234567m, stored[0].WebSearchPricePerRequest);
+        Assert.IsNull(stored[1].WebSearchPricePerRequest);
+
+        var usage = Usage();
+        usage.Model = "legacy-model";
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+        Assert.IsTrue(result.IsValuable);
+        Assert.AreEqual(0.0003m, result.RealAiCost);
+    }
+
+    [TestMethod]
+    public async Task TwoWebSearchRequestsAtOneCentAddExactlyTwoCentsInPricingCurrency()
+    {
+        await using var db = Db();
+        var price = Price();
+        price.Currency = "EUR";
+        price.WebSearchPricePerRequest = 0.01m;
+        await Seed(db, price);
+        var usage = Usage();
+        usage.WebSearchRequests = 2;
+
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+
+        Assert.IsTrue(result.IsValuable);
+        Assert.AreEqual(2, result.WebSearchRequests);
+        Assert.AreEqual(0.02m, result.WebSearchCost);
+        Assert.AreEqual(0.0203m, result.RealAiCost);
+        Assert.AreEqual("EUR", result.Currency);
+    }
+
+    [TestMethod]
+    public async Task WebSearchCostIsAddedToTokenAndCacheComponents()
+    {
+        await using var db = Db();
+        var price = Price();
+        price.WebSearchPricePerRequest = 0.01m;
+        await Seed(db, price);
+        var usage = Usage();
+        usage.InputTokens = 1_000_000;
+        usage.OutputTokens = 1_000_000;
+        usage.CacheReadInputTokens = 1_000_000;
+        usage.CacheCreationInputTokens = 2_000_000;
+        usage.CacheCreation5mInputTokens = 1_000_000;
+        usage.CacheCreation1hInputTokens = 1_000_000;
+        usage.WebSearchRequests = 2;
+
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+
+        Assert.IsTrue(result.IsValuable);
+        Assert.AreEqual(0.02m, result.WebSearchCost);
+        Assert.AreEqual(13.72m, result.RealAiCost);
+    }
+
+    [TestMethod]
+    public async Task MultipleWebSearchRequestsMultiplyUnroundedUnitPrice()
+    {
+        await using var db = Db();
+        var price = Price();
+        price.WebSearchPricePerRequest = 0.01234567m;
+        await Seed(db, price);
+        var usage = Usage();
+        usage.WebSearchRequests = 3;
+
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+
+        Assert.IsTrue(result.IsValuable);
+        Assert.AreEqual(0.03703701m, result.WebSearchCost);
+        Assert.AreEqual(0.037337m, result.RealAiCost);
+    }
+
+    [TestMethod]
+    public async Task WebSearchRequestsRequireAnExplicitPrice()
+    {
+        await using var db = Db();
+        await Seed(db, Price());
+        var usage = Usage();
+        usage.WebSearchRequests = 1;
+
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+
+        Assert.AreEqual(1, result.WebSearchRequests);
+        Failed(result, "WebSearchPricingMissing");
+    }
+
+    [TestMethod]
+    public async Task NegativeWebSearchPriceIsInvalidEvenWithoutRequests()
+    {
+        await using var db = Db();
+        var price = Price();
+        price.WebSearchPricePerRequest = -0.01m;
+        await Seed(db, price);
+
+        Failed(await new AiCostCalculator(db).CalculateAsync(Usage()), "InvalidPricing");
+    }
+
+    [TestMethod]
+    public async Task FinalRoundingIncludesRawWebSearchCostBeforeRoundingOnce()
+    {
+        await using var db = Db();
+        var price = Price();
+        price.InputPricePerMillion = 0.4m;
+        price.OutputPricePerMillion = 0m;
+        price.WebSearchPricePerRequest = 0.0000001m;
+        await Seed(db, price);
+        var usage = Usage();
+        usage.InputTokens = 1;
+        usage.OutputTokens = 0;
+        usage.WebSearchRequests = 1;
+
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+
+        Assert.IsTrue(result.IsValuable);
+        Assert.AreEqual(0.0000004m, result.InputCost);
+        Assert.AreEqual(0.0000001m, result.WebSearchCost);
+        Assert.AreEqual(0.000001m, result.RealAiCost);
     }
 }

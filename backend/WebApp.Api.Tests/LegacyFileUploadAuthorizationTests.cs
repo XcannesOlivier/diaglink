@@ -105,6 +105,7 @@ public sealed class LegacyFileUploadAuthorizationTests
                 }));
             builder.ConfigureTestServices(services =>
             {
+                services.RemoveWindowsEventLogProvider();
                 services.RemoveAll<DiagLinkDbContext>();
                 services.RemoveAll<DbContextOptions<DiagLinkDbContext>>();
                 services.RemoveAll<IDbContextOptionsConfiguration<DiagLinkDbContext>>();

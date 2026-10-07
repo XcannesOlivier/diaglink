@@ -122,6 +122,10 @@ export function AiUsagePanel({ scope = 'super-admin', companyName, selectedCompa
         <div className={mergeClasses(styles.metrics, isCompany && styles.companyMetrics)}>
           {[
             ['Tokens connus', formatUsageTokens(m.totalTokens)], ['Input', formatUsageTokens(m.inputTokens)],
+            ['Cache lu', formatUsageTokens(m.cacheReadInputTokens ?? null)],
+            ['Cache créé', formatUsageTokens(m.cacheCreationInputTokens ?? null)],
+            ['Cache 5 min', formatUsageTokens(m.cacheCreation5mInputTokens ?? null)],
+            ['Cache 1 h', formatUsageTokens(m.cacheCreation1hInputTokens ?? null)],
             ['Output', formatUsageTokens(m.outputTokens)],
             ...(!isCompany ? [['Réponses IA', m.chatResponseCount.toLocaleString('fr-FR')]] : []),
           ].map(([label, value]) => <div key={label} className={styles.metric}>
@@ -151,7 +155,7 @@ export function AiUsagePanel({ scope = 'super-admin', companyName, selectedCompa
           {!isCompany && <><th scope="col">Réponses IA</th><th scope="col">Vision</th><th scope="col">Résumés</th></>}
           {!showMachines && <th scope="col">Machines</th>}
           {!machine && <th scope="col">Utilisateurs</th>}
-          {machine && <><th scope="col">Input</th><th scope="col">Output</th></>}
+          {machine && <><th scope="col">Input</th><th scope="col">Cache lu</th><th scope="col">Cache créé</th><th scope="col">Cache 5 min</th><th scope="col">Cache 1 h</th><th scope="col">Output</th></>}
           <th scope="col">Tokens</th>{!isCompany && <th scope="col">Usages inconnus</th>}
         </tr></thead>
         <tbody>{rows.data.map(row => <tr key={row.id ?? 'unassigned'}>
@@ -161,7 +165,7 @@ export function AiUsagePanel({ scope = 'super-admin', companyName, selectedCompa
           }}>{row.name}</Button>}</td>
           {!isCompany && <><td>{row.metrics.chatResponseCount}</td><td>{row.metrics.visionToolCount}</td><td>{row.metrics.conversationSummaryCount}</td></>}
           {!showMachines && <td>{row.machines}</td>}{!machine && <td>{row.users}</td>}
-          {machine && <><td>{formatUsageTokens(row.metrics.inputTokens)}</td><td>{formatUsageTokens(row.metrics.outputTokens)}</td></>}
+          {machine && <><td>{formatUsageTokens(row.metrics.inputTokens)}</td><td>{formatUsageTokens(row.metrics.cacheReadInputTokens ?? null)}</td><td>{formatUsageTokens(row.metrics.cacheCreationInputTokens ?? null)}</td><td>{formatUsageTokens(row.metrics.cacheCreation5mInputTokens ?? null)}</td><td>{formatUsageTokens(row.metrics.cacheCreation1hInputTokens ?? null)}</td><td>{formatUsageTokens(row.metrics.outputTokens)}</td></>}
           <td>{formatUsageTokens(row.metrics.totalTokens)}{row.metrics.knownUsageCount > 0 && row.metrics.unknownUsageCount > 0 && ' (partiel)'}</td>
           {!isCompany && <td>{row.metrics.unknownUsageCount}</td>}
         </tr>)}</tbody>

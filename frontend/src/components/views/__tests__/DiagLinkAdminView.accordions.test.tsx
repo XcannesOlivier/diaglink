@@ -52,6 +52,11 @@ describe('DiagLinkAdminView primary accordions', () => {
   const openPrimarySections = () => primaryDetails()
     .filter(details => details.open)
     .map(details => details.dataset.primarySection as AdminSection);
+  const statisticsButton = () => container.querySelector<HTMLButtonElement>('button[aria-controls]')!;
+  const openSections = () => [
+    ...(statisticsButton().getAttribute('aria-expanded') === 'true' ? ['statistics' as AdminSection] : []),
+    ...openPrimarySections(),
+  ];
   const summary = (section: AdminSection) => container
     .querySelector<HTMLDetailsElement>(`[data-primary-section="${section}"]`)!
     .querySelector<HTMLElement>(':scope > summary')!;
@@ -64,30 +69,34 @@ describe('DiagLinkAdminView primary accordions', () => {
 
   it('allows zero or one primary section to be open', async () => {
     await act(async () => root.render(<DiagLinkAdminView />));
-    const statistics = container.querySelector<HTMLButtonElement>('button[aria-controls]')!;
+    const statistics = statisticsButton();
 
     expect(statistics.getAttribute('aria-expanded')).toBe('false');
-    expect(openPrimarySections()).toEqual([]);
+    expect(openSections()).toEqual([]);
 
     await click(summary('globalConsumption'));
-    expect(openPrimarySections()).toEqual(['globalConsumption']);
+    expect(openSections()).toEqual(['globalConsumption']);
 
     await click(summary('machineConsumption'));
-    expect(openPrimarySections()).toEqual(['machineConsumption']);
+    expect(openSections()).toEqual(['machineConsumption']);
 
     await click(statistics);
-    expect(statistics.getAttribute('aria-expanded')).toBe('true');
-    expect(openPrimarySections()).toEqual([]);
+    expect(openSections()).toEqual(['statistics']);
+
+    await click(statistics);
+    expect(openSections()).toEqual([]);
+
+    await click(statistics);
+    expect(openSections()).toEqual(['statistics']);
 
     await click(summary('technical'));
-    expect(statistics.getAttribute('aria-expanded')).toBe('false');
-    expect(openPrimarySections()).toEqual(['technical']);
+    expect(openSections()).toEqual(['technical']);
 
     await click(summary('repairs'));
-    expect(openPrimarySections()).toEqual(['repairs']);
+    expect(openSections()).toEqual(['repairs']);
 
     await click(summary('repairs'));
-    expect(openPrimarySections()).toEqual([]);
+    expect(openSections()).toEqual([]);
 
   });
 

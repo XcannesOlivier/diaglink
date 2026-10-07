@@ -1,9 +1,10 @@
 # Post-stream usage persistence and billing
 
-POST /api/chat/stream collects ChatResponse, VisionTool and ConversationSummary in the
-same measurement dictionary. The summary callback uses its own EventId; Vision uses
-each capture's EventId. All pass through one finally block and one coordinator,
-AiUsagePersistenceBillingService.ProcessAsync. There is no per-type billing branch.
+POST /api/chat/stream collects ChatResponse and ConversationSummary in the same
+measurement dictionary. The summary callback uses its own EventId. Both pass through
+one finally block and one coordinator, AiUsagePersistenceBillingService.ProcessAsync.
+There is no per-type billing branch. Historical VisionTool records remain readable and
+billable through the common SQL, pricing and reporting pipeline.
 
 The normal path sends and flushes WriteDoneEvent before entering finally. Error and
 disconnect paths also enter finally to retain identified/completed technical usages.

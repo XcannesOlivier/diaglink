@@ -7,7 +7,8 @@ public record AdminMachineCredit(Guid Id,string Name,decimal? Used,decimal? Rema
 public record AdminFinanceOverview(decimal WalletBalance,AdminMachineCredit[] Machines);
 public record AdminFinanceTechnical(DateTime FromUtc,DateTime ToUtc,int UsageCount,int UnvaluedCount,int UnconvertedCount,
     decimal RealCostEur,decimal CommercialConsumedEur,decimal WalletCoveredRealCostEur,decimal EstimatedWalletMarginEur,
-    long InputTokens,long OutputTokens,int UnknownTokens,object[] Breakdown,object[] Providers);
+    long InputTokens,long OutputTokens,long CacheReadInputTokens,long CacheCreationInputTokens,
+    long CacheCreation5mInputTokens,long CacheCreation1hInputTokens,int UnknownTokens,object[] Breakdown,object[] Providers);
 
 /// <summary>Read-only projections; all valuation uses the existing financial services.</summary>
 public static class AdminFinanceReader
@@ -121,6 +122,10 @@ public static class AdminFinanceReader
         var commercial=entries.Sum(e=>e.CommercialCreditAmount??0);var covered=entries.Sum(e=>e.RealAiCost??0);
         return Results.Ok(new AdminFinanceTechnical(from,to,usages.Length,unvalued,unconverted,real,commercial,covered,commercial-covered,
             usages.Where(u=>u.Available).Sum(u=>(long?)u.InputTokens??0),usages.Where(u=>u.Available).Sum(u=>(long?)u.OutputTokens??0),
+            usages.Where(u=>u.Available).Sum(u=>(long?)u.CacheReadInputTokens??0),
+            usages.Where(u=>u.Available).Sum(u=>(long?)u.CacheCreationInputTokens??0),
+            usages.Where(u=>u.Available).Sum(u=>(long?)u.CacheCreation5mInputTokens??0),
+            usages.Where(u=>u.Available).Sum(u=>(long?)u.CacheCreation1hInputTokens??0),
             usages.Count(u=>!u.Available||u.InputTokens==null||u.OutputTokens==null),
             usages.GroupBy(u=>u.UsageType).Select(g=>(object)new{Type=g.Key.ToString(),Count=g.Count()}).ToArray(),
             usages.GroupBy(u=>new{u.Provider,u.Model}).Select(g=>(object)new{g.Key.Provider,g.Key.Model,Count=g.Count()}).ToArray()));

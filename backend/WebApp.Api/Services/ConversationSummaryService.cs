@@ -11,9 +11,7 @@ namespace WebApp.Api.Services;
 public class ConversationSummaryService
 {
     /// <summary>
-    /// Number of most-recent non-summarized messages always kept verbatim. Shared (internal) with
-    /// <see cref="WebApp.Api.Program"/>, which uses the same count to size the "recent messages"
-    /// window injected into the model's context — the two must stay in sync by construction.
+    /// Number of most-recent non-summarized messages always kept verbatim after summarization.
     /// </summary>
     internal const int KeepRawMessageCount = 6;
 
@@ -23,17 +21,20 @@ public class ConversationSummaryService
     /// <summary>Non-summarized message count that triggers a batch summarization.</summary>
     private const int TriggerCount = KeepRawMessageCount + SummaryBatchSize; // 12
 
+    /// <summary>Maximum number of non-summarized messages injected before summarization triggers.</summary>
+    internal const int MaxContextMessageCount = TriggerCount - 1; // 11
+
     private readonly ConversationHistoryRepository _historyRepository;
-    private readonly AgentFrameworkService _agentService;
+    private readonly IConversationSummarizer _summarizer;
     private readonly ILogger<ConversationSummaryService> _logger;
 
     public ConversationSummaryService(
         ConversationHistoryRepository historyRepository,
-        AgentFrameworkService agentService,
+        IConversationSummarizer summarizer,
         ILogger<ConversationSummaryService> logger)
     {
         _historyRepository = historyRepository;
-        _agentService = agentService;
+        _summarizer = summarizer;
         _logger = logger;
     }
 
@@ -66,7 +67,7 @@ public class ConversationSummaryService
         var existingSummary = await _historyRepository.GetTechnicalSummaryAsync(conversationId, cancellationToken);
 
         // Capture separately before SQL writes, including unknown usage if the model call fails.
-        var newSummary = await _agentService.SummarizeConversationAsync(existingSummary, toSummarize, cancellationToken, onUsage);
+        var newSummary = await _summarizer.SummarizeConversationAsync(existingSummary, toSummarize, cancellationToken, onUsage);
 
         await _historyRepository.UpdateTechnicalSummaryAsync(conversationId, newSummary.Text, cancellationToken);
         await _historyRepository.MarkMessagesSummarizedAsync(toSummarize.Select(m => m.Id), cancellationToken);

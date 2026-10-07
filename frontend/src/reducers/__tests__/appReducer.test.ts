@@ -334,187 +334,6 @@ describe('appReducer', () => {
     });
   });
 
-  describe('CHAT_MCP_APPROVAL_REQUEST', () => {
-    it('adds approval message with mcpApproval data', () => {
-      const state = createInitialState();
-      const approvalRequest = {
-        id: 'approval-123',
-        toolName: 'read_file',
-        serverLabel: 'File System',
-        arguments: '{"path": "/test"}',
-      };
-      const action: AppAction = {
-        type: 'CHAT_MCP_APPROVAL_REQUEST',
-        messageId: 'msg-1',
-        approvalRequest,
-        previousResponseId: 'prev-response-1',
-      };
-
-      const result = appReducer(state, action);
-
-      expect(result.chat.messages).toHaveLength(1);
-      expect(result.chat.messages[0].role).toBe('approval');
-      expect(result.chat.messages[0].mcpApproval).toBeDefined();
-      expect(result.chat.messages[0].mcpApproval?.toolName).toBe('read_file');
-      expect(result.chat.messages[0].mcpApproval?.serverLabel).toBe('File System');
-    });
-
-    it('sets status to idle', () => {
-      const state = createInitialState();
-      state.chat.status = 'streaming';
-      const approvalRequest = {
-        id: 'approval-123',
-        toolName: 'test_tool',
-        serverLabel: 'Test',
-      };
-
-      const result = appReducer(state, {
-        type: 'CHAT_MCP_APPROVAL_REQUEST',
-        messageId: 'msg-1',
-        approvalRequest,
-        previousResponseId: null,
-      });
-
-      expect(result.chat.status).toBe('idle');
-    });
-
-    it('disables chat input until approval', () => {
-      const state = createInitialState();
-      state.ui.chatInputEnabled = true;
-      const approvalRequest = {
-        id: 'approval-123',
-        toolName: 'test_tool',
-        serverLabel: 'Test',
-      };
-
-      const result = appReducer(state, {
-        type: 'CHAT_MCP_APPROVAL_REQUEST',
-        messageId: 'msg-1',
-        approvalRequest,
-        previousResponseId: null,
-      });
-
-      expect(result.ui.chatInputEnabled).toBe(false);
-    });
-
-    it('handles null previousResponseId', () => {
-      const state = createInitialState();
-      const approvalRequest = {
-        id: 'approval-123',
-        toolName: 'test_tool',
-        serverLabel: 'Test',
-      };
-
-      const result = appReducer(state, {
-        type: 'CHAT_MCP_APPROVAL_REQUEST',
-        messageId: 'msg-1',
-        approvalRequest,
-        previousResponseId: null,
-      });
-
-      expect(result.chat.messages[0].mcpApproval?.previousResponseId).toBe('');
-    });
-  });
-
-  describe('CHAT_MCP_APPROVAL_RESOLVED', () => {
-    it('sets resolved to approved on matching approval message', () => {
-      const state = createInitialState();
-      state.chat.messages = [
-        createMockMessage({
-          id: 'approval-msg-1',
-          role: 'approval',
-          mcpApproval: {
-            id: 'req-123',
-            toolName: 'read_file',
-            serverLabel: 'FS',
-            previousResponseId: 'prev-1',
-          },
-        }),
-      ];
-
-      const result = appReducer(state, {
-        type: 'CHAT_MCP_APPROVAL_RESOLVED',
-        approvalRequestId: 'req-123',
-        resolved: 'approved',
-      });
-
-      expect(result.chat.messages[0].mcpApproval?.resolved).toBe('approved');
-    });
-
-    it('sets resolved to rejected on matching approval message', () => {
-      const state = createInitialState();
-      state.chat.messages = [
-        createMockMessage({
-          id: 'approval-msg-1',
-          role: 'approval',
-          mcpApproval: {
-            id: 'req-456',
-            toolName: 'write_file',
-            serverLabel: 'FS',
-            previousResponseId: 'prev-1',
-          },
-        }),
-      ];
-
-      const result = appReducer(state, {
-        type: 'CHAT_MCP_APPROVAL_RESOLVED',
-        approvalRequestId: 'req-456',
-        resolved: 'rejected',
-      });
-
-      expect(result.chat.messages[0].mcpApproval?.resolved).toBe('rejected');
-    });
-
-    it('does not change non-matching messages', () => {
-      const state = createInitialState();
-      const otherMsg = createMockMessage({ id: 'other-msg', role: 'user', content: 'Hello' });
-      const approvalMsg = createMockMessage({
-        id: 'approval-msg',
-        role: 'approval',
-        mcpApproval: {
-          id: 'req-999',
-          toolName: 'tool',
-          serverLabel: 'S',
-          previousResponseId: '',
-        },
-      });
-      state.chat.messages = [otherMsg, approvalMsg];
-
-      const result = appReducer(state, {
-        type: 'CHAT_MCP_APPROVAL_RESOLVED',
-        approvalRequestId: 'req-999',
-        resolved: 'approved',
-      });
-
-      expect(result.chat.messages[0]).toEqual(otherMsg);
-      expect(result.chat.messages[1].mcpApproval?.resolved).toBe('approved');
-    });
-
-    it('does not crash with non-existent approvalRequestId', () => {
-      const state = createInitialState();
-      state.chat.messages = [
-        createMockMessage({
-          id: 'approval-msg',
-          role: 'approval',
-          mcpApproval: {
-            id: 'req-existing',
-            toolName: 'tool',
-            serverLabel: 'S',
-            previousResponseId: '',
-          },
-        }),
-      ];
-
-      const result = appReducer(state, {
-        type: 'CHAT_MCP_APPROVAL_RESOLVED',
-        approvalRequestId: 'req-nonexistent',
-        resolved: 'approved',
-      });
-
-      expect(result.chat.messages[0].mcpApproval?.resolved).toBeUndefined();
-    });
-  });
-
   describe('CHAT_STREAM_COMPLETE', () => {
     it('sets status to idle', () => {
       const state = createInitialState();
@@ -524,7 +343,7 @@ describe('appReducer', () => {
 
       const action: AppAction = {
         type: 'CHAT_STREAM_COMPLETE',
-        usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150, duration: 1234 },
+        messageId: 'msg-1',
       };
 
       const result = appReducer(state, action);
@@ -539,7 +358,7 @@ describe('appReducer', () => {
 
       const action: AppAction = {
         type: 'CHAT_STREAM_COMPLETE',
-        usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150, duration: 1234 },
+        messageId: 'msg-1',
       };
 
       const result = appReducer(state, action);
@@ -555,7 +374,7 @@ describe('appReducer', () => {
 
       const action: AppAction = {
         type: 'CHAT_STREAM_COMPLETE',
-        usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150, duration: 1234 },
+        messageId: 'msg-1',
       };
 
       const result = appReducer(state, action);
@@ -563,18 +382,21 @@ describe('appReducer', () => {
       expect(result.ui.chatInputEnabled).toBe(true);
     });
 
-    it('adds usage info and duration to the message', () => {
+    it('records usage without completing the stream', () => {
       const state = createInitialState();
+      state.chat.status = 'streaming';
       state.chat.streamingMessageId = 'msg-1';
       state.chat.messages = [createMockMessage({ id: 'msg-1', role: 'assistant' })];
 
       const usage = { promptTokens: 100, completionTokens: 50, totalTokens: 150, duration: 1234 };
-      const action: AppAction = { type: 'CHAT_STREAM_COMPLETE', usage };
+      const action: AppAction = { type: 'CHAT_STREAM_USAGE', messageId: 'msg-1', usage };
 
       const result = appReducer(state, action);
 
       expect(result.chat.messages[0].more?.usage).toEqual(usage);
       expect(result.chat.messages[0].duration).toBe(1234);
+      expect(result.chat.status).toBe('streaming');
+      expect(result.chat.streamingMessageId).toBe('msg-1');
     });
   });
 
@@ -614,6 +436,48 @@ describe('appReducer', () => {
       });
       expect(result.chat.messages[0].visuals?.map(visual => visual.id)).toEqual([1, 2]);
       expect(result.chat.messages[0].visuals?.[0].name).toBe('tile.png');
+    });
+  });
+
+  describe('CHAT_STREAM_SOURCES', () => {
+    it('associates ordered sources only with the addressed assistant message', () => {
+      const state = createInitialState();
+      state.chat.messages = [
+        createMockMessage({ id: 'assistant', role: 'assistant', sources: [] }),
+        createMockMessage({ id: 'other', role: 'assistant', sources: [] }),
+      ];
+      const sources = [
+        { id: 124, pdfPage: 75, displayPage: '73', label: 'p. 73', startIndex: 20, endIndex: 25, displayOrder: 1 },
+        { id: 123, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: 9, endIndex: 14, displayOrder: 0 },
+      ];
+
+      const result = appReducer(state, { type: 'CHAT_STREAM_SOURCES', messageId: 'assistant', sources });
+
+      expect(result.chat.messages[0].sources?.map(source => source.id)).toEqual([123, 124]);
+      expect(result.chat.messages[1].sources).toEqual([]);
+    });
+
+    it('keeps the response streaming through usage, visuals, and sources until complete', () => {
+      const initial = createInitialState();
+      initial.chat.status = 'streaming';
+      initial.chat.streamingMessageId = 'assistant';
+      initial.chat.messages = [createMockMessage({ id: 'assistant', role: 'assistant', sources: [] })];
+      const usage = { promptTokens: 10, completionTokens: 5, totalTokens: 15, duration: 100 };
+      const visual = { id: 1, documentId: 'manual', page: 74, assetType: 'full' as const, tile: null, name: 'page.png', displayOrder: 0 };
+      const source = { id: 123, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: 9, endIndex: 14, displayOrder: 0 };
+
+      const afterUsage = appReducer(initial, { type: 'CHAT_STREAM_USAGE', messageId: 'assistant', usage });
+      const afterVisuals = appReducer(afterUsage, { type: 'CHAT_STREAM_VISUALS', messageId: 'assistant', visuals: [visual] });
+      const afterSources = appReducer(afterVisuals, { type: 'CHAT_STREAM_SOURCES', messageId: 'assistant', sources: [source] });
+
+      expect(afterUsage.chat.status).toBe('streaming');
+      expect(afterVisuals.chat.status).toBe('streaming');
+      expect(afterSources.chat.status).toBe('streaming');
+      expect(afterSources.chat.messages[0]).toMatchObject({ visuals: [{ id: 1 }], sources: [{ id: 123 }] });
+
+      const completed = appReducer(afterSources, { type: 'CHAT_STREAM_COMPLETE', messageId: 'assistant' });
+      expect(completed.chat.status).toBe('idle');
+      expect(completed.chat.streamingMessageId).toBeUndefined();
     });
   });
 
@@ -1105,10 +969,9 @@ describe('appReducer', () => {
         }),
       ];
 
-      const result = appReducer(state, {
-        type: 'CHAT_STREAM_COMPLETE',
-        usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150, duration: 1234 },
-      });
+      const usage = { promptTokens: 100, completionTokens: 50, totalTokens: 150, duration: 1234 };
+      const withUsage = appReducer(state, { type: 'CHAT_STREAM_USAGE', messageId: 'assistant-1', usage });
+      const result = appReducer(withUsage, { type: 'CHAT_STREAM_COMPLETE', messageId: 'assistant-1' });
 
       const msg = result.chat.messages[0];
       expect(msg.retryAttempt).toBeUndefined();
@@ -1339,7 +1202,7 @@ describe('appReducer', () => {
 
       const result = appReducer(state, {
         type: 'CHAT_STREAM_COMPLETE',
-        usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30, duration: 500 },
+        messageId: 'assistant-1',
       });
 
       expect(result.chat.messages[0].activeToolUse).toBeUndefined();

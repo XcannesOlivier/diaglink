@@ -9,7 +9,7 @@ using WebApp.Api.Models;
 
 namespace WebApp.Api.Services;
 
-public class BlobStorageService : ITechnicalVisualBlobReader
+public class BlobStorageService : ITechnicalVisualBlobReader, ITechnicalDocumentBlobReader
 {
     private readonly BlobServiceClient _client;
     private readonly IPdfPageCounter _pageCounter;
@@ -111,6 +111,42 @@ public class BlobStorageService : ITechnicalVisualBlobReader
             blobName.Contains('\\') ||
             blobName.Any(char.IsControl) ||
             !blobName.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+            Uri.TryCreate(blobName, UriKind.Absolute, out _))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await _client
+                .GetBlobContainerClient("documents")
+                .GetBlobClient(blobName)
+                .OpenReadAsync(cancellationToken: cancellationToken);
+        }
+        catch (Azure.RequestFailedException)
+        {
+            return null;
+        }
+    }
+
+    public Task<Stream?> OpenPageMapAsync(string blobName, CancellationToken cancellationToken) =>
+        OpenPrivateDocumentAssetAsync(blobName, "/page-map.json", cancellationToken);
+
+    public Task<Stream?> OpenPdfAsync(string blobName, CancellationToken cancellationToken) =>
+        OpenPrivateDocumentAssetAsync(blobName, ".pdf", cancellationToken);
+
+    private async Task<Stream?> OpenPrivateDocumentAssetAsync(
+        string blobName,
+        string requiredSuffix,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(blobName) ||
+            blobName.StartsWith('/') ||
+            blobName.StartsWith('\\') ||
+            blobName.Contains("..", StringComparison.Ordinal) ||
+            blobName.Contains('\\') ||
+            blobName.Any(char.IsControl) ||
+            !blobName.EndsWith(requiredSuffix, StringComparison.OrdinalIgnoreCase) ||
             Uri.TryCreate(blobName, UriKind.Absolute, out _))
         {
             return null;

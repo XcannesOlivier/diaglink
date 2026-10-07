@@ -1,12 +1,12 @@
 export interface IChatItem {
   id: string;
-  role?: 'user' | 'assistant' | 'approval';
+  role?: 'user' | 'assistant';
   content: string;
   duration?: number; // response time in ms
   attachments?: IFileAttachment[]; // File attachments
   annotations?: IAnnotation[]; // Citations/references from AI agent
   visuals?: TechnicalVisual[]; // Technical illustrations selected by the agent
-  mcpApproval?: IMcpApprovalRequest; // MCP tool approval request
+  sources?: TechnicalSourceReference[]; // Verified private PDF references from the backend
   activeToolUse?: string; // Currently active tool (e.g. "file_search", "code_interpreter")
   retryAttempt?: number; // Current retry attempt (set during retries)
   maxRetries?: number; // Max retry attempts (set during retries)
@@ -26,13 +26,14 @@ export interface TechnicalVisual {
   displayOrder: number;
 }
 
-export interface IMcpApprovalRequest {
-  id: string;
-  toolName: string;
-  serverLabel: string;
-  arguments?: string;
-  previousResponseId?: string;
-  resolved?: 'approved' | 'rejected';
+export interface TechnicalSourceReference {
+  id: number;
+  pdfPage: number;
+  displayPage: string;
+  label: string;
+  startIndex: number;
+  endIndex: number;
+  displayOrder: number;
 }
 
 export interface IUsageInfo {
@@ -44,7 +45,6 @@ export interface IUsageInfo {
   completed?: boolean;
   model?: string | null;
   modelSource?: string | null;
-  agentVersion?: string | null;
 }
 
 export interface IFileAttachment {
@@ -55,16 +55,14 @@ export interface IFileAttachment {
 
 /** Citation/annotation from AI agent responses (Azure AI Agent SDK annotation types). */
 export interface IAnnotation {
-  /** Type: "uri_citation", "file_citation", "file_path", or "container_file_citation" */
-  type: 'uri_citation' | 'file_citation' | 'file_path' | 'container_file_citation';
+  /** Type: "uri_citation" or "file_citation" */
+  type: 'uri_citation' | 'file_citation';
   /** Display label (title or filename) */
   label: string;
   /** URL for URI citations */
   url?: string;
   /** File ID for file citations */
   fileId?: string;
-  /** Container ID for container file citations (code interpreter outputs) */
-  containerId?: string;
   /** Placeholder text in the response to replace (e.g., "【4:0†source】") */
   textToReplace?: string;
   /** Start index in the text where the citation applies */
@@ -76,6 +74,11 @@ export interface IAnnotation {
 }
 
 // Agent metadata types
+export interface IAgentCapabilities {
+  imageAttachments: boolean;
+  fileAttachments: boolean;
+}
+
 export interface IAgentMetadata {
   id: string;
   object: string;
@@ -91,4 +94,5 @@ export interface IAgentMetadata {
    * If not set in Microsoft Foundry, defaults will be used in the UI.
    */
   starterPrompts?: string[] | null;
+  capabilities: IAgentCapabilities;
 }

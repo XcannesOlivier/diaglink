@@ -1,4 +1,4 @@
----
+﻿---
 name: writing-csharp-code
 description: Provides C# and ASP.NET Core coding standards for this repository. Use when writing or modifying C# code, implementing API endpoints, configuring middleware, or working with authentication in the backend.
 ---
@@ -68,13 +68,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 ## Async Best Practices
 
 ```csharp
-// ✅ Use async/await with CancellationToken
+// âœ… Use async/await with CancellationToken
 public async Task<Result> ProcessAsync(Request req, CancellationToken ct)
 {
     return await _service.ExecuteAsync(req, ct);
 }
 
-// ❌ Never block on async
+// âŒ Never block on async
 var result = _service.ExecuteAsync(req).Result;  // WRONG
 ```
 
@@ -142,17 +142,17 @@ See: `backend/WebApp.Api/Models/ErrorResponse.cs`
 
 ## Common Mistakes
 
-- ❌ Using `.Result` or `.Wait()` on async methods
-- ❌ Forgetting `CancellationToken` parameter
-- ❌ Missing `.RequireAuthorization()` on endpoints
-- ❌ Exposing internal errors in production
-- ❌ Forgetting disposal guards in `IDisposable`
+- âŒ Using `.Result` or `.Wait()` on async methods
+- âŒ Forgetting `CancellationToken` parameter
+- âŒ Missing `.RequireAuthorization()` on endpoints
+- âŒ Exposing internal errors in production
+- âŒ Forgetting disposal guards in `IDisposable`
 
 ---
 
 ## Project-Specific: Middleware Pipeline
 
-**Goal**: Serve static files → validate auth → route APIs → SPA fallback
+**Goal**: Serve static files â†’ validate auth â†’ route APIs â†’ SPA fallback
 
 ```csharp
 app.UseDefaultFiles();     // index.html for /
@@ -164,83 +164,9 @@ app.UseAuthorization();    // Enforce scope
 app.MapFallbackToFile("index.html");  // MUST BE LAST
 ```
 
-## Project-Specific: AgentFrameworkService
+## Project-Specific: Claude Direct
 
-**See**: `backend/WebApp.Api/Services/AgentFrameworkService.cs`
-
-**SDK Packages**:
-- `Azure.AI.Projects` — Main entry point, v2 Agents API (see `*.csproj` for version)
-- `Azure.AI.Projects.Agents` — `ProjectsAgentVersion`, `DeclarativeAgentDefinition`, `AgentAdministrationClient`
-- `Azure.AI.Extensions.OpenAI` — `ProjectOpenAIClient`, `ProjectConversationsClient`, `ProjectResponsesClient`
-
-**Sub-namespaces**: `Azure.AI.Projects.Agents`, `Azure.AI.Extensions.OpenAI`, `OpenAI.Responses`
-
-**Key patterns**:
-- `IDisposable` implementation
-- Disposal guards (`ObjectDisposedException.ThrowIf`) in all public methods
-- Environment-aware credential selection (ChainedTokenCredential vs ManagedIdentityCredential vs OnBehalfOfCredential)
-- Static-cached `ProjectsAgentVersion` resolved once per process via `SemaphoreSlim`
-- Configuration validation (`AI_AGENT_ENDPOINT`, `AI_AGENT_ID`, optional `AI_AGENT_VERSION`)
-
-**Agent Loading** (direct SDK):
-```csharp
-// Load agent metadata directly from v2 Agents API.
-// NOTE: the REST spec has no "latest" keyword — the agent_version path parameter is a
-// plain string. To resolve the newest version, enumerate versions in descending order
-// and take the first. Pin a specific version by passing its id to GetAgentVersionAsync.
-ProjectsAgentVersion? agentVersion = null;
-await foreach (var v in projectClient.AgentAdministrationClient.GetAgentVersionsAsync(
-    agentName: agentId,
-    limit: 1,
-    order: AgentListOrder.Descending,
-    after: null,
-    before: null,
-    cancellationToken: ct))
-{
-    agentVersion = v;
-    break;
-}
-
-// Access definition for model/instructions/structured inputs
-var definition = agentVersion?.Definition as DeclarativeAgentDefinition;
-```
-
-**Streaming** (direct ProjectResponsesClient — required for specialized types):
-```csharp
-// Direct SDK for streaming — IChatClient doesn't expose MCP/annotations.
-// Pin to the resolved agentVersion.Version so streaming and metadata stay in sync.
-ProjectResponsesClient responsesClient = projectClient.ProjectOpenAIClient.GetProjectResponsesClientForAgent(
-    new AgentReference(agentId, agentVersion.Version), conversationId);
-```
-
-**Why direct streaming?** The `IChatClient` abstraction doesn't expose:
-- `McpToolCallApprovalRequestItem` for MCP approval flows
-- `FileSearchCallResponseItem` for file search quotes
-- `MessageResponseItem.OutputTextAnnotations` for citations
-
-**Streaming Pattern**: Returns `IAsyncEnumerable<StreamChunk>` where `StreamChunk` contains either:
-- Text delta (`chunk.IsText`, `chunk.TextDelta`)
-- Annotations/citations (`chunk.HasAnnotations`, `chunk.Annotations`)
-
-**Streaming Response Types** (from `OpenAI.Responses`):
-- `StreamingResponseOutputTextDeltaUpdate` - Text content delta
-- `StreamingResponseOutputItemDoneUpdate` - Item completion (has annotations)
-- `StreamingResponseCompletedUpdate` - Response completion with usage stats
-
-**Image Validation** (in `BuildUserMessage()`):
-- Maximum 5 images per request
-- Maximum 5MB per image (decoded size)
-- Allowed: `image/png`, `image/jpeg`, `image/gif`, `image/webp`
-- Returns HTTP 400 with validation details if constraints violated
-
-**Annotation Types** (from `OpenAI.Responses`): 
-- `UriCitationMessageAnnotation` - Bing, Azure AI Search, SharePoint
-- `FileCitationMessageAnnotation` - File search (vector stores)
-- `FilePathMessageAnnotation` - Code interpreter output
-- `ContainerFileCitationMessageAnnotation` - Container file citations
-
-**Starter Prompts**: Parsed from agent metadata (`starterPrompts` key, newline-separated).
-
+The production runtime is `IClaudeDirectChatRuntime`. Keep machine configuration server-owned and resolve Toolbox MCP, File Search and `get_page_image` through `ClaudeDirectMachineConfigurationResolver`. Provider HTTP details belong in `ClaudeDirectChatService`; endpoints consume provider-neutral `StreamChunk` values.
 ## Project-Specific: Configuration Loading
 
 Auto-load `.env` file before building configuration:
@@ -259,87 +185,9 @@ if (File.Exists(envFile))
 }
 ```
 
-## Troubleshooting SDK Issues
+## Troubleshooting AI integration
 
-**When things break**: SDK type mismatches and missing methods almost always happen after a package upgrade. Check `backend/WebApp.Api/WebApp.Api.csproj` for current versions:
-
-- `Azure.AI.Projects` - check `WebApp.Api.csproj` for current version
-- `Azure.Identity` - check `WebApp.Api.csproj` for current version
-
-If types don't match documentation or samples, verify you're looking at docs for the **same version** installed in the project.
-
-### GitHub SDK Source (For Deep Dives)
-
-When you need to understand SDK internals, fetch the actual source:
-
-- **Azure.AI.Projects**: https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/ai/Azure.AI.Projects/src
-- **SDK samples**: https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/ai/Azure.AI.Agents.Persistent/samples
-- **OpenAI.Responses**: https://github.com/openai/openai-dotnet/tree/main/src
-
-### Quick Structure Checks (CLI)
-
-For project-level overviews only—use sparingly:
-
-```powershell
-# List public types in backend (overview, not deep exploration)
-Get-ChildItem -Path backend -Recurse -Include *.cs | 
-    Select-String -Pattern "^\s*(public|internal)\s+(class|record|interface)\s+(\w+)" |
-    ForEach-Object { $_.Matches.Groups[3].Value } | Sort-Object -Unique
-
-# Find IDisposable implementations
-Get-ChildItem -Path backend -Recurse -Include *.cs |
-    Select-String -Pattern ":\s*.*IDisposable"
-```
-
-**Use for**: Quick inventory of what exists. Follow up with pattern search or IDE navigation for understanding.
-
-### PowerShell Reflection for .NET Assemblies
-
-Use when you need to discover exact type members on any .NET assembly (especially beta SDKs):
-
-```powershell
-# 1. Build first to ensure DLLs are current
-cd backend/WebApp.Api; dotnet build --no-restore
-
-# 2. Find and load any assembly by name
-$dll = Get-ChildItem -Path "bin/Debug" -Recurse -Filter "SomePackage.dll" | Select-Object -First 1
-$asm = [System.Reflection.Assembly]::LoadFrom($dll.FullName)
-
-# 3. Inspect a specific type's properties
-$type = $asm.GetType("SomeNamespace.SomeClass")
-Write-Host "Type: $($type.FullName)"
-Write-Host "Assembly: $($asm.GetName().Name) v$($asm.GetName().Version)"
-$type.GetProperties() | ForEach-Object { Write-Host "  $($_.PropertyType.Name) $($_.Name)" }
-
-# 4. Check base type for inherited members
-Write-Host "Base: $($type.BaseType.Name)"
-$type.BaseType.GetProperties() | ForEach-Object { Write-Host "    $($_.PropertyType.Name) $($_.Name)" }
-```
-
-**Finding types by pattern** (when you don't know exact namespace):
-
-```powershell
-# Search for types matching a pattern
-$asm.GetTypes() | Where-Object { $_.Name -like "*Response*" } | ForEach-Object { Write-Host $_.FullName }
-
-# Find methods on a type
-$type.GetMethods() | Where-Object { $_.Name -like "*Async*" } | Select-Object Name, ReturnType
-```
-
-**Common assemblies to inspect** (after `dotnet build`):
-
-| Assembly | Path | Contains |
-|----------|------|----------|
-| `Azure.AI.Projects.dll` | bin/Debug/net10.0/ | AIProjectClient, AgentReference |
-| `Azure.AI.Projects.Agents.dll` | bin/Debug/net10.0/ | AgentAdministrationClient, ProjectsAgentVersion, DeclarativeAgentDefinition |
-| `Azure.AI.Extensions.OpenAI.dll` | bin/Debug/net10.0/ | ProjectOpenAIClient, ProjectConversationsClient, ProjectResponsesClient |
-| `OpenAI.dll` | bin/Debug/net10.0/ | ResponseItem, StreamingResponse*, annotations |
-| `Azure.Identity.dll` | bin/Debug/net10.0/ | Credential types |
-
-**When to use**: Beta SDK properties aren't in docs, IDE tooltips are incomplete, or you need to verify a type's actual API surface.
-
-**Limitation**: Returns raw API surface without intent or usage guidance. Combine with GitHub source for context.
-
+Inspect `ClaudeDirectChatService`, toolbox marker validation and the provider-neutral request/result models. Never log bearer tokens, MCP secrets, document identifiers or raw tool arguments.
 ## Related Skills
 
 - **implementing-chat-streaming** - SSE streaming patterns and backend endpoint implementation

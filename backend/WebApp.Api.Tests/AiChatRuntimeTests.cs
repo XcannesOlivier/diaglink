@@ -1,151 +1,11 @@
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Text.Json;
 using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
 using WebApp.Api.Services;
 
 namespace WebApp.Api.Tests;
-
-[TestClass]
-public sealed class AiChatRuntimeSelectorTests
-{
-    [TestMethod]
-    public void EmptyConfiguration_SelectsHostedAgent()
-    {
-        var selector = Selector();
-
-        Assert.AreEqual(AiChatRuntime.HostedAgent, selector.Select(Machine()));
-    }
-
-    [TestMethod]
-    public void NonEnabledMachine_SelectsHostedAgent()
-    {
-        var selector = Selector(Guid.NewGuid());
-
-        Assert.AreEqual(AiChatRuntime.HostedAgent, selector.Select(Machine()));
-    }
-
-    [TestMethod]
-    public void EnabledMachine_SelectsClaudeDirect()
-    {
-        var machine = Machine();
-        var selector = Selector(machine.Id);
-
-        Assert.AreEqual(AiChatRuntime.ClaudeDirect, selector.Select(machine));
-    }
-
-    [TestMethod]
-    public void MissingResolvedMachine_SelectsHostedAgent()
-    {
-        var selector = Selector(Guid.NewGuid());
-
-        Assert.AreEqual(AiChatRuntime.HostedAgent, selector.Select(null));
-    }
-
-    [TestMethod]
-    public void MachineNameCannotEnableClaudeDirect()
-    {
-        var enabled = Machine(name: "DX10z");
-        var sameNameDifferentId = Machine(name: "DX10z");
-        var selector = Selector(enabled.Id);
-
-        Assert.AreEqual(AiChatRuntime.HostedAgent, selector.Select(sameNameDifferentId));
-    }
-
-    [TestMethod]
-    public void FrontendContractCannotChooseRuntime()
-    {
-        Assert.IsNull(typeof(ChatRequest).GetProperty("Runtime"));
-        Assert.IsNull(typeof(ChatRequest).GetProperty("AiChatRuntime"));
-        Assert.AreEqual(typeof(Machine), typeof(IAiChatRuntimeSelector)
-            .GetMethod(nameof(IAiChatRuntimeSelector.Select))!.GetParameters().Single().ParameterType);
-    }
-
-    [TestMethod]
-    public void HostedDispatch_DoesNotInvokeClaudeDirect()
-    {
-        var hosted = 0;
-        var direct = 0;
-
-        _ = AiChatRuntimeDispatch.SelectStream(
-            AiChatRuntime.HostedAgent,
-            () => Counted(() => hosted++),
-            () => Counted(() => direct++));
-
-        Assert.AreEqual(1, hosted);
-        Assert.AreEqual(0, direct);
-    }
-
-    [TestMethod]
-    public void ClaudeDirectDispatch_DoesNotInvokeHostedAgent()
-    {
-        var hosted = 0;
-        var direct = 0;
-
-        _ = AiChatRuntimeDispatch.SelectStream(
-            AiChatRuntime.ClaudeDirect,
-            () => Counted(() => hosted++),
-            () => Counted(() => direct++));
-
-        Assert.AreEqual(0, hosted);
-        Assert.AreEqual(1, direct);
-    }
-
-    [TestMethod]
-    public async Task ClaudeDirectFailure_DoesNotFallbackToHostedAgent()
-    {
-        var hosted = 0;
-        var stream = AiChatRuntimeDispatch.SelectStream(
-            AiChatRuntime.ClaudeDirect,
-            () => Counted(() => hosted++),
-            Failing);
-
-        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () => await Collect(stream));
-        Assert.AreEqual(0, hosted);
-    }
-
-    private static AiChatRuntimeSelector Selector(params Guid[] enabled) =>
-        new(Options.Create(new ClaudeDirectChatOptions { EnabledMachineIds = enabled }));
-
-    private static Machine Machine(string name = "Machine") => new()
-    {
-        Id = Guid.NewGuid(),
-        CompanyId = Guid.NewGuid(),
-        Name = name,
-        Status = "active",
-        CreatedAtUtc = DateTime.UtcNow,
-        UpdatedAtUtc = DateTime.UtcNow
-    };
-
-    private static IAsyncEnumerable<StreamChunk> Counted(Action count)
-    {
-        count();
-        return One();
-
-        static async IAsyncEnumerable<StreamChunk> One()
-        {
-            await Task.Yield();
-            yield return StreamChunk.Text("ok");
-        }
-    }
-
-    private static async IAsyncEnumerable<StreamChunk> Failing()
-    {
-        await Task.Yield();
-        throw new InvalidOperationException("direct failed");
-#pragma warning disable CS0162
-        yield break;
-#pragma warning restore CS0162
-    }
-
-    private static async Task<List<StreamChunk>> Collect(IAsyncEnumerable<StreamChunk> stream)
-    {
-        var chunks = new List<StreamChunk>();
-        await foreach (var chunk in stream)
-            chunks.Add(chunk);
-        return chunks;
-    }
-}
 
 [TestClass]
 public sealed class ClaudeDirectChatRuntimeTests
@@ -160,6 +20,20 @@ public sealed class ClaudeDirectChatRuntimeTests
         Assert.AreSame(fixture.Machine, fixture.Factory.Machine);
         Assert.AreEqual("question", fixture.Factory.Messages!.Single().Text);
         Assert.AreEqual("user", fixture.Factory.Messages!.Single().Role);
+    }
+
+    [TestMethod]
+    public async Task UserImagesFlowToClaudeDirectRequestWithoutToolIndirection()
+    {
+        var fixture = Fixture(Result(finalText: "answer"));
+        var images = new[] { new ClaudeDirectUserImage("image/png", "iVBORw0KGgo=") };
+
+        await Collect(fixture.Runtime.StreamMessageAsync(fixture.Machine, "inspect", default, images));
+
+        var message = fixture.Factory.Messages!.Single();
+        Assert.AreEqual("inspect", message.Text);
+        Assert.AreSame(images, message.Images);
+        Assert.AreEqual(1, fixture.Service.CallCount);
     }
 
     [TestMethod]
@@ -251,6 +125,69 @@ public sealed class ClaudeDirectChatRuntimeTests
     }
 
     [TestMethod]
+    public async Task SourcesUseInternalStreamChunkContract()
+    {
+        var source = new TechnicalSourceReference("manual", 72, "70", "p. 70", 10, 15, 0);
+        var fixture = Fixture(Result(sources: [source]));
+
+        var chunks = await Collect(fixture.Runtime.StreamMessageAsync(fixture.Machine, "question"));
+
+        Assert.AreSame(source, chunks.Single(chunk => chunk.HasSources).Sources!.Single());
+    }
+
+    [TestMethod]
+    public async Task WebCitationUsesExistingAnnotationStreamContract()
+    {
+        var citation = new ClaudeDirectWebCitation(
+            "https://example.test/technical-article",
+            "Technical article",
+            "Quoted technical passage");
+        var fixture = Fixture(Result(webCitations: [citation]));
+
+        var chunks = await Collect(fixture.Runtime.StreamMessageAsync(fixture.Machine, "question"));
+
+        var annotation = chunks.Single(chunk => chunk.HasAnnotations).Annotations!.Single();
+        Assert.AreEqual("uri_citation", annotation.Type);
+        Assert.AreEqual("Technical article", annotation.Label);
+        Assert.AreEqual("https://example.test/technical-article", annotation.Url);
+        Assert.AreEqual("Quoted technical passage", annotation.Quote);
+        Assert.IsNull(annotation.FileId);
+        Assert.IsFalse(chunks.Any(chunk => chunk.HasSources));
+    }
+
+    [TestMethod]
+    public async Task ResponseWithoutWebCitationProducesNoAnnotationChunk()
+    {
+        var fixture = Fixture(Result());
+
+        var chunks = await Collect(fixture.Runtime.StreamMessageAsync(fixture.Machine, "question"));
+
+        Assert.IsFalse(chunks.Any(chunk => chunk.HasAnnotations));
+    }
+
+    [TestMethod]
+    public async Task PdfSourcesRemainSeparateFromWebCitationAnnotations()
+    {
+        var source = new TechnicalSourceReference("manual", 72, "70", "p. 70", 10, 15, 0);
+        var citation = new ClaudeDirectWebCitation(
+            "https://example.test/web-source",
+            "Web source",
+            "Web passage");
+        var fixture = Fixture(Result(sources: [source], webCitations: [citation]));
+
+        var chunks = await Collect(fixture.Runtime.StreamMessageAsync(fixture.Machine, "question"));
+
+        var sourceChunk = chunks.Single(chunk => chunk.HasSources);
+        var annotationChunk = chunks.Single(chunk => chunk.HasAnnotations);
+        Assert.AreSame(source, sourceChunk.Sources!.Single());
+        Assert.HasCount(1, sourceChunk.Sources!);
+        Assert.HasCount(1, annotationChunk.Annotations!);
+        Assert.AreEqual("https://example.test/web-source", annotationChunk.Annotations![0].Url);
+        Assert.IsNull(sourceChunk.Annotations);
+        Assert.IsNull(annotationChunk.Sources);
+    }
+
+    [TestMethod]
     public async Task AggregateUsageBecomesSingleChatResponse()
     {
         var fixture = Fixture(Result(input: 100, output: 25));
@@ -263,6 +200,46 @@ public sealed class ClaudeDirectChatRuntimeTests
         Assert.AreEqual(100, usages[0].InputTokens);
         Assert.AreEqual(25, usages[0].OutputTokens);
         Assert.AreEqual(125, usages[0].TotalTokens);
+    }
+
+    [TestMethod]
+    public async Task UsageContainsOnlyAllowedPerCallBreakdownFieldsWithoutChangingTotals()
+    {
+        var calls = new ClaudeDirectCallUsage[]
+        {
+            new(1, 10, 2, "claude-returned", "tool_use", "response-secret", "request-secret")
+            {
+                CacheReadInputTokens = 3,
+                CacheCreationInputTokens = 5,
+                CacheCreation5mInputTokens = 4,
+                CacheCreation1hInputTokens = 1,
+                Tools = ["file_search"]
+            },
+            new(2, 20, 5, "claude-returned", "end_turn", "response-final", "request-final")
+            {
+                Tools = []
+            }
+        };
+        var fixture = Fixture(Result(input: 30, output: 7, calls: calls));
+
+        var chunks = await Collect(fixture.Runtime.StreamMessageAsync(fixture.Machine, "question"));
+        var usage = chunks.Single(chunk => chunk.Usage is not null).Usage!;
+
+        Assert.AreEqual(30, usage.InputTokens);
+        Assert.AreEqual(7, usage.OutputTokens);
+        Assert.AreEqual(37, usage.TotalTokens);
+        Assert.IsNotNull(usage.CallBreakdownJson);
+        using var document = JsonDocument.Parse(usage.CallBreakdownJson);
+        var serializedCalls = document.RootElement.EnumerateArray().ToArray();
+        Assert.HasCount(2, serializedCalls);
+        CollectionAssert.AreEquivalent(
+            new[] { "callNumber", "inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "cacheCreation5mInputTokens", "cacheCreation1hInputTokens", "totalTokens", "model", "stopReason", "tools" },
+            serializedCalls[0].EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.AreEqual(12, serializedCalls[0].GetProperty("totalTokens").GetInt64());
+        Assert.AreEqual("file_search", serializedCalls[0].GetProperty("tools")[0].GetString());
+        Assert.AreEqual(3, serializedCalls[0].GetProperty("cacheReadInputTokens").GetInt64());
+        Assert.IsFalse(usage.CallBreakdownJson.Contains("response-secret", StringComparison.Ordinal));
+        Assert.IsFalse(usage.CallBreakdownJson.Contains("request-secret", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -279,13 +256,36 @@ public sealed class ClaudeDirectChatRuntimeTests
     }
 
     [TestMethod]
-    public async Task ClaudeDirectNeverProducesVisionUsage()
+    public async Task UsageCarriesAggregateCacheTokenCategories()
+    {
+        var fixture = Fixture(Result(input: 10, output: 2, cacheRead: 30, cacheCreation5m: 40, cacheCreation1h: 50));
+
+        var chunks = await Collect(fixture.Runtime.StreamMessageAsync(fixture.Machine, "question"));
+        var usage = chunks.Single(chunk => chunk.Usage is not null).Usage!;
+
+        Assert.AreEqual(30, usage.CacheReadInputTokens);
+        Assert.AreEqual(90, usage.CacheCreationInputTokens);
+        Assert.AreEqual(40, usage.CacheCreation5mInputTokens);
+        Assert.AreEqual(50, usage.CacheCreation1hInputTokens);
+    }
+
+    [TestMethod]
+    public async Task WebSearchRequestsFlowIntoInternalResponseUsage()
+    {
+        var fixture = Fixture(Result(webSearchRequests: 3));
+
+        var chunks = await Collect(fixture.Runtime.StreamMessageAsync(fixture.Machine, "question"));
+
+        Assert.AreEqual(3, chunks.Single(chunk => chunk.Usage is not null).Usage!.WebSearchRequests);
+    }
+
+    [TestMethod]
+    public async Task ClaudeDirectNeverProducesSeparateVisionUsage()
     {
         var fixture = Fixture(Result(visuals: [new("manual", 75, "full", null, "page.png", "manual/page.png")]));
 
         var chunks = await Collect(fixture.Runtime.StreamMessageAsync(fixture.Machine, "question"));
 
-        Assert.IsFalse(chunks.Any(chunk => chunk.VisionUsage is not null));
         Assert.IsFalse(chunks.Any(chunk => chunk.Usage?.UsageType == AiUsageType.VisionTool));
     }
 
@@ -374,20 +374,44 @@ public sealed class ClaudeDirectChatRuntimeTests
         IReadOnlyList<ClaudeDirectToolUse>? toolUses = null,
         IReadOnlyList<ClaudeDirectMcpCall>? mcpCalls = null,
         IReadOnlyList<TechnicalVisualReference>? visuals = null,
+        IReadOnlyList<TechnicalSourceReference>? sources = null,
+        IReadOnlyList<ClaudeDirectWebCitation>? webCitations = null,
         IReadOnlyList<ClaudeDirectError>? errors = null,
         long input = 10,
         long output = 5,
-        string model = "claude-returned") => new(
+        long cacheRead = 0,
+        long cacheCreation5m = 0,
+        long cacheCreation1h = 0,
+        long webSearchRequests = 0,
+        string model = "claude-returned",
+        IReadOnlyList<ClaudeDirectCallUsage>? calls = null) => new(
             finalText,
             toolUses ?? [],
             mcpCalls ?? [],
             visuals ?? [],
+            sources ?? [],
             [],
-            [new(1, input, output, model, "end_turn", "response-1", "request-1")],
-            new(input, output, input + output),
+            calls ?? [new(1, input, output, model, "end_turn", "response-1", "request-1")
+            {
+                CacheReadInputTokens = cacheRead,
+                CacheCreationInputTokens = cacheCreation5m + cacheCreation1h,
+                CacheCreation5mInputTokens = cacheCreation5m,
+                CacheCreation1hInputTokens = cacheCreation1h
+            }],
+            new(input, output, input + output)
+            {
+                CacheReadInputTokens = cacheRead,
+                CacheCreationInputTokens = cacheCreation5m + cacheCreation1h,
+                CacheCreation5mInputTokens = cacheCreation5m,
+                CacheCreation1hInputTokens = cacheCreation1h,
+                WebSearchRequests = webSearchRequests
+            },
             model,
             "end_turn",
-            errors ?? []);
+            errors ?? [])
+        {
+            WebCitations = webCitations ?? []
+        };
 
     private static async Task<List<StreamChunk>> Collect(IAsyncEnumerable<StreamChunk> stream)
     {

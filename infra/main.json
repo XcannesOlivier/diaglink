@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "1103848923325056690"
+      "templateHash": "8633344796082865393"
     }
   },
   "parameters": {
@@ -22,20 +22,6 @@
       "minLength": 1,
       "metadata": {
         "description": "Primary location for all resources"
-      }
-    },
-    "aiAgentEndpoint": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "AI Agent endpoint (auto-discovered by preprovision hook)"
-      }
-    },
-    "aiAgentId": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "AI Agent ID (configured via azd env set AI_AGENT_ID)"
       }
     },
     "entraTenantId": {
@@ -1230,12 +1216,6 @@
           "containerRegistryName": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'infrastructure'), '2025-04-01').outputs.containerRegistryName.value]"
           },
-          "aiAgentEndpoint": {
-            "value": "[parameters('aiAgentEndpoint')]"
-          },
-          "aiAgentId": {
-            "value": "[parameters('aiAgentId')]"
-          },
           "entraSpaClientId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'entra-app'), '2025-04-01').outputs.clientAppId.value]"
           },
@@ -1308,7 +1288,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "11490761715006211774"
+              "templateHash": "12187522161239179700"
             }
           },
           "parameters": {
@@ -1325,12 +1305,6 @@
               "type": "string"
             },
             "containerRegistryName": {
-              "type": "string"
-            },
-            "aiAgentEndpoint": {
-              "type": "string"
-            },
-            "aiAgentId": {
               "type": "string"
             },
             "entraSpaClientId": {
@@ -1430,13 +1404,6 @@
             }
           },
           "variables": {
-            "copy": [
-              {
-                "name": "pricingIdentityEnvGroups",
-                "count": "[length(variables('pricingIdentities'))]",
-                "input": "[createArray(createObject('name', format('AiPricingIdentity__Deployments__{0}__ProjectEndpoint', copyIndex('pricingIdentityEnvGroups')), 'value', variables('pricingIdentities')[copyIndex('pricingIdentityEnvGroups')].ProjectEndpoint), createObject('name', format('AiPricingIdentity__Deployments__{0}__Deployment', copyIndex('pricingIdentityEnvGroups')), 'value', variables('pricingIdentities')[copyIndex('pricingIdentityEnvGroups')].Deployment), createObject('name', format('AiPricingIdentity__Deployments__{0}__Provider', copyIndex('pricingIdentityEnvGroups')), 'value', variables('pricingIdentities')[copyIndex('pricingIdentityEnvGroups')].Provider))]"
-              }
-            ],
             "$fxv#0": {
               "resourcesResourceGroups": "rg-",
               "containerRegistryRegistries": "cr",
@@ -1445,60 +1412,6 @@
               "operationalInsightsWorkspaces": "law-",
               "insightsComponents": "appi-",
               "managedIdentityUserAssignedIdentities": "id-"
-            },
-            "$fxv#1": {
-              "AiPricingIdentity": {
-                "Deployments": [
-                  {
-                    "ProjectEndpoint": "https://diaglink-foundry-prod.services.ai.azure.com/api/projects/entreprise-001-demo",
-                    "Deployment": "claude-sonnet-5",
-                    "Provider": "Anthropic"
-                  },
-                  {
-                    "ProjectEndpoint": "https://diaglink-foundry-prod.services.ai.azure.com/api/projects/entreprise-002-demo",
-                    "Deployment": "claude-sonnet-5",
-                    "Provider": "Anthropic"
-                  },
-                  {
-                    "ProjectEndpoint": "https://claude-assistant-techni-resource.services.ai.azure.com/api/projects/claude-assistant-technique",
-                    "Deployment": "claude-sonnet-5",
-                    "Provider": "Anthropic"
-                  }
-                ]
-              },
-              "Logging": {
-                "LogLevel": {
-                  "Default": "Information",
-                  "Microsoft.AspNetCore": "Warning",
-                  "Microsoft.Identity": "Information",
-                  "WebApp.Api.Services": "Debug"
-                }
-              },
-              "AllowedHosts": "*",
-              "AzureAd": {
-                "Instance": "https://login.microsoftonline.com/",
-                "TenantId": "PLACEHOLDER_SET_VIA_ENTRA_TENANT_ID_ENV_VAR",
-                "ClientId": "PLACEHOLDER_SET_VIA_ENTRA_SPA_CLIENT_ID_ENV_VAR",
-                "Audience": "PLACEHOLDER_WILL_BE_SET_BY_ENVIRONMENT"
-              },
-              "ConnectionStrings": {
-                "DiagLink": "PLACEHOLDER_SET_VIA_ENV_VAR_OR_USER_SECRETS"
-              },
-              "AI_AGENT_ENDPOINT": "PLACEHOLDER_SET_VIA_ENV_VAR_OR_AZD_PREPROVISION",
-              "AI_AGENT_ID": "PLACEHOLDER_SET_VIA_ENV_VAR_OR_AZD_PREPROVISION",
-              "Email": {
-                "AcsEndpoint": "PLACEHOLDER_SET_VIA_ENV_VAR_Email__AcsEndpoint",
-                "SenderAddress": "PLACEHOLDER_SET_VIA_ENV_VAR_Email__SenderAddress"
-              },
-              "Contact": {
-                "RecipientAddress": ""
-              },
-              "CORS": {
-                "AllowedOrigins": [
-                  "http://localhost:5173",
-                  "http://localhost:8080"
-                ]
-              }
             },
             "abbrs": "[variables('$fxv#0')]",
             "baseEnv": [
@@ -1517,14 +1430,6 @@
               {
                 "name": "ENTRA_TENANT_ID",
                 "value": "[parameters('entraTenantId')]"
-              },
-              {
-                "name": "AI_AGENT_ENDPOINT",
-                "value": "[parameters('aiAgentEndpoint')]"
-              },
-              {
-                "name": "AI_AGENT_ID",
-                "value": "[parameters('aiAgentId')]"
               },
               {
                 "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
@@ -1620,9 +1525,7 @@
                 "value": "[parameters('stripeMachineRequestWebhookSecret')]"
               }
             ],
-            "pricingIdentities": "[variables('$fxv#1').AiPricingIdentity.Deployments]",
-            "pricingIdentityEnv": "[flatten(variables('pricingIdentityEnvGroups'))]",
-            "containerEnv": "[concat(variables('baseEnv'), variables('miEnv'), variables('oboEnv'), variables('diagLinkEnv'), variables('emailEnv'), variables('authEnv'), variables('storageEnv'), variables('contactEnv'), variables('stripeEnv'), variables('pricingIdentityEnv'))]"
+            "containerEnv": "[concat(variables('baseEnv'), variables('miEnv'), variables('oboEnv'), variables('diagLinkEnv'), variables('emailEnv'), variables('authEnv'), variables('storageEnv'), variables('contactEnv'), variables('stripeEnv'))]"
           },
           "resources": [
             {

@@ -2,28 +2,23 @@ namespace WebApp.Api.Models;
 
 /// <summary>
 /// Represents a chunk of streaming response data.
-/// Can contain text content, annotations (citations), or MCP tool approval requests.
+/// Can contain text content, annotations (citations), visuals, usage, or tool-use indicators.
 /// </summary>
 public record StreamChunk
 {
-    public VisionUsageCapture? VisionUsage { get; init; }
     public AiResponseUsage? Usage { get; init; }
     public List<TechnicalVisualReference>? Visuals { get; init; }
+    public List<TechnicalSourceReference>? Sources { get; init; }
 
     /// <summary>
-    /// Text content chunk (delta). Null if this chunk contains annotations or approval request.
+    /// Text content chunk (delta). Null if this chunk contains another event type.
     /// </summary>
     public string? TextDelta { get; init; }
     
     /// <summary>
-    /// Annotations/citations extracted from the response. Null if this chunk contains text or approval request.
+    /// Annotations/citations extracted from the response. Null if this chunk contains another event type.
     /// </summary>
     public List<AnnotationInfo>? Annotations { get; init; }
-    
-    /// <summary>
-    /// MCP tool approval request. Null if this chunk contains text or annotations.
-    /// </summary>
-    public McpApprovalRequest? McpApprovalRequest { get; init; }
     
     /// <summary>
     /// Whether this chunk signals a tool-use step (e.g. file_search, code_interpreter).
@@ -46,17 +41,15 @@ public record StreamChunk
     public static StreamChunk WithAnnotations(List<AnnotationInfo> annotations) => new() { Annotations = annotations };
     
     /// <summary>
-    /// Creates an MCP approval request chunk.
-    /// </summary>
-    public static StreamChunk McpApproval(McpApprovalRequest request) => new() { McpApprovalRequest = request };
-    
-    /// <summary>
     /// Creates a tool-use indicator chunk.
     /// </summary>
     public static StreamChunk ToolUse(string toolName) => new() { IsToolUse = true, ToolName = toolName };
 
     public static StreamChunk WithVisuals(IReadOnlyList<TechnicalVisualReference> visuals) =>
         new() { Visuals = visuals.ToList() };
+
+    public static StreamChunk WithSources(IReadOnlyList<TechnicalSourceReference> sources) =>
+        new() { Sources = sources.ToList() };
     
     /// <summary>
     /// Whether this chunk contains text content.
@@ -69,21 +62,6 @@ public record StreamChunk
     public bool HasAnnotations => Annotations != null && Annotations.Count > 0;
 
     public bool HasVisuals => Visuals != null && Visuals.Count > 0;
-    
-    /// <summary>
-    /// Whether this chunk contains an MCP approval request.
-    /// </summary>
-    public bool IsMcpApprovalRequest => McpApprovalRequest != null;
-}
 
-/// <summary>
-/// Represents an MCP tool call requiring user approval.
-/// </summary>
-public record McpApprovalRequest
-{
-    public required string Id { get; init; }
-    public required string ToolName { get; init; }
-    public required string ServerLabel { get; init; }
-    public string? Arguments { get; init; }
-    public string? PreviousResponseId { get; init; }
+    public bool HasSources => Sources != null && Sources.Count > 0;
 }

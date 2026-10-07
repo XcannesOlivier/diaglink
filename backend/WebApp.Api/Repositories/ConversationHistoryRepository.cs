@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using WebApp.Api.Data;
 using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
@@ -7,7 +7,7 @@ namespace WebApp.Api.Repositories;
 
 /// <summary>
 /// Best-effort persistence of Foundry conversations/messages into the 'chat' schema.
-/// Foundry remains the source of truth — callers must catch and log failures, never let them break the chat stream.
+/// Foundry remains the source of truth â€” callers must catch and log failures, never let them break the chat stream.
 /// </summary>
 public class ConversationHistoryRepository
 {
@@ -21,7 +21,7 @@ public class ConversationHistoryRepository
     }
 
     public async Task CreateConversationAsync(
-        string foundryConversationId,
+        string conversationPublicId,
         string userObjectId,
         string? agentName,
         Guid? machineId,
@@ -31,7 +31,7 @@ public class ConversationHistoryRepository
         _db.Conversations.Add(new Conversation
         {
             Id = Guid.NewGuid(),
-            FoundryConversationId = foundryConversationId,
+            ConversationPublicId = conversationPublicId,
             UserObjectId = userObjectId,
             AgentName = agentName,
             MachineId = machineId,
@@ -43,41 +43,59 @@ public class ConversationHistoryRepository
     }
 
     public async Task<long?> AddMessageAsync(
-        string foundryConversationId,
+        string conversationPublicId,
         string userObjectId,
         string role,
         string content,
         CancellationToken cancellationToken)
     {
         var result = await AddMessageAsync(
-            foundryConversationId,
+            conversationPublicId,
             userObjectId,
             role,
             content,
             Array.Empty<TechnicalVisualReference>(),
+            Array.Empty<TechnicalSourceReference>(),
             cancellationToken);
         return result?.MessageId;
     }
 
     public async Task<ConversationMessagePersistenceResult?> AddMessageAsync(
-        string foundryConversationId,
+        string conversationPublicId,
         string userObjectId,
         string role,
         string content,
         IReadOnlyList<TechnicalVisualReference> visuals,
+        CancellationToken cancellationToken) =>
+        await AddMessageAsync(
+            conversationPublicId,
+            userObjectId,
+            role,
+            content,
+            visuals,
+            Array.Empty<TechnicalSourceReference>(),
+            cancellationToken);
+
+    public async Task<ConversationMessagePersistenceResult?> AddMessageAsync(
+        string conversationPublicId,
+        string userObjectId,
+        string role,
+        string content,
+        IReadOnlyList<TechnicalVisualReference> visuals,
+        IReadOnlyList<TechnicalSourceReference> sources,
         CancellationToken cancellationToken)
     {
-        // Ownership check and lookup in the same query — never write to another user's conversation.
+        // Ownership check and lookup in the same query â€” never write to another user's conversation.
         var conversation = await _db.Conversations
             .FirstOrDefaultAsync(
-                c => c.FoundryConversationId == foundryConversationId && c.UserObjectId == userObjectId,
+                c => c.ConversationPublicId == conversationPublicId && c.UserObjectId == userObjectId,
                 cancellationToken);
 
         if (conversation is null)
         {
             _logger.LogWarning(
-                "No SQL row found for FoundryConversationId {FoundryConversationId} owned by the current user; message not persisted.",
-                foundryConversationId);
+                "No SQL row found for ConversationPublicId {ConversationPublicId} owned by the current user; message not persisted.",
+                conversationPublicId);
             return null;
         }
 
@@ -111,6 +129,20 @@ public class ConversationHistoryRepository
             });
         }
 
+        foreach (var source in sources.OrderBy(source => source.DisplayOrder))
+        {
+            message.Sources.Add(new ConversationMessageSourceReference
+            {
+                DocumentId = source.DocumentId,
+                PdfPage = source.PdfPage,
+                DisplayPage = source.DisplayPage,
+                Label = source.Label,
+                StartIndex = source.StartIndex,
+                EndIndex = source.EndIndex,
+                DisplayOrder = message.Sources.Count
+            });
+        }
+
         _db.ConversationMessages.Add(message);
         conversation.UpdatedAtUtc = now;
 
@@ -120,6 +152,10 @@ public class ConversationHistoryRepository
             message.Visuals
                 .OrderBy(visual => visual.DisplayOrder)
                 .Select(ToVisualInfo)
+                .ToList(),
+            message.Sources
+                .OrderBy(source => source.DisplayOrder)
+                .Select(ToSourceInfo)
                 .ToList());
     }
 
@@ -178,17 +214,17 @@ public class ConversationHistoryRepository
 
     /// <summary>
     /// Returns a conversation's condensed technical summary scoped to its owning user in the same
-    /// query as the lookup — mirrors <see cref="GetConversationMessagesAsync"/>'s isolation. Returns
+    /// query as the lookup â€” mirrors <see cref="GetConversationMessagesAsync"/>'s isolation. Returns
     /// null both when the conversation doesn't exist and when it belongs to a different user.
     /// </summary>
     public Task<string?> GetTechnicalSummaryForUserAsync(
-        string foundryConversationId,
+        string conversationPublicId,
         string userObjectId,
         CancellationToken cancellationToken)
     {
         return _db.Conversations
             .AsNoTracking()
-            .Where(c => c.FoundryConversationId == foundryConversationId && c.UserObjectId == userObjectId)
+            .Where(c => c.ConversationPublicId == conversationPublicId && c.UserObjectId == userObjectId)
             .Select(c => c.TechnicalSummary)
             .FirstOrDefaultAsync(cancellationToken);
     }
@@ -196,10 +232,10 @@ public class ConversationHistoryRepository
     /// <summary>
     /// Resolves the SQL <see cref="Conversation.Id"/> for a given Foundry conversation id, or null if no row exists.
     /// </summary>
-    public Task<Guid?> GetConversationIdByFoundryIdAsync(string foundryConversationId, CancellationToken cancellationToken)
+    public Task<Guid?> GetConversationIdByPublicIdAsync(string conversationPublicId, CancellationToken cancellationToken)
     {
         return _db.Conversations
-            .Where(c => c.FoundryConversationId == foundryConversationId)
+            .Where(c => c.ConversationPublicId == conversationPublicId)
             .Select(c => (Guid?)c.Id)
             .FirstOrDefaultAsync(cancellationToken);
     }
@@ -207,27 +243,27 @@ public class ConversationHistoryRepository
     /// <summary>
     /// Resolves a conversation's SQL id and bound MachineId, scoped to its owning user in the same
     /// query as the lookup. Returns null both when the conversation doesn't exist and when it belongs
-    /// to a different user (indistinguishable by design — caller must map to 404). MachineId is null
+    /// to a different user (indistinguishable by design â€” caller must map to 404). MachineId is null
     /// for legacy conversations created before machine-scoped chat existed.
     /// </summary>
     public Task<ConversationOwnershipInfo?> GetConversationOwnershipInfoAsync(
-        string foundryConversationId,
+        string conversationPublicId,
         string userObjectId,
         CancellationToken cancellationToken)
     {
         return _db.Conversations
             .AsNoTracking()
-            .Where(c => c.FoundryConversationId == foundryConversationId && c.UserObjectId == userObjectId)
+            .Where(c => c.ConversationPublicId == conversationPublicId && c.UserObjectId == userObjectId)
             .Select(c => new ConversationOwnershipInfo(c.Id, c.MachineId))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
     /// <summary>
     /// Lists a user's conversations (most recent first), with a display title derived from each
-    /// conversation's first user message. Strictly scoped to <paramref name="userObjectId"/> —
+    /// conversation's first user message. Strictly scoped to <paramref name="userObjectId"/> â€”
     /// never returns another user's conversations. When <paramref name="machineId"/> is supplied,
     /// only conversations bound to that machine are returned. The returned <c>Id</c> is the
-    /// FoundryConversationId, matching the identifier the frontend already treats as its conversationId.
+    /// ConversationPublicId, matching the identifier the frontend already treats as its conversationId.
     /// </summary>
     public async Task<List<ConversationSummary>> ListConversationsForUserAsync(
         string userObjectId,
@@ -245,7 +281,7 @@ public class ConversationHistoryRepository
 
         var conversations = await query
             .OrderByDescending(c => c.CreatedAtUtc)
-            .Select(c => new { c.Id, c.FoundryConversationId, c.CreatedAtUtc, c.MachineId })
+            .Select(c => new { c.Id, c.ConversationPublicId, c.CreatedAtUtc, c.MachineId })
             .ToListAsync(cancellationToken);
 
         if (conversations.Count == 0)
@@ -277,7 +313,7 @@ public class ConversationHistoryRepository
         return conversations
             .Select(c => new ConversationSummary
             {
-                Id = c.FoundryConversationId,
+                Id = c.ConversationPublicId,
                 Title = BuildTitle(firstUserMessageByConversation.GetValueOrDefault(c.Id)),
                 CreatedAt = new DateTimeOffset(c.CreatedAtUtc, TimeSpan.Zero).ToUnixTimeSeconds(),
                 MachineId = c.MachineId?.ToString(),
@@ -288,20 +324,23 @@ public class ConversationHistoryRepository
 
     /// <summary>
     /// Loads a conversation's messages in chronological order, scoped to the owning user in the
-    /// same query as the conversation lookup. Returns null when no conversation matches — either
+    /// same query as the conversation lookup. Returns null when no conversation matches â€” either
     /// because it doesn't exist or because it belongs to a different user (indistinguishable by design).
     /// </summary>
     public async Task<List<ConversationMessageInfo>?> GetConversationMessagesAsync(
-        string foundryConversationId,
+        string conversationPublicId,
         string userObjectId,
         CancellationToken cancellationToken)
     {
         var conversation = await _db.Conversations
             .AsNoTracking()
+            .AsSplitQuery()
             .Include(c => c.Messages.OrderBy(m => m.CreatedAtUtc))
             .ThenInclude(m => m.Visuals.OrderBy(v => v.DisplayOrder))
+            .Include(c => c.Messages.OrderBy(m => m.CreatedAtUtc))
+            .ThenInclude(m => m.Sources.OrderBy(source => source.DisplayOrder))
             .FirstOrDefaultAsync(
-                c => c.FoundryConversationId == foundryConversationId && c.UserObjectId == userObjectId,
+                c => c.ConversationPublicId == conversationPublicId && c.UserObjectId == userObjectId,
                 cancellationToken);
 
         if (conversation is null)
@@ -317,6 +356,10 @@ public class ConversationHistoryRepository
                 Visuals = m.Visuals
                     .OrderBy(v => v.DisplayOrder)
                     .Select(ToVisualInfo)
+                    .ToList(),
+                Sources = m.Sources
+                    .OrderBy(source => source.DisplayOrder)
+                    .Select(ToSourceInfo)
                     .ToList()
             })
             .ToList();
@@ -333,22 +376,34 @@ public class ConversationHistoryRepository
         DisplayOrder = visual.DisplayOrder
     };
 
+    private static ConversationMessageSourceReferenceInfo ToSourceInfo(
+        ConversationMessageSourceReference source) => new()
+    {
+        Id = source.Id,
+        PdfPage = source.PdfPage,
+        DisplayPage = source.DisplayPage,
+        Label = source.Label,
+        StartIndex = source.StartIndex,
+        EndIndex = source.EndIndex,
+        DisplayOrder = source.DisplayOrder
+    };
+
     /// <summary>
     /// Returns the most recent non-summarized messages for a conversation, scoped to its owning user
     /// in the same query as the lookup (never returns another user's messages). Selects the
     /// <paramref name="limit"/> most recent messages (by <see cref="ConversationMessage.CreatedAtUtc"/>,
-    /// then <see cref="ConversationMessage.Id"/> for determinism), then returns them oldest-first —
+    /// then <see cref="ConversationMessage.Id"/> for determinism), then returns them oldest-first â€”
     /// ready to render straight into a prompt.
     /// </summary>
     public async Task<List<ConversationMessage>> GetRecentUnsummarizedMessagesForUserAsync(
-        string foundryConversationId,
+        string conversationPublicId,
         string userObjectId,
         int limit,
         CancellationToken cancellationToken)
     {
         var mostRecentFirst = await _db.ConversationMessages
             .AsNoTracking()
-            .Where(m => m.Conversation!.FoundryConversationId == foundryConversationId
+            .Where(m => m.Conversation!.ConversationPublicId == conversationPublicId
                      && m.Conversation.UserObjectId == userObjectId
                      && !m.IsSummarized)
             .OrderByDescending(m => m.CreatedAtUtc)

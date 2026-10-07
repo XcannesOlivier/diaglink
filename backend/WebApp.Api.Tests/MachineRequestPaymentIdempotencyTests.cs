@@ -302,6 +302,7 @@ public sealed class MachineRequestPaymentIdempotencyTests
                 new Dictionary<string, string?> { ["AZURE_STORAGE_CONNECTION_STRING"] = string.Empty }));
             builder.ConfigureTestServices(services =>
             {
+                services.RemoveWindowsEventLogProvider();
                 services.RemoveAll<DiagLinkDbContext>();
                 services.RemoveAll<DbContextOptions<DiagLinkDbContext>>();
                 services.RemoveAll<IDbContextOptionsConfiguration<DiagLinkDbContext>>();

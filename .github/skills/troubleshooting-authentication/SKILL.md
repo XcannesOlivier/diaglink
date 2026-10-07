@@ -1,4 +1,4 @@
----
+﻿---
 name: troubleshooting-authentication
 description: Provides authentication troubleshooting for MSAL, JWT, and Entra ID. Use when debugging 401 errors, token issues, MSAL configuration problems, or credential failures in this repository.
 ---
@@ -7,9 +7,9 @@ description: Provides authentication troubleshooting for MSAL, JWT, and Entra ID
 
 ## Architecture
 
-1. Browser → MSAL.js (PKCE flow) → JWT with `Chat.ReadWrite` scope
-2. Frontend → Backend (JWT Bearer token)
-3. Backend → Foundry Agent Service (ManagedIdentityCredential)
+1. Browser â†’ MSAL.js (PKCE flow) â†’ JWT with `Chat.ReadWrite` scope
+2. Frontend â†’ Backend (JWT Bearer token)
+3. Backend → Claude Direct and Azure AI project resources (ManagedIdentityCredential)
 
 ## Common Issues
 

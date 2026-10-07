@@ -99,7 +99,8 @@ describe('usage panel', () => {
     const companyMode = scope === 'company';
     const loadSummary = companyMode ? getCompanyUsageSummary : getUsageSummary;
     const all = { ...metrics, eventCount: 5, chatResponseCount: 1, conversationSummaryCount: 1,
-      visionToolCount: 3, knownUsageCount: 4, unknownUsageCount: 1, inputTokens: 400, outputTokens: 80, totalTokens: 480 };
+      visionToolCount: 3, knownUsageCount: 4, unknownUsageCount: 1, inputTokens: 400, outputTokens: 80, totalTokens: 480,
+      cacheReadInputTokens: 30, cacheCreationInputTokens: 50, cacheCreation5mInputTokens: 20, cacheCreation1hInputTokens: 30 };
     const vision = { ...all, eventCount: 3, chatResponseCount: 0, conversationSummaryCount: 0,
       knownUsageCount: 2, inputTokens: 200, outputTokens: 40, totalTokens: 240 };
     vi.mocked(loadSummary).mockImplementation(async (_, filter) => ({ kind: 'success', data: {
@@ -123,6 +124,8 @@ describe('usage panel', () => {
     await act(async () => root.render(<AiUsagePanel scope={scope} />));
     const totalCard = () => [...host.querySelectorAll('span')].find(e => e.textContent === 'Tokens connus')?.parentElement;
     expect(totalCard()?.textContent).toContain('480');
+    expect([...host.querySelectorAll('span')].find(e => e.textContent === 'Cache lu')?.parentElement?.textContent).toContain('30');
+    expect([...host.querySelectorAll('span')].find(e => e.textContent === 'Cache créé')?.parentElement?.textContent).toContain('50');
     expect(host.textContent?.includes('Analyses Vision : 3')).toBe(!companyMode);
     expect([...host.querySelectorAll('th')].some(e => e.textContent === 'Vision')).toBe(!companyMode);
     const select = host.querySelector<HTMLSelectElement>(`select[aria-label="Type d'usage"]`)!;
@@ -142,11 +145,11 @@ describe('usage panel', () => {
     expect(vi.mocked(loadUsers).mock.lastCall).toContainEqual(expect.objectContaining({ usageType: 'VisionTool' }));
     expect(host.textContent).toContain('User A');
     expect([...host.querySelectorAll('th')].map(e => e.textContent)).toEqual(companyMode
-      ? ['Utilisateur', 'Input', 'Output', 'Tokens']
-      : ['Utilisateur', 'Réponses IA', 'Vision', 'Résumés', 'Input', 'Output', 'Tokens', 'Usages inconnus']);
+      ? ['Utilisateur', 'Input', 'Cache lu', 'Cache créé', 'Cache 5 min', 'Cache 1 h', 'Output', 'Tokens']
+      : ['Utilisateur', 'Réponses IA', 'Vision', 'Résumés', 'Input', 'Cache lu', 'Cache créé', 'Cache 5 min', 'Cache 1 h', 'Output', 'Tokens', 'Usages inconnus']);
     expect([...host.querySelectorAll('tbody td')].map(e => e.textContent)).toEqual(companyMode
-      ? ['User A', '200', '40', '240 (partiel)']
-      : ['User A', '0', '3', '0', '200', '40', '240 (partiel)', '1']);
+      ? ['User A', '200', '30', '50', '20', '30', '40', '240 (partiel)']
+      : ['User A', '0', '3', '0', '200', '30', '50', '20', '30', '40', '240 (partiel)', '1']);
     await click('Retour aux machines');
     await act(async () => { select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true })); });
     expect(vi.mocked(loadSummary).mock.lastCall?.[1].usageType).toBeUndefined();

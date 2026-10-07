@@ -51,7 +51,7 @@ public class EmailService : ITransactionalEmailSender
         _managedIdentityClientId = configuration["MANAGED_IDENTITY_CLIENT_ID"]
             ?? configuration["OBO_MANAGED_IDENTITY_CLIENT_ID"]; // backward compat
 
-        // Same environment-aware credential strategy as AgentFrameworkService.
+        // Environment-aware Azure credential strategy.
         TokenCredential credential;
         if (environment.IsDevelopment())
         {

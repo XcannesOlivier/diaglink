@@ -102,7 +102,7 @@ public partial class StripeBillingTests
         await using var app = builder.Build();
         app.MapStripeAdminEndpoints();
         var routes = ((IEndpointRouteBuilder)app).DataSources.SelectMany(s => s.Endpoints).ToList();
-        Assert.AreEqual(12, routes.Count);
+        Assert.AreEqual(13, routes.Count);
         foreach (var endpoint in routes)
         {
             Assert.IsTrue(endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(a => a.Policy == "SuperAdminOnly"));

@@ -207,6 +207,69 @@
   margin-left: 4px;
 }
 
+.webSources {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--colorNeutralStroke2);
+}
+
+.webSourcesTitle {
+  margin: 0 0 8px;
+  color: var(--colorNeutralForeground2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.webSourceList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.webSourceItem {
+  min-width: 0;
+}
+
+.webSourceLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  color: var(--colorBrandForegroundLink);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.webSourceLink:hover {
+  text-decoration: underline;
+}
+
+.webSourceLink:focus-visible {
+  outline: 2px solid var(--colorBrandStroke1);
+  outline-offset: 2px;
+}
+
+.webSourceLink span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.webSourceQuote {
+  display: -webkit-box;
+  margin: 4px 0 0 20px;
+  overflow: hidden;
+  color: var(--colorNeutralForeground3);
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 /* Suggested follow-up prompts extracted from the end of the response */
 .suggestedPrompts {
   display: flex;

@@ -273,6 +273,7 @@ public sealed class OtpAtomicConsumptionTests
                 }));
             builder.ConfigureTestServices(services =>
             {
+                services.RemoveWindowsEventLogProvider();
                 services.RemoveAll<DiagLinkDbContext>();
                 services.RemoveAll<DbContextOptions<DiagLinkDbContext>>();
                 services.RemoveAll<IDbContextOptionsConfiguration<DiagLinkDbContext>>();

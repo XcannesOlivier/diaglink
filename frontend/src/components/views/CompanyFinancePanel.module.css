@@ -40,7 +40,7 @@
 
 .companyBanner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 20px;padding:0}
 .companyBanner>div{min-width:0}.companyBanner dt{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.companyBanner dd{margin:0;padding:7px 10px;border:1px solid var(--colorNeutralStroke2);border-radius:6px;background:var(--colorNeutralBackground2);font-size:14px;line-height:1.4;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-@media(max-width:480px){.companyBanner{display:grid;grid-template-columns:minmax(0,1fr)}.companyBanner dd{text-align:center}}
+@media(max-width:600px){.companyBanner{display:flex;align-items:stretch;flex-wrap:nowrap;gap:3px;max-width:100%}.companyBanner>div{flex:0 0 auto;min-width:0}.companyBanner>div:nth-child(2){flex:1 1 0}.companyBanner dd{display:flex;align-items:center;justify-content:center;height:100%;box-sizing:border-box;padding:5px clamp(3px,1.25vw,6px);font-size:clamp(10px,2.5vw,12px);line-height:1.2;text-align:center;overflow-wrap:normal}.companyBanner>div:nth-child(2) dd{width:100%;overflow-wrap:anywhere}.companyBanner>div:not(:nth-child(2)) dd{white-space:nowrap}}
 
 .quotaList{list-style:none;padding:0;margin:0;display:grid;gap:16px}.quotaRow{padding:12px 0;border-top:1px solid var(--colorNeutralStroke2)}.quotaRow:first-child{border-top:0}.quotaRow .cardHeading{margin-bottom:12px}.quotaRow .cardHeading strong{font-size:15px}.quotaRow .note{margin-bottom:0}
 
@@ -48,6 +48,8 @@
 .compactTable { width: 100%; border-collapse: collapse; font-size: 13px; }
 .compactTable th, .compactTable td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--colorNeutralStroke2); overflow-wrap: anywhere; }
 .machineToggle { margin-block: 10px; padding: 8px 14px; border: 1px solid var(--colorNeutralStroke2); border-radius: 6px; color: inherit; background: transparent; cursor: pointer; }
+.desktopButtonLabel{display:inline}.mobileButtonLabel{display:none}
+.tokenHistoryDetailToggle{min-height:32px!important;margin:0;padding:4px 8px;white-space:nowrap}.tokenCallDetailRow>td{padding:0 10px 10px}.tokenCallDetail{min-width:0;padding:10px;border:1px solid var(--colorNeutralStroke2);border-radius:8px;background:var(--colorNeutralBackground1)}.tokenCallDetail>strong{display:block;margin-bottom:8px}.tokenCallDetail .compactTableScroll{margin-bottom:0}
 .rechargeDiagnostic { border-top: 1px solid var(--colorNeutralStroke2); padding-block: 8px; overflow-wrap: anywhere; }
 .rechargeHistory { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-block: 8px; border-bottom: 1px solid var(--colorNeutralStroke2); font-size: 13px; }
 
@@ -82,10 +84,11 @@
 .companyQuotaStateContent{min-width:0}
 @media(max-width:760px){.consumptionDesktop{display:none}.consumptionMobile{display:grid;gap:10px}.consumptionMobile article{min-width:0;padding:14px;border-radius:9px;background:var(--colorNeutralBackground1);border:1px solid var(--colorNeutralStroke2)}.consumptionMobile p{margin:6px 0;color:var(--colorNeutralForeground2)}.consumptionMobile dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;margin:10px 0 0}.consumptionMobile dl div{min-width:0}.consumptionMobile dt{font-size:12px;color:var(--colorNeutralForeground2)}.consumptionMobile dd{margin:2px 0 0;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}}
 @media(max-width:1000px){.companyQuotaMetrics{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:760px){.machineConsumptionCard{padding:12px}.machineConsumptionHeader{display:grid}.machineConsumptionHeader>.machineToggle{width:100%}}
+@media(max-width:760px){.machineConsumptionCard{padding:12px}.machineConsumptionHeader{display:grid}.machineConsumptionHeader>.machineToggle{width:100%}.desktopButtonLabel{display:none}.mobileButtonLabel{display:inline}}
+@media(max-width:760px){.tokenHistoryScroll{max-width:100%;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch}.tokenHistoryTable{min-width:680px}.tokenHistoryTable th,.tokenHistoryTable td{white-space:nowrap;overflow-wrap:normal;word-break:normal}.tokenCallDetail .tokenHistoryTable{min-width:620px}}
 @media(max-width:767px){.companyMachineControls{align-items:stretch;flex-direction:column;gap:12px}.companyMachineControls label,.companyMachineControls select,.companyMachineControls .machineSearch{width:100%;max-width:none}.companyMachineControls .machineSearch{flex:0 0 auto}}
 @media(max-width:767px){.companyQuotaMetrics>article.companyQuotaStateCard{min-height:0;padding:0;overflow:hidden}.companyQuotaStateToggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;padding:12px 14px;border:0;background:transparent;color:var(--colorNeutralForeground2);font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer}.companyQuotaStateToggle svg{flex:0 0 auto}.companyQuotaStateContent{padding:0 14px 14px}}
-@media(max-width:460px){.consumptionMobile dl{grid-template-columns:minmax(0,1fr)}.companyBanner{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:460px){.consumptionMobile dl{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:480px){.consumptionMetrics{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:480px){.consumptionBreadcrumb{align-items:center;gap:4px 7px}.breadcrumbMachine{font-size:19px;max-width:100%}}
 

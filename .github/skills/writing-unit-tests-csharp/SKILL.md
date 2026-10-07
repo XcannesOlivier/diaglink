@@ -1,4 +1,4 @@
----
+﻿---
 name: writing-unit-tests-csharp
 description: Guidelines and patterns for writing unit tests in C# using MSTest SDK.
 ---
@@ -12,21 +12,21 @@ This skill covers writing unit tests for the backend using **MSTest SDK**. The p
 
 ```text
 backend/
-├── WebApp.sln
-├── WebApp.Api/
-│   ├── Models/           # DTOs and request/response models
-│   ├── Services/         # Business logic and agent integration
-│   └── Program.cs        # Minimal API endpoints
-└── WebApp.Api.Tests/
-    ├── WebApp.Api.Tests.csproj
-    └── [TestClass].cs    # Test files organized by class under test
+â”œâ”€â”€ WebApp.sln
+â”œâ”€â”€ WebApp.Api/
+â”‚   â”œâ”€â”€ Models/           # DTOs and request/response models
+â”‚   â”œâ”€â”€ Services/         # Business logic and agent integration
+â”‚   â””â”€â”€ Program.cs        # Minimal API endpoints
+â””â”€â”€ WebApp.Api.Tests/
+    â”œâ”€â”€ WebApp.Api.Tests.csproj
+    â””â”€â”€ [TestClass].cs    # Test files organized by class under test
 ```
 
 ## Test Project Configuration
 
 The test project uses MSTest SDK which eliminates the need for explicit package references:
 
-See `backend/WebApp.Api.Tests/WebApp.Api.Tests.csproj` for current configuration. The project uses MSTest SDK which eliminates the need for explicit package references — just set `Sdk="MSTest.Sdk/{version}"` in the project element.
+See `backend/WebApp.Api.Tests/WebApp.Api.Tests.csproj` for current configuration. The project uses MSTest SDK which eliminates the need for explicit package references â€” just set `Sdk="MSTest.Sdk/{version}"` in the project element.
 
 ## Test Anatomy
 
@@ -90,11 +90,9 @@ dotnet test --collect:"XPlat Code Coverage"
 | `StreamChunk` | Serialization/deserialization |
 | `AnnotationInfo` | Property mapping |
 
-### Services (Require Integration Testing)
+### Services requiring integration testing
 
-| Class | Testing Approach |
-|-------|------------------|
-| `AgentFrameworkService` | Use Playwright for integration tests |
+Use the existing in-memory host fixtures for Claude Direct, conversation persistence, authorization and SSE endpoints. Real Azure tests remain opt-in and inconclusive by default.
 
 ## Test Naming Convention
 

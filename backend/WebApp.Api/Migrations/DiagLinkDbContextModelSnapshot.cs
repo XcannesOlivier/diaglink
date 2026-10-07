@@ -28,6 +28,18 @@ namespace WebApp.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal?>("CacheCreation1hPricePerMillion")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("decimal(18,8)");
+
+                    b.Property<decimal?>("CacheCreation5mPricePerMillion")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("decimal(18,8)");
+
+                    b.Property<decimal?>("CacheReadPricePerMillion")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("decimal(18,8)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -65,6 +77,10 @@ namespace WebApp.Api.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
+                    b.Property<decimal?>("WebSearchPricePerRequest")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("decimal(18,8)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Provider", "Model", "UsageType", "EffectiveFromUtc");
@@ -77,15 +93,26 @@ namespace WebApp.Api.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("AgentVersion")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
                     b.Property<long?>("AssistantMessageId")
                         .HasColumnType("bigint");
 
                     b.Property<bool>("Available")
                         .HasColumnType("bit");
+
+                    b.Property<int?>("CacheCreation1hInputTokens")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CacheCreation5mInputTokens")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CacheCreationInputTokens")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CacheReadInputTokens")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CallBreakdownJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("CallId")
                         .HasMaxLength(200)
@@ -100,14 +127,14 @@ namespace WebApp.Api.Migrations
                     b.Property<Guid?>("ConversationId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ConversationPublicId")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Deployment")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("FoundryConversationId")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
@@ -147,6 +174,9 @@ namespace WebApp.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
+
+                    b.Property<int>("WebSearchRequests")
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("UserId")
                         .HasColumnType("uniqueidentifier");
@@ -298,16 +328,16 @@ namespace WebApp.Api.Migrations
                     b.Property<string>("AgentName")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("ConversationPublicId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("Entreprise")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("FoundryConversationId")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("Machine")
                         .HasColumnType("nvarchar(max)");
@@ -331,9 +361,9 @@ namespace WebApp.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CreatedAtUtc");
+                    b.HasIndex("ConversationPublicId");
 
-                    b.HasIndex("FoundryConversationId");
+                    b.HasIndex("CreatedAtUtc");
 
                     b.HasIndex("MachineId");
 
@@ -376,6 +406,63 @@ namespace WebApp.Api.Migrations
                     b.HasIndex("ConversationId");
 
                     b.ToTable("ConversationMessages", "chat");
+                });
+
+            modelBuilder.Entity("WebApp.Api.Models.Entities.ConversationMessageSourceReference", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ConversationMessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DisplayPage")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("DocumentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("EndIndex")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<int>("PdfPage")
+                        .HasColumnType("int");
+
+                    b.Property<int>("StartIndex")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationMessageId");
+
+                    b.HasIndex("ConversationMessageId", "DisplayOrder")
+                        .IsUnique();
+
+                    b.ToTable("ConversationMessageSourceReferences", "chat", t =>
+                        {
+                            t.HasCheckConstraint("CK_ConversationMessageSourceReferences_DisplayOrder", "[DisplayOrder] >= 0");
+
+                            t.HasCheckConstraint("CK_ConversationMessageSourceReferences_PdfPage", "[PdfPage] > 0");
+
+                            t.HasCheckConstraint("CK_ConversationMessageSourceReferences_RequiredStrings", "LEN([DocumentId]) > 0 AND LEN([DisplayPage]) > 0 AND LEN([Label]) > 0");
+
+                            t.HasCheckConstraint("CK_ConversationMessageSourceReferences_TextRange", "[StartIndex] >= 0 AND [EndIndex] > [StartIndex]");
+                        });
                 });
 
             modelBuilder.Entity("WebApp.Api.Models.Entities.ConversationMessageVisual", b =>
@@ -701,11 +788,6 @@ namespace WebApp.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("AgentVersion")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)")
-                        .HasColumnName("AgentVersion");
-
                     b.Property<string>("BlobPrefix")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)")
@@ -717,11 +799,6 @@ namespace WebApp.Api.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2")
                         .HasColumnName("CreatedAt");
-
-                    b.Property<string>("FoundryAgentId")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)")
-                        .HasColumnName("FoundryAgentId");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -1464,6 +1541,17 @@ namespace WebApp.Api.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("WebApp.Api.Models.Entities.ConversationMessageSourceReference", b =>
+                {
+                    b.HasOne("WebApp.Api.Models.Entities.ConversationMessage", "ConversationMessage")
+                        .WithMany("Sources")
+                        .HasForeignKey("ConversationMessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ConversationMessage");
+                });
+
             modelBuilder.Entity("WebApp.Api.Models.Entities.ConversationMessageVisual", b =>
                 {
                     b.HasOne("WebApp.Api.Models.Entities.ConversationMessage", "ConversationMessage")
@@ -1613,6 +1701,8 @@ namespace WebApp.Api.Migrations
 
             modelBuilder.Entity("WebApp.Api.Models.Entities.ConversationMessage", b =>
                 {
+                    b.Navigation("Sources");
+
                     b.Navigation("Visuals");
                 });
 #pragma warning restore 612, 618

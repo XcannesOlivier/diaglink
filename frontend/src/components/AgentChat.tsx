@@ -33,7 +33,7 @@ interface AgentChatProps {
 // Number of conversations fetched initially and per "load more" / "show less" step.
 const CONVERSATIONS_PAGE_SIZE = 5;
 
-export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescription, agentLogo, starterPrompts, onDiagLinkSessionExpired, autoOpenHistory, onOpenMobileMenu }) => {
+export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescription, starterPrompts, onDiagLinkSessionExpired, autoOpenHistory, onOpenMobileMenu }) => {
   const { chat, state } = useAppState();
   const { dispatch } = useAppContext();
   const { getAccessToken } = useAuth();
@@ -148,19 +148,14 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     dispatch({ type: 'CHAT_CANCEL_EDIT' });
   }, [dispatch]);
 
-  const handleDownloadFile = useCallback(async (fileId: string, fileName: string, containerId?: string) => {
-    try {
-      await chatService.downloadFile(fileId, fileName, containerId);
-    } catch (err) {
-      dispatch({
-        type: 'CHAT_ERROR',
-        error: { code: 'NETWORK', message: `Échec du téléchargement de ${fileName} : ${err instanceof Error ? err.message : 'Erreur inconnue'}`, recoverable: true },
-      });
-    }
-  }, [chatService, dispatch]);
-
   const handleLoadTechnicalVisual = useCallback(
     (visualId: number, signal?: AbortSignal) => chatService.getTechnicalVisualBlob(visualId, signal),
+    [chatService]
+  );
+
+  const handleLoadTechnicalSource = useCallback(
+    (sourceReferenceId: number, signal?: AbortSignal) =>
+      chatService.getTechnicalSourcePdfBlob(sourceReferenceId, signal),
     [chatService]
   );
 
@@ -172,21 +167,6 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
       chatService.sendMessage(text, chat.currentConversationId);
     }
   }, [chat.regenerateText, chat.status, chat.currentConversationId, chatService, dispatch]);
-
-  const handleMcpApproval = async (
-    approvalRequestId: string,
-    approved: boolean,
-    previousResponseId: string,
-    conversationId: string
-  ) => {
-    dispatch({ type: 'CHAT_MCP_APPROVAL_RESOLVED', approvalRequestId, resolved: approved ? 'approved' : 'rejected' });
-    try {
-      await chatService.sendMcpApproval(approvalRequestId, approved, previousResponseId, conversationId);
-    } catch {
-      // Rollback so user can retry — clears resolved state, restoring buttons
-      dispatch({ type: 'CHAT_MCP_APPROVAL_RESOLVED', approvalRequestId, resolved: undefined });
-    }
-  };
 
   const loadConversations = useCallback(async (limit: number, appendFrom?: number) => {
     conversationListRequest.current?.controller.abort();
@@ -296,6 +276,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           role: msg.role as 'user' | 'assistant',
           content: msg.content,
           visuals: msg.role === 'assistant' ? msg.visuals : undefined,
+          sources: msg.role === 'assistant' ? msg.sources : undefined,
           more: { time: new Date().toISOString() },
         }));
 
@@ -387,23 +368,20 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           onRecoveredInputConsumed={handleRecoveredInputConsumed}
           onNewChat={handleNewChat}
           onCancelStream={handleCancelStream}
-          onMcpApproval={handleMcpApproval}
           onToggleSidebar={handleToggleSidebar}
           onOpenMobileMenu={onOpenMobileMenu}
           onRegenerate={handleRegenerate}
           onCancelEdit={handleCancelEdit}
           isEditing={!!chat.editSnapshot}
           onFeedback={handleFeedback}
-          onDownloadFile={handleDownloadFile}
           onLoadTechnicalVisual={handleLoadTechnicalVisual}
-          conversationId={chat.currentConversationId}
+          onLoadTechnicalSource={handleLoadTechnicalSource}
           pendingMessages={chat.pendingMessages}
           onDequeueMessage={handleDequeueMessage}
           hasMessages={chat.messages.length > 0}
           disabled={false}
           agentName={agentName}
           agentDescription={agentDescription}
-          agentLogo={agentLogo}
           starterPrompts={starterPrompts}
           onChangeMachine={handleChangeMachine}
           machineId={state.machine.selected?.id}

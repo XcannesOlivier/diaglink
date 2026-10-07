@@ -1,11 +1,21 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { StripeCompanySummary } from '../../../services/stripeAdminService';
 import { CompanySummaryBanner } from '../CompanySummaryBanner';
 
 vi.mock('../../../utils/apiAuth', () => ({ getApiAuthHeaders: async () => ({ headers: {} }) }));
 afterEach(() => vi.unstubAllGlobals());
+
+it('keeps all three summary badges on one mobile row without changing the desktop wrapping rule', () => {
+  const css = readFileSync(resolve('src/components/views/CompanyFinancePanel.module.css'), 'utf8');
+  expect(css).toContain('.companyBanner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;');
+  expect(css).toMatch(/@media\(max-width:600px\)\{\.companyBanner\{[^}]*flex-wrap:nowrap;[^}]*max-width:100%/);
+  expect(css).toMatch(/\.companyBanner>div:nth-child\(2\)\{flex:1 1 0\}/);
+  expect(css).toMatch(/\.companyBanner dd\{[^}]*box-sizing:border-box;[^}]*font-size:clamp\(10px,2\.5vw,12px\)/);
+});
 
 async function renderSummary(account: Partial<StripeCompanySummary>, walletBalance = 20) {
   const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ walletBalance })));

@@ -4,10 +4,8 @@ namespace WebApp.Api.Services;
 
 public sealed class TechnicalAssistantPromptProvider : ITechnicalAssistantPromptProvider
 {
-    internal const string LegacyRelativePath = "Prompts/TechnicalAssistantPrompt.legacy.txt";
     internal const string ClaudeDirectRelativePath = "Prompts/TechnicalAssistantPrompt.claude-direct.txt";
 
-    private readonly Lazy<string> _legacyPrompt;
     private readonly Lazy<string> _claudeDirectPrompt;
 
     public TechnicalAssistantPromptProvider(IHostEnvironment environment)
@@ -17,11 +15,8 @@ public sealed class TechnicalAssistantPromptProvider : ITechnicalAssistantPrompt
 
     internal TechnicalAssistantPromptProvider(string contentRootPath)
     {
-        _legacyPrompt = CreatePromptLoader(contentRootPath, LegacyRelativePath);
         _claudeDirectPrompt = CreatePromptLoader(contentRootPath, ClaudeDirectRelativePath);
     }
-
-    public string GetLegacyPrompt() => _legacyPrompt.Value;
 
     public string GetClaudeDirectPrompt() => _claudeDirectPrompt.Value;
 

@@ -12,7 +12,7 @@ public class AiUsageRecord
     public Guid? MachineId { get; set; }
     public Guid? ConversationId { get; set; }
     public long? AssistantMessageId { get; set; }
-    public string? FoundryConversationId { get; set; }
+    public string? ConversationPublicId { get; set; }
     public string? ResponseId { get; set; }
     public string? CallId { get; set; }
     public string? ParentResponseId { get; set; }
@@ -20,9 +20,14 @@ public class AiUsageRecord
     public string? Provider { get; set; }
     public string? Deployment { get; set; }
     public string? ModelSource { get; set; }
-    public string? AgentVersion { get; set; }
+    public string? CallBreakdownJson { get; set; }
     public int? InputTokens { get; set; }
     public int? OutputTokens { get; set; }
     public int? TotalTokens { get; set; }
+    public int? CacheReadInputTokens { get; set; }
+    public int? CacheCreationInputTokens { get; set; }
+    public int? CacheCreation5mInputTokens { get; set; }
+    public int? CacheCreation1hInputTokens { get; set; }
+    public int WebSearchRequests { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }

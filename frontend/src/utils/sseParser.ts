@@ -1,8 +1,11 @@
+import type { TechnicalSourceReference } from '../types/chat';
+import { parseTechnicalSources } from './technicalSources';
+
 /**
  * SSE event types from Azure AI Agent streaming API.
  * Contract: Backend sends Server-Sent Events with these event types.
  */
-export type SseEventType = 'conversationId' | 'chunk' | 'annotations' | 'visuals' | 'mcpApprovalRequest' | 'toolUse' | 'usage' | 'done' | 'error';
+export type SseEventType = 'conversationId' | 'chunk' | 'annotations' | 'visuals' | 'sources' | 'toolUse' | 'usage' | 'done' | 'error';
 
 export interface SseEvent {
   type: SseEventType;
@@ -32,7 +35,6 @@ export interface SseAnnotationsEvent extends SseEvent {
       label: string;
       url?: string;
       fileId?: string;
-      containerId?: string;
       textToReplace?: string;
       startIndex?: number;
       endIndex?: number;
@@ -51,8 +53,14 @@ export interface SseUsageEvent extends SseEvent {
     completed?: boolean;
     model?: string | null;
     modelSource?: string | null;
-    agentVersion?: string | null;
     duration: number;
+  };
+}
+
+export interface SseSourcesEvent extends SseEvent {
+  type: 'sources';
+  data: {
+    sources: TechnicalSourceReference[];
   };
 }
 
@@ -99,6 +107,9 @@ export function parseSseLine(line: string): SseEvent | null {
     // Backend sends flat structure: {type: "conversationId", conversationId: "xyz"}
     // Map to expected structure: {type: "conversationId", data: parsed}
     const { type, ...data } = parsed;
+    if (type === 'sources') {
+      return { type, data: { sources: parseTechnicalSources(data.sources) } };
+    }
     return { type, data } as SseEvent;
   } catch (error) {
     console.warn('[sseParser] Malformed JSON in SSE event:', jsonString, error);

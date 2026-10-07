@@ -1,12 +1,12 @@
 import type { AccountInfo } from '@azure/msal-browser';
-import type { IChatItem, IUsageInfo, IAnnotation, IMcpApprovalRequest, IFileAttachment, TechnicalVisual } from './chat';
+import type { IChatItem, IUsageInfo, IAnnotation, IFileAttachment, TechnicalVisual, TechnicalSourceReference } from './chat';
 import type { AppError } from './errors';
 import type { CurrentUser } from './currentUser';
 import type { AppView } from './navigation';
 import type { SelectedMachine } from './machine';
 
 // Re-export types for convenience
-export type { IChatItem, IUsageInfo, IAnnotation, IMcpApprovalRequest, IFileAttachment, TechnicalVisual, CurrentUser, AppView, SelectedMachine };
+export type { IChatItem, IUsageInfo, IAnnotation, IFileAttachment, TechnicalVisual, TechnicalSourceReference, CurrentUser, AppView, SelectedMachine };
 
 export interface ConversationSummary {
   id: string;
@@ -20,6 +20,7 @@ export interface ConversationMessageInfo {
   role: string;
   content: string;
   visuals?: TechnicalVisual[];
+  sources?: TechnicalSourceReference[];
 }
 
 /**
@@ -93,10 +94,10 @@ export type AppAction =
   | { type: 'CHAT_STREAM_CHUNK'; messageId: string; content: string }
   | { type: 'CHAT_STREAM_ANNOTATIONS'; messageId: string; annotations: IAnnotation[] }
   | { type: 'CHAT_STREAM_VISUALS'; messageId: string; visuals: TechnicalVisual[] }
+  | { type: 'CHAT_STREAM_SOURCES'; messageId: string; sources: TechnicalSourceReference[] }
   | { type: 'CHAT_STREAM_TOOL_USE'; messageId: string; toolName: string }
-  | { type: 'CHAT_MCP_APPROVAL_REQUEST'; messageId: string; approvalRequest: IMcpApprovalRequest; previousResponseId: string | null }
-  | { type: 'CHAT_MCP_APPROVAL_RESOLVED'; approvalRequestId: string; resolved?: 'approved' | 'rejected' }
-  | { type: 'CHAT_STREAM_COMPLETE'; usage: IUsageInfo }
+  | { type: 'CHAT_STREAM_USAGE'; messageId: string; usage: IUsageInfo }
+  | { type: 'CHAT_STREAM_COMPLETE'; messageId: string }
   | { type: 'CHAT_CANCEL_STREAM' }
   | { type: 'CHAT_ERROR'; error: AppError } // Enhanced error object
   | { type: 'CHAT_CLEAR_ERROR' } // Clear error state

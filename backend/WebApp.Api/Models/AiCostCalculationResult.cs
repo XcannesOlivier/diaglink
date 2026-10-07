@@ -12,10 +12,20 @@ public sealed record AiCostCalculationResult
     public string? Currency { get; init; }
     public long? InputTokens { get; init; }
     public long? OutputTokens { get; init; }
+    public long? CacheReadInputTokens { get; init; }
+    public long? CacheCreationInputTokens { get; init; }
+    public long? CacheCreation5mInputTokens { get; init; }
+    public long? CacheCreation1hInputTokens { get; init; }
+    public int WebSearchRequests { get; init; }
     /// <summary>Unrounded component; not intended for direct decimal(18,6) persistence.</summary>
     public decimal? InputCost { get; init; }
     /// <summary>Unrounded component; not intended for direct decimal(18,6) persistence.</summary>
     public decimal? OutputCost { get; init; }
+    public decimal? CacheReadCost { get; init; }
+    public decimal? CacheCreation5mCost { get; init; }
+    public decimal? CacheCreation1hCost { get; init; }
+    /// <summary>Unrounded component; not intended for direct decimal(18,6) persistence.</summary>
+    public decimal? WebSearchCost { get; init; }
     /// <summary>Sum of raw components rounded once to six places, AwayFromZero.</summary>
     public decimal? RealAiCost { get; init; }
     public Guid? PricingId { get; init; }

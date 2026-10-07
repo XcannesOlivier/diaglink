@@ -17,6 +17,7 @@ public record ConversationMessageInfo
     public required string Role { get; init; }
     public required string Content { get; init; }
     public IReadOnlyList<ConversationMessageVisualInfo> Visuals { get; init; } = [];
+    public IReadOnlyList<ConversationMessageSourceReferenceInfo> Sources { get; init; } = [];
 }
 
 public record ConversationMessageVisualInfo
@@ -30,6 +31,18 @@ public record ConversationMessageVisualInfo
     public int DisplayOrder { get; init; }
 }
 
+public record ConversationMessageSourceReferenceInfo
+{
+    public long Id { get; init; }
+    public int PdfPage { get; init; }
+    public required string DisplayPage { get; init; }
+    public required string Label { get; init; }
+    public int StartIndex { get; init; }
+    public int EndIndex { get; init; }
+    public int DisplayOrder { get; init; }
+}
+
 public sealed record ConversationMessagePersistenceResult(
     long MessageId,
-    IReadOnlyList<ConversationMessageVisualInfo> Visuals);
+    IReadOnlyList<ConversationMessageVisualInfo> Visuals,
+    IReadOnlyList<ConversationMessageSourceReferenceInfo> Sources);

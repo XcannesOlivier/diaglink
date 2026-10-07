@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using WebApp.Api.Models.Entities;
 using WebApp.Api.Services;
@@ -9,21 +8,12 @@ namespace WebApp.Api.Tests;
 public sealed class MachineAssistantReadinessTests
 {
     [TestMethod]
-    public void ClaudeDirectEligibleWithoutHostedAgentIdentity_IsConfigured()
+    public void ClaudeDirectEligibleWithCompleteConfiguration_IsConfigured()
     {
         var machine = Machine();
-        var readiness = Readiness(machine.Id);
+        var readiness = new MachineAssistantReadiness();
 
         Assert.IsTrue(readiness.IsAssistantConfigured(machine, eligible: true));
-    }
-
-    [TestMethod]
-    public void HostedAgentEligibleWithoutFoundryAgentId_IsNotConfigured()
-    {
-        var machine = Machine();
-        var readiness = Readiness();
-
-        Assert.IsFalse(readiness.IsAssistantConfigured(machine, eligible: true));
     }
 
     [TestMethod]
@@ -31,7 +21,7 @@ public sealed class MachineAssistantReadinessTests
     {
         var machine = Machine();
         machine.VectorStoreId = null;
-        var readiness = Readiness(machine.Id);
+        var readiness = new MachineAssistantReadiness();
 
         Assert.IsFalse(readiness.IsAssistantConfigured(machine, eligible: true));
     }
@@ -40,16 +30,10 @@ public sealed class MachineAssistantReadinessTests
     public void ClaudeDirectIneligibleWithCompleteConfiguration_IsNotConfigured()
     {
         var machine = Machine();
-        var readiness = Readiness(machine.Id);
+        var readiness = new MachineAssistantReadiness();
 
         Assert.IsFalse(readiness.IsAssistantConfigured(machine, eligible: false));
     }
-
-    private static MachineAssistantReadiness Readiness(params Guid[] enabledMachineIds) =>
-        new(new AiChatRuntimeSelector(Options.Create(new ClaudeDirectChatOptions
-        {
-            EnabledMachineIds = enabledMachineIds
-        })));
 
     private static Machine Machine() => new()
     {
@@ -60,8 +44,6 @@ public sealed class MachineAssistantReadinessTests
         ProjectEndpoint = "https://resource.test/api/projects/company",
         BlobPrefix = "company/machine",
         VectorStoreId = "vs_marker123",
-        FoundryAgentId = null,
-        AgentVersion = null,
         CreatedAtUtc = DateTime.UtcNow,
         UpdatedAtUtc = DateTime.UtcNow
     };

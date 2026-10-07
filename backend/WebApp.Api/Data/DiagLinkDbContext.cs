@@ -19,6 +19,7 @@ public class DiagLinkDbContext : DbContext
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
     public DbSet<ConversationMessageVisual> ConversationMessageVisuals => Set<ConversationMessageVisual>();
+    public DbSet<ConversationMessageSourceReference> ConversationMessageSourceReferences => Set<ConversationMessageSourceReference>();
     public DbSet<User> Users => Set<User>();
     public DbSet<LoginCode> LoginCodes => Set<LoginCode>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
@@ -230,6 +231,10 @@ public class DiagLinkDbContext : DbContext
             entity.Property(p => p.UsageType).HasMaxLength(32);
             entity.Property(p => p.InputPricePerMillion).HasPrecision(18, 8);
             entity.Property(p => p.OutputPricePerMillion).HasPrecision(18, 8);
+            entity.Property(p => p.CacheReadPricePerMillion).HasPrecision(18, 8);
+            entity.Property(p => p.CacheCreation5mPricePerMillion).HasPrecision(18, 8);
+            entity.Property(p => p.CacheCreation1hPricePerMillion).HasPrecision(18, 8);
+            entity.Property(p => p.WebSearchPricePerRequest).HasPrecision(18, 8);
             entity.Property(p => p.Currency).IsRequired().HasMaxLength(3).IsUnicode(false);
             entity.Property(p => p.EffectiveFromUtc).IsRequired();
             entity.HasIndex(p => new { p.Provider, p.Model, p.UsageType, p.EffectiveFromUtc });
@@ -314,7 +319,7 @@ public class DiagLinkDbContext : DbContext
             entity.HasKey(u => u.Id);
             entity.Property(u => u.Id).ValueGeneratedNever();
             entity.Property(u => u.UsageType).HasConversion<string>().HasMaxLength(32);
-            entity.Property(u => u.FoundryConversationId).HasMaxLength(200);
+            entity.Property(u => u.ConversationPublicId).HasMaxLength(200);
             entity.Property(u => u.ResponseId).HasMaxLength(200);
             entity.Property(u => u.CallId).HasMaxLength(200);
             entity.Property(u => u.ParentResponseId).HasMaxLength(200);
@@ -322,7 +327,6 @@ public class DiagLinkDbContext : DbContext
             entity.Property(u => u.Provider).HasMaxLength(100);
             entity.Property(u => u.Deployment).HasMaxLength(200);
             entity.Property(u => u.ModelSource).HasMaxLength(32);
-            entity.Property(u => u.AgentVersion).HasMaxLength(100);
             entity.HasIndex(u => u.CreatedAtUtc);
             entity.HasIndex(u => new { u.CompanyId, u.CreatedAtUtc });
             entity.HasIndex(u => new { u.MachineId, u.CreatedAtUtc });
@@ -350,10 +354,10 @@ public class DiagLinkDbContext : DbContext
         {
             entity.ToTable("Conversations", Schema);
             entity.HasKey(c => c.Id);
-            entity.Property(c => c.FoundryConversationId).IsRequired().HasMaxLength(200);
+            entity.Property(c => c.ConversationPublicId).IsRequired().HasMaxLength(200);
             entity.Property(c => c.UserObjectId).IsRequired().HasMaxLength(200);
 
-            entity.HasIndex(c => c.FoundryConversationId);
+            entity.HasIndex(c => c.ConversationPublicId);
             entity.HasIndex(c => c.UserObjectId);
             entity.HasIndex(c => c.CreatedAtUtc);
             entity.HasIndex(c => c.MachineId);
@@ -382,6 +386,11 @@ public class DiagLinkDbContext : DbContext
                   .WithOne(v => v.ConversationMessage!)
                   .HasForeignKey(v => v.ConversationMessageId)
                   .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(m => m.Sources)
+                .WithOne(source => source.ConversationMessage!)
+                .HasForeignKey(source => source.ConversationMessageId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ConversationMessageVisual>(entity =>
@@ -407,6 +416,29 @@ public class DiagLinkDbContext : DbContext
 
             entity.HasIndex(v => v.ConversationMessageId);
             entity.HasIndex(v => new { v.ConversationMessageId, v.AssetKey }).IsUnique();
+        });
+
+        modelBuilder.Entity<ConversationMessageSourceReference>(entity =>
+        {
+            entity.ToTable("ConversationMessageSourceReferences", Schema, table =>
+            {
+                table.HasCheckConstraint("CK_ConversationMessageSourceReferences_PdfPage", "[PdfPage] > 0");
+                table.HasCheckConstraint("CK_ConversationMessageSourceReferences_TextRange", "[StartIndex] >= 0 AND [EndIndex] > [StartIndex]");
+                table.HasCheckConstraint("CK_ConversationMessageSourceReferences_DisplayOrder", "[DisplayOrder] >= 0");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint(
+                        "CK_ConversationMessageSourceReferences_RequiredStrings",
+                        "LEN([DocumentId]) > 0 AND LEN([DisplayPage]) > 0 AND LEN([Label]) > 0");
+                }
+            });
+            entity.HasKey(source => source.Id);
+            entity.Property(source => source.DocumentId).IsRequired().HasMaxLength(200);
+            entity.Property(source => source.DisplayPage).IsRequired().HasMaxLength(64);
+            entity.Property(source => source.Label).IsRequired().HasMaxLength(128);
+
+            entity.HasIndex(source => source.ConversationMessageId);
+            entity.HasIndex(source => new { source.ConversationMessageId, source.DisplayOrder }).IsUnique();
         });
 
         modelBuilder.Entity<LoginCode>(entity =>
@@ -455,11 +487,9 @@ public class DiagLinkDbContext : DbContext
             entity.Property(m => m.Status).IsRequired().HasMaxLength(50);
 
             entity.Property(m => m.Reference).HasMaxLength(200).HasColumnName("Reference");
-            entity.Property(m => m.FoundryAgentId).HasMaxLength(200).HasColumnName("FoundryAgentId");
             entity.Property(m => m.VectorStoreId).HasMaxLength(200).HasColumnName("VectorStoreId");
             entity.Property(m => m.BlobPrefix).HasMaxLength(200).HasColumnName("BlobPrefix");
             entity.Property(m => m.ProjectEndpoint).HasMaxLength(500).HasColumnName("ProjectEndpoint");
-            entity.Property(m => m.AgentVersion).HasMaxLength(50).HasColumnName("AgentVersion");
 
             // Map audit columns to legacy names
             entity.Property(m => m.CreatedAtUtc).HasColumnName("CreatedAt");

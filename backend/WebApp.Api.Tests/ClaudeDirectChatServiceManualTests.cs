@@ -48,11 +48,15 @@ public sealed class ClaudeDirectChatServiceManualTests
             promptProvider,
             NullLogger<ClaudeDirectMachineConfigurationResolver>.Instance);
         var requestFactory = new ClaudeDirectChatRequestFactory(resolver);
+        var pageMapResolver = new TechnicalPageMapResolver(
+            blobReader,
+            NullLogger<TechnicalPageMapResolver>.Instance);
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
         var service = new ClaudeDirectChatService(
             new ManualHttpClientFactory(httpClient),
             credential,
             blobReader,
+            new TechnicalSourceReferenceResolver(pageMapResolver),
             Options.Create(new ClaudeDirectChatOptions
             {
                 FoundryAnthropicEndpoint = "https://diaglink-foundry-prod.services.ai.azure.com/anthropic",

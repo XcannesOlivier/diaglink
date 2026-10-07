@@ -161,7 +161,7 @@ describe('ChatService', () => {
           }),
         }),
       );
-      expect(result).toEqual(mockMessages);
+      expect(result).toEqual([{ ...mockMessages[0], sources: [] }]);
     });
 
     it('throws on non-ok response', async () => {
@@ -186,7 +186,7 @@ describe('ChatService', () => {
       );
     });
 
-    it('keeps ordered visuals, removes duplicate ids, and supports legacy messages', async () => {
+    it('keeps ordered visuals and sources while supporting legacy messages', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
         ok: true,
         json: () => Promise.resolve([
@@ -194,6 +194,9 @@ describe('ChatService', () => {
             { id: 2, documentId: 'manual', page: 72, assetType: 'full', tile: null, name: 'b.png', displayOrder: 1, assetKey: 'secret' },
             { id: 1, documentId: 'manual', page: 71, assetType: 'tile', tile: 'r02-c01', name: 'a.png', displayOrder: 0 },
             { id: 1, documentId: 'other', page: 99, assetType: 'full', tile: null, name: 'duplicate.png', displayOrder: 3 },
+          ], sources: [
+            { id: 22, pdfPage: 75, displayPage: '73', label: 'p. 73', startIndex: 20, endIndex: 25, displayOrder: 1 },
+            { id: 21, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: 8, endIndex: 13, displayOrder: 0, documentId: 'private' },
           ] },
           { role: 'assistant', content: 'Ancien message' },
         ]),
@@ -203,7 +206,10 @@ describe('ChatService', () => {
 
       expect(result[0].visuals?.map(visual => visual.id)).toEqual([1, 2]);
       expect(result[0].visuals?.[1]).not.toHaveProperty('assetKey');
+      expect(result[0].sources?.map(source => source.id)).toEqual([21, 22]);
+      expect(result[0].sources?.[0]).not.toHaveProperty('documentId');
       expect(result[1].visuals).toBeUndefined();
+      expect(result[1].sources).toEqual([]);
     });
   });
 
@@ -218,6 +224,73 @@ describe('ChatService', () => {
       headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
       signal: controller.signal,
     }));
+  });
+
+  it('loads a technical source PDF through the authenticated opaque-id endpoint', async () => {
+    const blob = new Blob(['pdf'], { type: 'application/pdf' });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(blob) });
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await expect(chatService.getTechnicalSourcePdfBlob(123, controller.signal)).resolves.toBe(blob);
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat/sources/123/document', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+      signal: controller.signal,
+    }));
+  });
+
+  it.each([
+    [401, 'session a expiré'],
+    [403, 'plus accès'],
+    [404, 'plus disponible'],
+  ])('maps source endpoint status %i to a safe message', async (status, expected) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status }));
+
+    await expect(chatService.getTechnicalSourcePdfBlob(123)).rejects.toMatchObject({
+      message: expect.stringContaining(expected),
+    });
+  });
+
+  it('maps source endpoint network failures without leaking details', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('private network detail')));
+
+    await expect(chatService.getTechnicalSourcePdfBlob(123)).rejects.toMatchObject({
+      message: 'Le document source n’a pas pu être chargé.',
+    });
+  });
+
+  it('sends image-only UI attachments through imageDataUris without fileDataUris', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      'data: {"type":"done"}\n',
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await chatService.sendMessage(
+      'Inspecte cette image',
+      null,
+      [new File(['png'], 'photo.png', { type: 'image/png' })],
+      'machine',
+    );
+
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(request.body as string) as Record<string, unknown>;
+    expect(body.imageDataUris).toEqual([expect.stringMatching(/^data:image\/png;base64,/)]);
+    expect(body).not.toHaveProperty('fileDataUris');
+  });
+
+  it('rejects chat documents before sending a request', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(chatService.sendMessage(
+      'Analyse le document',
+      null,
+      [new File(['pdf'], 'manual.pdf', { type: 'application/pdf' })],
+      'machine',
+    )).rejects.toBeDefined();
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('dispatches a sanitized visuals SSE event for the streamed assistant message', async () => {
@@ -235,5 +308,30 @@ describe('ChatService', () => {
       .find(action => action.type === 'CHAT_STREAM_VISUALS');
     expect(visualAction).toMatchObject({ type: 'CHAT_STREAM_VISUALS', visuals: [{ id: 1 }, { id: 2 }] });
     expect(JSON.stringify(visualAction)).not.toContain('assetKey');
+  });
+
+  it('keeps streaming through usage, visuals, and sources until done', async () => {
+    const stream = [
+      'data: {"type":"chunk","content":"Source : p. 72"}\n',
+      'data: {"type":"usage","promptTokens":10,"completionTokens":5,"totalTokens":15,"duration":100}\n',
+      'data: {"type":"visuals","visuals":[{"id":1,"documentId":"manual","page":74,"assetType":"full","tile":null,"name":"page.png","displayOrder":0}]}\n',
+      'data: {"type":"sources","sources":[{"id":123,"pdfPage":74,"displayPage":"72","label":"p. 72","startIndex":9,"endIndex":14,"displayOrder":0}]}\n',
+      'data: {"type":"done"}\n',
+    ].join('');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream, { status: 200 })));
+
+    await chatService.sendMessage('Question', 'conv');
+
+    const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls.map(call => call[0] as AppAction);
+    const terminalActions = actions.filter(action =>
+      ['CHAT_STREAM_USAGE', 'CHAT_STREAM_VISUALS', 'CHAT_STREAM_SOURCES', 'CHAT_STREAM_COMPLETE'].includes(action.type));
+    expect(terminalActions.map(action => action.type)).toEqual([
+      'CHAT_STREAM_USAGE',
+      'CHAT_STREAM_VISUALS',
+      'CHAT_STREAM_SOURCES',
+      'CHAT_STREAM_COMPLETE',
+    ]);
+    expect(terminalActions[0]).toMatchObject({ type: 'CHAT_STREAM_USAGE', messageId: expect.any(String) });
+    expect(terminalActions[2]).toMatchObject({ type: 'CHAT_STREAM_SOURCES', sources: [{ id: 123, pdfPage: 74 }] });
   });
 });

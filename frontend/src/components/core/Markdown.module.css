@@ -93,6 +93,44 @@
   border-radius: 2px;
 }
 
+.technicalSourceLink {
+  appearance: none;
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dotted var(--colorBrandStroke1);
+  border-bottom-color: light-dark(transparent, var(--colorBrandStroke1));
+  background: transparent;
+  color: var(--colorBrandForeground1);
+  color: light-dark(var(--colorBrandForeground2), var(--colorBrandForeground1));
+  font: inherit;
+  line-height: inherit;
+  text-decoration: underline;
+  text-decoration-color: light-dark(var(--colorBrandForeground2), transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+:global(html[style*="color-scheme: light"]) .technicalSourceLink {
+  font-weight: 600;
+}
+
+.technicalSourceLink:hover {
+  color: light-dark(var(--colorBrandForeground2Hover), var(--colorBrandForeground1));
+  border-bottom-style: solid;
+  text-decoration-color: light-dark(var(--colorBrandForeground2Hover), transparent);
+  text-decoration-thickness: 2px;
+}
+
+.technicalSourceLink:focus-visible {
+  outline: 2px solid var(--colorBrandStroke1);
+  outline-color: light-dark(var(--colorBrandForeground2), var(--colorBrandStroke1));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .list {
   padding-left: 2em;
   margin-bottom: 16px;

@@ -1,6 +1,6 @@
 namespace WebApp.Api.Models;
 
-/// <summary>A validated, durable reference to a technical image produced by blob_page_images.</summary>
+/// <summary>A validated, durable reference to a technical image stored for a machine document.</summary>
 public sealed record TechnicalVisualReference(
     string DocumentId,
     int Page,

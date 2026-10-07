@@ -1,6 +1,7 @@
 import type { AppState, AppAction } from '../types/appState';
 import { resolveView } from '../utils/navigation';
 import { parseTechnicalVisuals } from '../utils/technicalVisuals';
+import { parseTechnicalSources } from '../utils/technicalSources';
 
 /**
  * Main application state reducer.
@@ -110,6 +111,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
               id: action.messageId,
               role: 'assistant' as const,
               content: '',
+              sources: [],
               more: {
                 time: new Date().toISOString(),
               },
@@ -202,6 +204,20 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       return { ...state, chat: { ...state.chat, messages: updatedMessages } };
     }
 
+    case 'CHAT_STREAM_SOURCES': {
+      const messageIndex = state.chat.messages.findIndex(
+        msg => msg.id === action.messageId && msg.role === 'assistant'
+      );
+      if (messageIndex === -1) return state;
+
+      const updatedMessages = [...state.chat.messages];
+      updatedMessages[messageIndex] = {
+        ...updatedMessages[messageIndex],
+        sources: parseTechnicalSources(action.sources),
+      };
+      return { ...state, chat: { ...state.chat, messages: updatedMessages } };
+    }
+
     case 'CHAT_STREAM_TOOL_USE': {
       // Set activeToolUse on the streaming message for progress indicator
       const messageIndex = state.chat.messages.findIndex(
@@ -227,50 +243,9 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       };
     }
 
-    case 'CHAT_MCP_APPROVAL_REQUEST': {
-      // Add approval request as a special message
-      const approvalMessage = {
-        id: `approval-${action.messageId}`,
-        role: 'approval' as const,
-        content: '',
-        mcpApproval: {
-          ...action.approvalRequest,
-          previousResponseId: action.previousResponseId || '',
-        },
-      };
-      
-      return {
-        ...state,
-        chat: {
-          ...state.chat,
-          messages: [...state.chat.messages, approvalMessage],
-          status: 'idle',
-        },
-        ui: {
-          ...state.ui,
-          chatInputEnabled: false, // Keep disabled until approval
-        },
-      };
-    }
-
-    case 'CHAT_MCP_APPROVAL_RESOLVED': {
-      return {
-        ...state,
-        chat: {
-          ...state.chat,
-          messages: state.chat.messages.map(msg =>
-            msg.role === 'approval' && msg.mcpApproval?.id === action.approvalRequestId
-              ? { ...msg, mcpApproval: { ...msg.mcpApproval!, resolved: action.resolved } }
-              : msg
-          ),
-        },
-      };
-    }
-
-    case 'CHAT_STREAM_COMPLETE': {
-      // Update the completed message with usage info and clean up retry/tool state
+    case 'CHAT_STREAM_USAGE': {
       const updatedMessages = state.chat.messages.map(msg =>
-        msg.id === state.chat.streamingMessageId
+        msg.id === action.messageId
           ? {
               ...msg,
               more: {
@@ -278,6 +253,20 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
                 usage: action.usage,
               },
               duration: action.usage.duration,
+            }
+          : msg
+      );
+
+      return { ...state, chat: { ...state.chat, messages: updatedMessages } };
+    }
+
+    case 'CHAT_STREAM_COMPLETE': {
+      if (state.chat.streamingMessageId !== action.messageId) return state;
+
+      const updatedMessages = state.chat.messages.map(msg =>
+        msg.id === action.messageId
+          ? {
+              ...msg,
               retryAttempt: undefined,
               maxRetries: undefined,
               activeToolUse: undefined,
@@ -373,6 +362,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         ...updatedMessages[retryIndex],
         content: '',
         annotations: undefined,
+        sources: [],
         retryAttempt: action.attempt,
         maxRetries: action.maxRetries,
       };

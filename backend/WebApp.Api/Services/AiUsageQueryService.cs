@@ -20,6 +20,10 @@ public class AiUsageQueryService(DiagLinkDbContext db)
         public long? Input { get; set; }
         public long? Output { get; set; }
         public long? Total { get; set; }
+        public long? CacheRead { get; set; }
+        public long? CacheCreation { get; set; }
+        public long? CacheCreation5m { get; set; }
+        public long? CacheCreation1h { get; set; }
         public long Machines { get; set; }
         public long Users { get; set; }
         public long NoCompany { get; set; }
@@ -27,7 +31,11 @@ public class AiUsageQueryService(DiagLinkDbContext db)
         public long NoUser { get; set; }
         public AiUsageMetricsDto Metrics() => new(Events, Chats, Summaries, Visions, Known, Events - Known,
             Completed, Events - Completed, Events == 0 ? 0 : Known == 0 ? null : Input,
-            Events == 0 ? 0 : Known == 0 ? null : Output, Events == 0 ? 0 : Known == 0 ? null : Total);
+            Events == 0 ? 0 : Known == 0 ? null : Output, Events == 0 ? 0 : Known == 0 ? null : Total,
+            Events == 0 ? 0 : Known == 0 ? null : CacheRead,
+            Events == 0 ? 0 : Known == 0 ? null : CacheCreation,
+            Events == 0 ? 0 : Known == 0 ? null : CacheCreation5m,
+            Events == 0 ? 0 : Known == 0 ? null : CacheCreation1h);
     }
 
     private IQueryable<AiUsageRecord> Records(AiUsageFilter filter)
@@ -48,6 +56,10 @@ public class AiUsageQueryService(DiagLinkDbContext db)
             Input = g.Sum(r => r.Available ? (long?)r.InputTokens : null),
             Output = g.Sum(r => r.Available ? (long?)r.OutputTokens : null),
             Total = g.Sum(r => r.Available ? (long?)r.TotalTokens : null),
+            CacheRead = g.Sum(r => r.Available ? (long?)(r.CacheReadInputTokens ?? 0) : null),
+            CacheCreation = g.Sum(r => r.Available ? (long?)(r.CacheCreationInputTokens ?? 0) : null),
+            CacheCreation5m = g.Sum(r => r.Available ? (long?)(r.CacheCreation5mInputTokens ?? 0) : null),
+            CacheCreation1h = g.Sum(r => r.Available ? (long?)(r.CacheCreation1hInputTokens ?? 0) : null),
             Machines = g.Where(r => r.MachineId != null).Select(r => r.MachineId).Distinct().LongCount(),
             Users = g.Where(r => r.UserId != null).Select(r => r.UserId).Distinct().LongCount(),
             NoCompany = g.LongCount(r => r.CompanyId == null),

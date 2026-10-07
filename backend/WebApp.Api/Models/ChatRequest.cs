@@ -20,23 +20,6 @@ public record ChatRequest
     /// Supports documents like PDF, DOCX, TXT, etc.
     /// </summary>
     public List<FileAttachment>? FileDataUris { get; init; }
-    /// <summary>
-    /// MCP tool approval response (for resuming after approval request).
-    /// </summary>
-    public McpApprovalResponse? McpApproval { get; init; }
-    /// <summary>
-    /// Response ID to continue from (for MCP approval flow).
-    /// </summary>
-    public string? PreviousResponseId { get; init; }
-}
-
-/// <summary>
-/// Represents a user's approval/rejection decision for an MCP tool call.
-/// </summary>
-public record McpApprovalResponse
-{
-    public required string ApprovalRequestId { get; init; }
-    public required bool Approved { get; init; }
 }
 
 /// <summary>

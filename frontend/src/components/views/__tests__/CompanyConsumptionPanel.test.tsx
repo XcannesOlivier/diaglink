@@ -10,6 +10,7 @@ const metrics={responses:16,vision:2,summaries:1,input:100,output:20,tokens:120,
 const machine=(id:string,name:string,n:number)=>({id,name,billable:id==='a',budget:10,used:10,remaining:0,resetUtc:'2026-11-14T00:00:00Z',rightsEndUtc:'2026-11-14T00:00:00Z',hasPaidRights:true,metrics:{...metrics,responses:n},users:[{id:'u',name:'Olivier',metrics:{...metrics,responses:n,commercialCredit:.3,includedQuotaConsumed:n===16?2.4:1.1}}]});
 const zeroMachine={...machine('b','Machine B',999),budget:0,used:0,remaining:0,resetUtc:null,users:[{id:'u',name:'Olivier',metrics:{...metrics,responses:999,commercialCredit:0,includedQuotaConsumed:0}}]};
 const report={companyName:'Entreprise',walletBalance:49.96,metrics,machines:[machine('a','Machine A',16),zeroMachine]};
+const buttonByDesktopLabel=(root:ParentNode,label:string)=>[...root.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.querySelector(`.${styles.desktopButtonLabel}`)?.textContent===label)!;
 afterEach(()=>vi.unstubAllGlobals());
 
 it('renders one compact summary card per machine with unchanged values and zero-quota support',async()=>{
@@ -36,7 +37,7 @@ it('renders one compact summary card per machine with unchanged values and zero-
   expect(second.classList.contains(styles.machineConsumptionCardAlternate)).toBe(false);
   expect(first.querySelector(`.${styles.machineConsumptionMetrics}`)?.querySelectorAll(':scope > article')).toHaveLength(3);
   expect(second.querySelector(`.${styles.machineConsumptionMetrics}`)?.querySelectorAll(':scope > article')).toHaveLength(3);
-  expect(first.querySelector('header')?.textContent).toBe('Machine AVoir la consommation par utilisateur');expect(first.querySelector('header button')).not.toBeNull();expect(first.querySelector(':scope > button')).toBeNull();
+  expect(first.querySelector('header h3')?.textContent).toBe('Machine A');expect(buttonByDesktopLabel(first,'Voir la consommation par utilisateur')).not.toBeNull();expect(buttonByDesktopLabel(first,'Historique des tokens')).not.toBeNull();expect(first.querySelector(':scope > button')).toBeNull();
   expect(second.querySelector('header')?.textContent).not.toContain('Quota mensuel');expect(second.querySelector('header button')).not.toBeNull();expect(second.querySelector(':scope > button')).toBeNull();
  }finally{await act(async()=>root.unmount());}
 });
@@ -125,7 +126,7 @@ it('limite à cinq machines puis recherche en temps réel dans la liste déjà c
   await act(async()=>button('Voir plus de machines').click());expect(cards()).toHaveLength(7);expect(button('Voir moins de machines')).not.toBeNull();
   await act(async()=>button('Voir moins de machines').click());expect(cards()).toHaveLength(5);
 
-  await act(async()=>[...cards()[0].querySelectorAll<HTMLButtonElement>('button')].find(item=>item.textContent==='Voir la consommation par utilisateur')!.click());
+  await act(async()=>buttonByDesktopLabel(cards()[0],'Voir la consommation par utilisateur').click());
   await type('  MACHINE ALPHA  ');expect(cards().map(card=>card.dataset.machineCard)).toEqual(['Machine Alpha']);expect(cards()[0].textContent).toContain('Olivier');
   await type('H4');expect(cards().map(card=>card.dataset.machineCard)).toEqual(['h4immo']);expect(cards()[0].classList.contains(styles.machineConsumptionCardAlternate)).toBe(true);
   await type('tract');expect(cards().map(card=>card.dataset.machineCard)).toEqual(['Tracteur']);
@@ -141,9 +142,9 @@ it('limite à cinq machines puis recherche en temps réel dans la liste déjà c
 it('opens and closes each machine user consumption independently without navigation',async()=>{
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify(report))));
  const host=document.createElement('div'),root=createRoot(host),initialUrl=window.location.href;
- const buttons=()=>[...host.querySelectorAll<HTMLButtonElement>('button')].filter(button=>button.textContent?.includes('consommation par utilisateur'));
+ const buttons=()=>[...host.querySelectorAll<HTMLButtonElement>('button')].filter(button=>button.querySelector(`.${styles.desktopButtonLabel}`)?.textContent?.includes('consommation par utilisateur'));
  try{await act(async()=>root.render(<CompanyConsumptionPanel companyId="c" token={async()=>null} view="machines"/>));
-  expect(buttons().map(button=>button.textContent)).toEqual(['Voir la consommation par utilisateur','Voir la consommation par utilisateur']);
+  expect(buttons().map(button=>button.querySelector(`.${styles.desktopButtonLabel}`)?.textContent)).toEqual(['Voir la consommation par utilisateur','Voir la consommation par utilisateur']);
   await act(async()=>buttons()[0].click());
   let cards=[...host.querySelectorAll<HTMLElement>('[data-machine-card]')];
   expect(cards[0].textContent).toContain('Masquer la consommation par utilisateur');expect(cards[0].textContent).toContain('Olivier');expect(cards[0].textContent).toContain('24 %');expect(cards[1].textContent).not.toContain('Olivier');
@@ -156,6 +157,81 @@ it('opens and closes each machine user consumption independently without navigat
   expect(cards[0].textContent).toContain('Olivier');expect(cards[1].textContent).toContain('Olivier');expect(cards[1].textContent).toContain('0 %');expect(cards[1].textContent).not.toContain('NaN');expect(cards[1].textContent).not.toContain('Infinity');
   await act(async()=>buttons()[0].click());cards=[...host.querySelectorAll<HTMLElement>('[data-machine-card]')];
   expect(cards[0].textContent).not.toContain('Olivier');expect(cards[1].textContent).toContain('Olivier');expect(window.location.href).toBe(initialUrl);
+ }finally{await act(async()=>root.unmount());}
+});
+
+it('opens and closes Claude call details locally while preserving the main token values',async()=>{
+ const history={items:[
+  {createdAtUtc:'2026-10-05T14:07:57Z',inputTokens:56358,outputTokens:4446,totalTokens:60804,model:'claude-sonnet-5',provider:'Anthropic',calls:[
+   {callNumber:1,inputTokens:8120,outputTokens:280,totalTokens:8400,model:'claude-sonnet-5',stopReason:'tool_use',tools:['file_search']},
+   {callNumber:2,inputTokens:48238,outputTokens:4166,totalTokens:52404,model:'claude-sonnet-5',stopReason:'end_turn',tools:[]},
+  ]},
+  {createdAtUtc:'2026-10-05T13:42:21Z',inputTokens:49046,outputTokens:1082,totalTokens:50128,model:'claude-sonnet-5',provider:'Anthropic',calls:[
+   {callNumber:1,inputTokens:49046,outputTokens:1082,totalTokens:50128,model:'claude-sonnet-5',stopReason:'end_turn',tools:[]},
+  ]},
+ ],hasMore:false};
+ const fetch=vi.fn().mockImplementation(async(input:string)=>new Response(JSON.stringify(String(input).includes('/token-history?')?history:report)));vi.stubGlobal('fetch',fetch);
+ const host=document.createElement('div'),root=createRoot(host),numbers=new Intl.NumberFormat('fr-FR');
+ try{
+  await act(async()=>root.render(<CompanyConsumptionPanel companyId="c" token={async()=>null} view="machines"/>));
+  const card=host.querySelector<HTMLElement>('[data-machine-card="Machine A"]')!;
+  const userButton=buttonByDesktopLabel(card,'Voir la consommation par utilisateur');
+  const historyButton=[...card.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.querySelector(`.${styles.desktopButtonLabel}`)?.textContent==='Historique des tokens')!;
+  await act(async()=>userButton.click());expect(card.querySelector('#machine-users-0')).not.toBeNull();
+  await act(async()=>{historyButton.click();await new Promise(resolve=>window.setTimeout(resolve,0));});
+  expect(card.querySelector('#machine-users-0')).toBeNull();expect(card.querySelector('#machine-token-history-0')).not.toBeNull();
+  await act(async()=>userButton.click());expect(card.querySelector('#machine-users-0')).not.toBeNull();expect(card.querySelector('#machine-token-history-0')).toBeNull();
+  await act(async()=>historyButton.click());expect(card.querySelector('#machine-users-0')).toBeNull();expect(card.querySelector('#machine-token-history-0')).not.toBeNull();
+
+  const mainTable=card.querySelector<HTMLTableElement>('#machine-token-history-0 > div > table')!;
+  expect(mainTable.classList.contains(styles.tokenHistoryTable)).toBe(true);expect(mainTable.parentElement?.classList.contains(styles.tokenHistoryScroll)).toBe(true);
+  expect([...mainTable.tHead!.rows[0].cells]).toHaveLength(10);
+  expect([...mainTable.tHead!.rows[0].cells].slice(1,8).map(cell=>cell.textContent)).toEqual(['Input','Cache lu','Cache créé','Cache 5 min','Cache 1 h','Output','Total']);
+  let rows=[...mainTable.tBodies[0].rows];
+  expect([...rows[0].cells].slice(1,9).map(cell=>cell.textContent)).toEqual([numbers.format(56358),'0','0','0','0',numbers.format(4446),numbers.format(60804),'claude-sonnet-5']);
+  expect(rows[0].querySelector('button')?.textContent).toBe('Détails');
+  expect(rows[1].querySelector('button')?.textContent).toBe('Détails');
+  const fetchCount=fetch.mock.calls.length;
+
+  await act(async()=>rows[0].querySelector<HTMLButtonElement>('button')!.click());
+  rows=[...mainTable.tBodies[0].rows];
+  expect(rows[0].querySelector('button')?.textContent).toBe('Masquer');expect(rows).toHaveLength(3);
+  const detailTable=rows[1].querySelector<HTMLTableElement>('table')!;
+  expect(detailTable.classList.contains(styles.tokenHistoryTable)).toBe(true);expect(detailTable.parentElement?.classList.contains(styles.tokenHistoryScroll)).toBe(true);
+  expect([...detailTable.tHead!.rows[0].cells]).toHaveLength(10);
+  expect([...detailTable.tHead!.rows[0].cells].slice(0,8).map(cell=>cell.textContent)).toEqual(['Appel','Input','Cache lu','Cache créé','Cache 5 min','Cache 1 h','Output','Total']);
+  const callRows=[...detailTable.tBodies[0].rows];
+  expect([...callRows[0].cells].slice(0,8).map(cell=>cell.textContent)).toEqual(['1',numbers.format(8120),'0','0','0','0',numbers.format(280),numbers.format(8400)]);
+  expect([...callRows[1].cells].slice(0,8).map(cell=>cell.textContent)).toEqual(['2',numbers.format(48238),'0','0','0','0',numbers.format(4166),numbers.format(52404)]);
+  expect(fetch).toHaveBeenCalledTimes(fetchCount);
+
+  await act(async()=>rows[2].querySelector<HTMLButtonElement>('button')!.click());
+  rows=[...mainTable.tBodies[0].rows];
+  expect(rows).toHaveLength(3);expect(rows[0].querySelector('button')?.textContent).toBe('Détails');expect(rows[1].querySelector('button')?.textContent).toBe('Masquer');
+  expect(rows[2].textContent).toContain(numbers.format(49046));expect(rows[2].textContent).not.toContain(numbers.format(56358));
+  await act(async()=>rows[1].querySelector<HTMLButtonElement>('button')!.click());
+  expect([...mainTable.tBodies[0].rows]).toHaveLength(2);expect(mainTable.textContent).not.toContain('Détail des appels Claude');
+  expect(fetch).toHaveBeenCalledTimes(fetchCount);
+ }finally{await act(async()=>root.unmount());}
+});
+
+it('loads token history five rows at a time',async()=>{
+ const items=Array.from({length:6},(_,index)=>({createdAtUtc:`2026-10-05T${String(14-index).padStart(2,'0')}:00:00Z`,inputTokens:100+index,outputTokens:10,totalTokens:110+index,model:'claude-sonnet-5',provider:'Anthropic',calls:null}));
+ const fetch=vi.fn().mockImplementation(async(input:string)=>{
+  const url=String(input);if(!url.includes('/token-history?'))return new Response(JSON.stringify(report));
+  const skip=Number(new URL(url,'http://localhost').searchParams.get('skip')??0);
+  return new Response(JSON.stringify({items:items.slice(skip,skip+5),hasMore:skip+5<items.length}));
+ });vi.stubGlobal('fetch',fetch);
+ const host=document.createElement('div'),root=createRoot(host);
+ try{
+  await act(async()=>root.render(<CompanyConsumptionPanel companyId="c" token={async()=>null} view="machines"/>));
+  const card=host.querySelector<HTMLElement>('[data-machine-card="Machine A"]')!;
+  await act(async()=>{buttonByDesktopLabel(card,'Historique des tokens').click();await new Promise(resolve=>window.setTimeout(resolve,0));});
+  const tokenCalls=()=>fetch.mock.calls.map(call=>String(call[0])).filter(url=>url.includes('/token-history?'));
+  const rows=()=>card.querySelectorAll('#machine-token-history-0 > div > table > tbody > tr');
+  expect(tokenCalls()).toEqual([expect.stringContaining('skip=0&take=5')]);expect(rows()).toHaveLength(5);
+  await act(async()=>{[...card.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Afficher plus')!.click();await new Promise(resolve=>window.setTimeout(resolve,0));});
+  expect(tokenCalls()).toEqual([expect.stringContaining('skip=0&take=5'),expect.stringContaining('skip=5&take=5')]);expect(rows()).toHaveLength(6);expect(card.textContent).not.toContain('Afficher plus');
  }finally{await act(async()=>root.unmount());}
 });
 
@@ -207,7 +283,7 @@ it('keeps assigned users with zero consumption and historical rows in the expand
  const users=[{id:'used',name:'Robert Petit',metrics},{id:'zero',name:'Technicien sans usage',metrics:zero},{id:'deleted',name:'Utilisateur non attribué / supprimé',metrics:{...zero,vision:1}}];
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({...report,machines:[{...machine('a','Machine A',16),users}]}))));
  const host=document.createElement('div'),root=createRoot(host);
- try{await act(async()=>root.render(<CompanyConsumptionPanel companyId="c" token={async()=>null} view="machines"/>));await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Voir la consommation par utilisateur')!.click());
+ try{await act(async()=>root.render(<CompanyConsumptionPanel companyId="c" token={async()=>null} view="machines"/>));await act(async()=>buttonByDesktopLabel(host,'Voir la consommation par utilisateur').click());
   const rows=[...host.querySelectorAll('table tbody tr')].map(row=>row.textContent);expect(rows).toHaveLength(3);expect(rows[0]).toContain('Robert Petit');expect(rows[0]).toContain('2,40 €');expect(rows[0]).toContain('24 %');expect(rows[1]).toContain('Technicien sans usage');expect(rows[1]).toContain('0,00 €');expect(rows[2]).toContain('Utilisateur non attribué / supprimé');
  }finally{await act(async()=>root.unmount());}
 });

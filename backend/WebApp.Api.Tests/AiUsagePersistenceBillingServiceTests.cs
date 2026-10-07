@@ -14,7 +14,7 @@ public class AiUsagePersistenceBillingServiceTests
 {
     private static DbContextOptions<DiagLinkDbContext> Options() => new DbContextOptionsBuilder<DiagLinkDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
     private static AiUsageMeasurement Measurement(AiUsageType type=AiUsageType.ChatResponse) => new(null,null,null,null,"test",null,
-        new AiResponseUsage(type,"response",true,1,1,2,"model","response",null,DateTimeOffset.UtcNow));
+        new AiResponseUsage(type,"response",true,1,1,2,"model","response",DateTimeOffset.UtcNow));
     private sealed class Billing(Func<Guid,CancellationToken,Task<AiUsageBillingResult>> action) : IAiUsageBillingOrchestrator
     {
         public List<Guid> Calls {get;}=[];

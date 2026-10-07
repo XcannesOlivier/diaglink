@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using WebApp.Api.Data;
 using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
@@ -8,10 +9,17 @@ namespace WebApp.Api.Services;
 /// <summary>Read-only usage valuation; never persists or replays billing.</summary>
 public static class AdminConsumptionReader
 {
+    private static readonly JsonSerializerOptions CallBreakdownJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     public record Metrics(int Responses, int Vision, int Summaries, long Input, long Output, long Tokens,
+        long CacheReadInput, long CacheCreationInput, long CacheCreation5mInput, long CacheCreation1hInput,
         int Unknown, int Unvalued, decimal RealCost, decimal CommercialCredit, decimal WalletRealCost,
         object[] Providers);
     public record UserMetrics(int Responses, int Vision, int Summaries, long Input, long Output, long Tokens,
+        long CacheReadInput, long CacheCreationInput, long CacheCreation5mInput, long CacheCreation1hInput,
         int Unknown, int Unvalued, decimal RealCost, decimal CommercialCredit, decimal WalletRealCost,
         object[] Providers, decimal IncludedQuotaConsumed);
     public record UserRow(Guid? Id, string Name, UserMetrics Metrics);
@@ -20,12 +28,124 @@ public static class AdminConsumptionReader
         Metrics Metrics, UserRow[] Users);
     public record Report(string CompanyName, decimal WalletBalance, Metrics Metrics, MachineRow[] Machines);
 
+    public record MachineTokenHistoryItem(
+        DateTime CreatedAtUtc,
+        int InputTokens,
+        int OutputTokens,
+        int TotalTokens,
+        int CacheReadInputTokens,
+        int CacheCreationInputTokens,
+        int CacheCreation5mInputTokens,
+        int CacheCreation1hInputTokens,
+        string? Model,
+        string? Provider,
+        MachineTokenHistoryCall[]? Calls);
+
+    public record MachineTokenHistoryCall(
+        int CallNumber,
+        long InputTokens,
+        long OutputTokens,
+        long TotalTokens,
+        long CacheReadInputTokens,
+        long CacheCreationInputTokens,
+        long CacheCreation5mInputTokens,
+        long CacheCreation1hInputTokens,
+        string Model,
+        string StopReason,
+        string[] Tools);
+
+    public record MachineTokenHistoryResponse(
+        MachineTokenHistoryItem[] Items,
+        bool HasMore);
     public static async Task<IResult> ReadAsync(Guid companyId, string? from, string? to, string? usageType,
         DiagLinkDbContext db, CancellationToken ct)
     {
         if (!AiUsageFilter.TryParse(from, to, usageType, out var filter)) return Results.BadRequest();
         var report = await ReadReportAsync(companyId, filter, db, ct);
         return report == null ? Results.NotFound() : Results.Ok(report);
+    }
+
+    public static async Task<IResult> ReadMachineTokenHistoryAsync(
+        Guid companyId,
+        Guid machineId,
+        int? skip,
+        int? take,
+        DiagLinkDbContext db,
+        CancellationToken ct)
+    {
+        var offset = skip ?? 0;
+        var pageSize = take ?? 20;
+
+        if (offset < 0 || pageSize < 1 || pageSize > 100)
+            return Results.BadRequest(new
+        {
+            error = "Pagination invalide."
+        });
+
+     var machineExists = await db.Machines
+         .AsNoTracking()
+         .AnyAsync(
+             machine => machine.Id == machineId
+                 && machine.CompanyId == companyId,
+             ct);
+
+     if (!machineExists)
+         return Results.NotFound();
+
+     var rows = await db.AiUsageRecords
+         .AsNoTracking()
+         .Where(usage =>
+             usage.CompanyId == companyId
+             && usage.MachineId == machineId
+             && usage.UsageType == AiUsageType.ChatResponse)
+         .OrderByDescending(usage => usage.CreatedAtUtc)
+         .Skip(offset)
+         .Take(pageSize + 1)
+         .Select(usage => new
+         {
+             usage.CreatedAtUtc,
+             InputTokens = usage.InputTokens ?? 0,
+             OutputTokens = usage.OutputTokens ?? 0,
+             TotalTokens = usage.TotalTokens ?? 0,
+             CacheReadInputTokens = usage.CacheReadInputTokens ?? 0,
+             CacheCreationInputTokens = usage.CacheCreationInputTokens ?? 0,
+             CacheCreation5mInputTokens = usage.CacheCreation5mInputTokens ?? 0,
+             CacheCreation1hInputTokens = usage.CacheCreation1hInputTokens ?? 0,
+             usage.Model,
+             usage.Provider,
+             usage.CallBreakdownJson
+         })
+         .ToArrayAsync(ct);
+
+     var hasMore = rows.Length > pageSize;
+
+     return Results.Ok(new MachineTokenHistoryResponse(
+          rows.Take(pageSize).Select(row => new MachineTokenHistoryItem(
+              row.CreatedAtUtc,
+              row.InputTokens,
+              row.OutputTokens,
+              row.TotalTokens,
+              row.CacheReadInputTokens,
+              row.CacheCreationInputTokens,
+              row.CacheCreation5mInputTokens,
+              row.CacheCreation1hInputTokens,
+              row.Model,
+              row.Provider,
+              ReadCallBreakdown(row.CallBreakdownJson))).ToArray(),
+         hasMore));
+    }
+
+    private static MachineTokenHistoryCall[]? ReadCallBreakdown(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<MachineTokenHistoryCall[]>(value, CallBreakdownJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     public static async Task<Report?> ReadReportAsync(Guid companyId, AiUsageFilter filter,
@@ -63,6 +183,10 @@ public static class AdminConsumptionReader
             rows.Where(u => u.Available).Sum(u => (long?)u.InputTokens ?? 0),
             rows.Where(u => u.Available).Sum(u => (long?)u.OutputTokens ?? 0),
             rows.Where(u => u.Available).Sum(u => (long?)u.TotalTokens ?? 0),
+            rows.Where(u => u.Available).Sum(u => (long?)u.CacheReadInputTokens ?? 0),
+            rows.Where(u => u.Available).Sum(u => (long?)u.CacheCreationInputTokens ?? 0),
+            rows.Where(u => u.Available).Sum(u => (long?)u.CacheCreation5mInputTokens ?? 0),
+            rows.Where(u => u.Available).Sum(u => (long?)u.CacheCreation1hInputTokens ?? 0),
             rows.Count(u => !u.Available || u.InputTokens == null || u.OutputTokens == null),
             rows.Count(u => valued[u.Id] == null), rows.Sum(u => valued[u.Id] ?? 0),
             rows.Sum(u => walletDebits[u.Id].Sum(e => e.CommercialCreditAmount ?? 0)),
@@ -72,6 +196,7 @@ public static class AdminConsumptionReader
         {
             var metrics = Aggregate(rows);
             return new(metrics.Responses, metrics.Vision, metrics.Summaries, metrics.Input, metrics.Output, metrics.Tokens,
+                metrics.CacheReadInput, metrics.CacheCreationInput, metrics.CacheCreation5mInput, metrics.CacheCreation1hInput,
                 metrics.Unknown, metrics.Unvalued, metrics.RealCost, metrics.CommercialCredit, metrics.WalletRealCost,
                 metrics.Providers, rows.Sum(u => includedDebits[u.Id].Sum(e => e.RealAiCost ?? 0)));
         }

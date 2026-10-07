@@ -9,6 +9,10 @@ public class AiPricing
     public string? UsageType { get; set; }
     public decimal InputPricePerMillion { get; set; }
     public decimal OutputPricePerMillion { get; set; }
+    public decimal? CacheReadPricePerMillion { get; set; }
+    public decimal? CacheCreation5mPricePerMillion { get; set; }
+    public decimal? CacheCreation1hPricePerMillion { get; set; }
+    public decimal? WebSearchPricePerRequest { get; set; }
     public required string Currency { get; set; }
     public DateTime EffectiveFromUtc { get; set; }
     public DateTime? EffectiveToUtc { get; set; }

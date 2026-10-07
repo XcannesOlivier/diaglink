@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
@@ -13,14 +14,15 @@ public sealed class ClaudeDirectChatRuntime(
     public async IAsyncEnumerable<StreamChunk> StreamMessageAsync(
         Machine machine,
         string message,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default,
+        IReadOnlyList<ClaudeDirectUserImage>? userImages = null)
     {
         ArgumentNullException.ThrowIfNull(machine);
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
 
         var request = await requestFactory.CreateAsync(
             machine,
-            [new ClaudeDirectMessage("user", message)],
+            [new ClaudeDirectMessage("user", message, userImages)],
             cancellationToken);
         var result = await chatService.CompleteAsync(request, cancellationToken);
 
@@ -34,6 +36,16 @@ public sealed class ClaudeDirectChatRuntime(
             yield return StreamChunk.WithVisuals(result.Visuals);
         }
 
+        if (result.Sources.Count > 0)
+        {
+            yield return StreamChunk.WithSources(result.Sources);
+        }
+
+        if (result.WebCitations.Count > 0)
+        {
+            yield return StreamChunk.WithAnnotations(result.WebCitations.Select(ToAnnotation).ToList());
+        }
+
         if (!string.IsNullOrWhiteSpace(result.FinalText))
         {
             yield return StreamChunk.Text(result.FinalText);
@@ -41,6 +53,22 @@ public sealed class ClaudeDirectChatRuntime(
 
         var unrecoveredErrors = result.Errors.Where(error => !error.Recovered).ToArray();
         var finalCall = result.Calls.LastOrDefault();
+        var callBreakdownJson = result.Calls.Count == 0
+            ? null
+            : JsonSerializer.Serialize(result.Calls.Select(call => new
+            {
+                callNumber = call.CallNumber,
+                inputTokens = call.InputTokens,
+                outputTokens = call.OutputTokens,
+                cacheReadInputTokens = call.CacheReadInputTokens,
+                cacheCreationInputTokens = call.CacheCreationInputTokens,
+                cacheCreation5mInputTokens = call.CacheCreation5mInputTokens,
+                cacheCreation1hInputTokens = call.CacheCreation1hInputTokens,
+                totalTokens = call.TotalTokens,
+                model = call.Model,
+                stopReason = call.StopReason,
+                tools = call.Tools
+            }));
         yield return new StreamChunk
         {
             Usage = new AiResponseUsage(
@@ -52,11 +80,16 @@ public sealed class ClaudeDirectChatRuntime(
                 ToTokenCount(result.Usage.TotalTokens),
                 result.Model,
                 "response",
-                null,
                 DateTimeOffset.UtcNow)
             {
                 Provider = "Anthropic",
-                Deployment = options.Value.Deployment
+                Deployment = options.Value.Deployment,
+                CallBreakdownJson = callBreakdownJson,
+                CacheReadInputTokens = ToTokenCount(result.Usage.CacheReadInputTokens),
+                CacheCreationInputTokens = ToTokenCount(result.Usage.CacheCreationInputTokens),
+                CacheCreation5mInputTokens = ToTokenCount(result.Usage.CacheCreation5mInputTokens),
+                CacheCreation1hInputTokens = ToTokenCount(result.Usage.CacheCreation1hInputTokens),
+                WebSearchRequests = ToTokenCount(result.Usage.WebSearchRequests)
             }
         };
 
@@ -83,6 +116,14 @@ public sealed class ClaudeDirectChatRuntime(
             }
         }
     }
+
+    private static AnnotationInfo ToAnnotation(ClaudeDirectWebCitation citation) => new()
+    {
+        Type = "uri_citation",
+        Label = string.IsNullOrWhiteSpace(citation.Title) ? citation.Url : citation.Title,
+        Url = citation.Url,
+        Quote = citation.CitedText
+    };
 
     private static int ToTokenCount(long value) => checked((int)value);
 }

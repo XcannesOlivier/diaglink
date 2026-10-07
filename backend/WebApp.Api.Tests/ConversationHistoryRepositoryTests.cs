@@ -1,10 +1,11 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using WebApp.Api.Data;
 using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
 using WebApp.Api.Repositories;
+using WebApp.Api.Services;
 
 namespace WebApp.Api.Tests;
 
@@ -57,21 +58,21 @@ public class ConversationHistoryRepositoryTests
     public async Task AddMessageAsync_OtherUsersConversationId_DoesNotPersistMessage()
     {
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-shared-id";
+        const string conversationPublicId = "conv-shared-id";
         const string ownerUserObjectId = "user-A";
         const string attackerUserObjectId = "user-B";
 
         await using (var seedContext = CreateContext(dbName))
         {
             await CreateRepository(seedContext).CreateConversationAsync(
-                foundryConversationId, ownerUserObjectId, agentName: null, machineId: null, cancellationToken: CancellationToken.None);
+                conversationPublicId, ownerUserObjectId, agentName: null, machineId: null, cancellationToken: CancellationToken.None);
         }
 
-        // User B attempts to add a message to a FoundryConversationId owned by User A.
+        // User B attempts to add a message to a ConversationPublicId owned by User A.
         await using (var attackContext = CreateContext(dbName))
         {
             var messageId = await CreateRepository(attackContext).AddMessageAsync(
-                foundryConversationId, attackerUserObjectId, "user", "message injecte par B", CancellationToken.None);
+                conversationPublicId, attackerUserObjectId, "user", "message injecte par B", CancellationToken.None);
             Assert.IsNull(messageId);
         }
 
@@ -83,19 +84,19 @@ public class ConversationHistoryRepositoryTests
     public async Task AddMessageAsync_OwningUser_PersistsMessage()
     {
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-owned-id";
+        const string conversationPublicId = "conv-owned-id";
         const string ownerUserObjectId = "user-A";
 
         await using (var seedContext = CreateContext(dbName))
         {
             await CreateRepository(seedContext).CreateConversationAsync(
-                foundryConversationId, ownerUserObjectId, agentName: null, machineId: null, cancellationToken: CancellationToken.None);
+                conversationPublicId, ownerUserObjectId, agentName: null, machineId: null, cancellationToken: CancellationToken.None);
         }
 
         await using (var writeContext = CreateContext(dbName))
         {
             var messageId = await CreateRepository(writeContext).AddMessageAsync(
-                foundryConversationId, ownerUserObjectId, "user", "message legitime de A", CancellationToken.None);
+                conversationPublicId, ownerUserObjectId, "user", "message legitime de A", CancellationToken.None);
             Assert.IsNotNull(messageId);
             Assert.AreEqual((await writeContext.ConversationMessages.SingleAsync()).Id, messageId.Value);
         }
@@ -108,25 +109,25 @@ public class ConversationHistoryRepositoryTests
     public async Task GetTechnicalSummaryForUserAsync_OtherUsersConversationId_ReturnsNull()
     {
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-with-summary";
+        const string conversationPublicId = "conv-with-summary";
         const string ownerUserObjectId = "user-A";
         const string attackerUserObjectId = "user-B";
 
         await using (var seedContext = CreateContext(dbName))
         {
             await CreateRepository(seedContext).CreateConversationAsync(
-                foundryConversationId, ownerUserObjectId, agentName: null, machineId: null, cancellationToken: CancellationToken.None);
+                conversationPublicId, ownerUserObjectId, agentName: null, machineId: null, cancellationToken: CancellationToken.None);
 
             // Set TechnicalSummary directly (ExecuteUpdateAsync is unsupported by the EF Core InMemory provider).
-            var conversation = await seedContext.Conversations.FirstAsync(c => c.FoundryConversationId == foundryConversationId);
+            var conversation = await seedContext.Conversations.FirstAsync(c => c.ConversationPublicId == conversationPublicId);
             conversation.TechnicalSummary = "Resume confidentiel de A";
             await seedContext.SaveChangesAsync();
         }
 
-        // User B attempts to read User A's TechnicalSummary via A's FoundryConversationId.
+        // User B attempts to read User A's TechnicalSummary via A's ConversationPublicId.
         await using var readContext = CreateContext(dbName);
         var summaryForAttacker = await CreateRepository(readContext)
-            .GetTechnicalSummaryForUserAsync(foundryConversationId, attackerUserObjectId, CancellationToken.None);
+            .GetTechnicalSummaryForUserAsync(conversationPublicId, attackerUserObjectId, CancellationToken.None);
 
         Assert.IsNull(summaryForAttacker);
     }
@@ -135,23 +136,23 @@ public class ConversationHistoryRepositoryTests
     public async Task GetTechnicalSummaryForUserAsync_OwningUser_ReturnsSummary()
     {
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-with-summary-2";
+        const string conversationPublicId = "conv-with-summary-2";
         const string ownerUserObjectId = "user-A";
         const string summary = "Resume technique de A";
 
         await using (var seedContext = CreateContext(dbName))
         {
             await CreateRepository(seedContext).CreateConversationAsync(
-                foundryConversationId, ownerUserObjectId, agentName: null, machineId: null, cancellationToken: CancellationToken.None);
+                conversationPublicId, ownerUserObjectId, agentName: null, machineId: null, cancellationToken: CancellationToken.None);
 
-            var conversation = await seedContext.Conversations.FirstAsync(c => c.FoundryConversationId == foundryConversationId);
+            var conversation = await seedContext.Conversations.FirstAsync(c => c.ConversationPublicId == conversationPublicId);
             conversation.TechnicalSummary = summary;
             await seedContext.SaveChangesAsync();
         }
 
         await using var readContext = CreateContext(dbName);
         var result = await CreateRepository(readContext)
-            .GetTechnicalSummaryForUserAsync(foundryConversationId, ownerUserObjectId, CancellationToken.None);
+            .GetTechnicalSummaryForUserAsync(conversationPublicId, ownerUserObjectId, CancellationToken.None);
 
         Assert.AreEqual(summary, result);
     }
@@ -162,7 +163,7 @@ public class ConversationHistoryRepositoryTests
     /// </summary>
     private static async Task<Guid> SeedConversationWithMessagesAsync(
         string dbName,
-        string foundryConversationId,
+        string conversationPublicId,
         string userObjectId,
         int count,
         HashSet<int>? summarizedIndexes = null)
@@ -171,7 +172,7 @@ public class ConversationHistoryRepositoryTests
         var conversation = new Conversation
         {
             Id = Guid.NewGuid(),
-            FoundryConversationId = foundryConversationId,
+            ConversationPublicId = conversationPublicId,
             UserObjectId = userObjectId,
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow,
@@ -199,12 +200,12 @@ public class ConversationHistoryRepositoryTests
     public async Task GetRecentUnsummarizedMessagesForUserAsync_OtherUser_ReturnsEmpty()
     {
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-recent-1";
-        await SeedConversationWithMessagesAsync(dbName, foundryConversationId, "user-A", count: 4);
+        const string conversationPublicId = "conv-recent-1";
+        await SeedConversationWithMessagesAsync(dbName, conversationPublicId, "user-A", count: 4);
 
         await using var readContext = CreateContext(dbName);
         var result = await CreateRepository(readContext)
-            .GetRecentUnsummarizedMessagesForUserAsync(foundryConversationId, "user-B", limit: 6, CancellationToken.None);
+            .GetRecentUnsummarizedMessagesForUserAsync(conversationPublicId, "user-B", limit: 6, CancellationToken.None);
 
         Assert.AreEqual(0, result.Count);
     }
@@ -213,12 +214,12 @@ public class ConversationHistoryRepositoryTests
     public async Task GetRecentUnsummarizedMessagesForUserAsync_OwningUser_ReturnsMessages()
     {
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-recent-2";
-        await SeedConversationWithMessagesAsync(dbName, foundryConversationId, "user-A", count: 4);
+        const string conversationPublicId = "conv-recent-2";
+        await SeedConversationWithMessagesAsync(dbName, conversationPublicId, "user-A", count: 4);
 
         await using var readContext = CreateContext(dbName);
         var result = await CreateRepository(readContext)
-            .GetRecentUnsummarizedMessagesForUserAsync(foundryConversationId, "user-A", limit: 6, CancellationToken.None);
+            .GetRecentUnsummarizedMessagesForUserAsync(conversationPublicId, "user-A", limit: 6, CancellationToken.None);
 
         Assert.AreEqual(4, result.Count);
     }
@@ -227,14 +228,14 @@ public class ConversationHistoryRepositoryTests
     public async Task GetRecentUnsummarizedMessagesForUserAsync_ExcludesSummarizedMessages()
     {
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-recent-3";
+        const string conversationPublicId = "conv-recent-3";
         // 8 messages, the 4 oldest (indexes 0-3) already folded into TechnicalSummary.
         await SeedConversationWithMessagesAsync(
-            dbName, foundryConversationId, "user-A", count: 8, summarizedIndexes: [0, 1, 2, 3]);
+            dbName, conversationPublicId, "user-A", count: 8, summarizedIndexes: [0, 1, 2, 3]);
 
         await using var readContext = CreateContext(dbName);
         var result = await CreateRepository(readContext)
-            .GetRecentUnsummarizedMessagesForUserAsync(foundryConversationId, "user-A", limit: 6, CancellationToken.None);
+            .GetRecentUnsummarizedMessagesForUserAsync(conversationPublicId, "user-A", limit: 6, CancellationToken.None);
 
         Assert.IsTrue(result.All(m => m.Content is "msg-4" or "msg-5" or "msg-6" or "msg-7"));
     }
@@ -243,27 +244,49 @@ public class ConversationHistoryRepositoryTests
     public async Task GetRecentUnsummarizedMessagesForUserAsync_RespectsLimit()
     {
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-recent-4";
-        await SeedConversationWithMessagesAsync(dbName, foundryConversationId, "user-A", count: 10);
+        const string conversationPublicId = "conv-recent-4";
+        await SeedConversationWithMessagesAsync(dbName, conversationPublicId, "user-A", count: 10);
 
         await using var readContext = CreateContext(dbName);
         var result = await CreateRepository(readContext)
-            .GetRecentUnsummarizedMessagesForUserAsync(foundryConversationId, "user-A", limit: 6, CancellationToken.None);
+            .GetRecentUnsummarizedMessagesForUserAsync(conversationPublicId, "user-A", limit: 6, CancellationToken.None);
 
         Assert.AreEqual(6, result.Count);
+    }
+
+    [TestMethod]
+    [DataRow(8)]
+    [DataRow(10)]
+    public async Task GetRecentUnsummarizedMessagesForUserAsync_ContextWindowReturnsAllMessagesOldestFirst(int messageCount)
+    {
+        var dbName = Guid.NewGuid().ToString();
+        const string conversationPublicId = "conv-context-window";
+        await SeedConversationWithMessagesAsync(dbName, conversationPublicId, "user-A", count: messageCount);
+
+        await using var readContext = CreateContext(dbName);
+        var result = await CreateRepository(readContext)
+            .GetRecentUnsummarizedMessagesForUserAsync(
+                conversationPublicId,
+                "user-A",
+                ConversationSummaryService.MaxContextMessageCount,
+                CancellationToken.None);
+
+        CollectionAssert.AreEqual(
+            Enumerable.Range(0, messageCount).Select(index => $"msg-{index}").ToList(),
+            result.Select(message => message.Content).ToList());
     }
 
     [TestMethod]
     public async Task GetRecentUnsummarizedMessagesForUserAsync_SelectsMostRecentNotOldest()
     {
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-recent-5";
+        const string conversationPublicId = "conv-recent-5";
         // 10 messages: msg-0..msg-9 (msg-9 is the most recent).
-        await SeedConversationWithMessagesAsync(dbName, foundryConversationId, "user-A", count: 10);
+        await SeedConversationWithMessagesAsync(dbName, conversationPublicId, "user-A", count: 10);
 
         await using var readContext = CreateContext(dbName);
         var result = await CreateRepository(readContext)
-            .GetRecentUnsummarizedMessagesForUserAsync(foundryConversationId, "user-A", limit: 6, CancellationToken.None);
+            .GetRecentUnsummarizedMessagesForUserAsync(conversationPublicId, "user-A", limit: 6, CancellationToken.None);
 
         var contents = result.Select(m => m.Content).ToList();
         CollectionAssert.AreEqual(
@@ -275,12 +298,12 @@ public class ConversationHistoryRepositoryTests
     public async Task GetRecentUnsummarizedMessagesForUserAsync_ReturnsChronologicalOrder()
     {
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-recent-6";
-        await SeedConversationWithMessagesAsync(dbName, foundryConversationId, "user-A", count: 6);
+        const string conversationPublicId = "conv-recent-6";
+        await SeedConversationWithMessagesAsync(dbName, conversationPublicId, "user-A", count: 6);
 
         await using var readContext = CreateContext(dbName);
         var result = await CreateRepository(readContext)
-            .GetRecentUnsummarizedMessagesForUserAsync(foundryConversationId, "user-A", limit: 6, CancellationToken.None);
+            .GetRecentUnsummarizedMessagesForUserAsync(conversationPublicId, "user-A", limit: 6, CancellationToken.None);
 
         for (var i = 1; i < result.Count; i++)
         {
@@ -296,15 +319,15 @@ public class ConversationHistoryRepositoryTests
         // Proves the Program.cs ordering contract: fetching memory BEFORE persisting the current
         // question guarantees the question is never duplicated inside the "recent messages" window.
         var dbName = Guid.NewGuid().ToString();
-        const string foundryConversationId = "conv-no-dup";
+        const string conversationPublicId = "conv-no-dup";
         const string userObjectId = "user-A";
-        await SeedConversationWithMessagesAsync(dbName, foundryConversationId, userObjectId, count: 2);
+        await SeedConversationWithMessagesAsync(dbName, conversationPublicId, userObjectId, count: 2);
 
         List<ConversationMessage> beforeSave;
         await using (var fetchContext = CreateContext(dbName))
         {
             beforeSave = await CreateRepository(fetchContext)
-                .GetRecentUnsummarizedMessagesForUserAsync(foundryConversationId, userObjectId, limit: 6, CancellationToken.None);
+                .GetRecentUnsummarizedMessagesForUserAsync(conversationPublicId, userObjectId, limit: 6, CancellationToken.None);
         }
 
         Assert.IsFalse(beforeSave.Any(m => m.Content == "current question"));
@@ -312,14 +335,14 @@ public class ConversationHistoryRepositoryTests
         await using (var saveContext = CreateContext(dbName))
         {
             await CreateRepository(saveContext).AddMessageAsync(
-                foundryConversationId, userObjectId, "user", "current question", CancellationToken.None);
+                conversationPublicId, userObjectId, "user", "current question", CancellationToken.None);
         }
 
         List<ConversationMessage> afterSave;
         await using (var refetchContext = CreateContext(dbName))
         {
             afterSave = await CreateRepository(refetchContext)
-                .GetRecentUnsummarizedMessagesForUserAsync(foundryConversationId, userObjectId, limit: 6, CancellationToken.None);
+                .GetRecentUnsummarizedMessagesForUserAsync(conversationPublicId, userObjectId, limit: 6, CancellationToken.None);
         }
 
         Assert.IsTrue(afterSave.Any(m => m.Content == "current question"));
@@ -493,7 +516,86 @@ public class ConversationHistoryRepositoryTests
         var messages = await CreateRepository(readContext)
             .GetConversationMessagesAsync("conv-legacy", "user-A", CancellationToken.None);
 
-        Assert.HasCount(0, messages!.Single().Visuals);
+        var message = messages!.Single();
+        Assert.HasCount(0, message.Visuals);
+        Assert.HasCount(0, message.Sources);
+    }
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_PersistsAndReturnsSourcesWithoutPrivateFields()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-sources", "user-A");
+        var source = SourceReference();
+        ConversationMessagePersistenceResult result;
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            result = (await CreateRepository(writeContext).AddMessageAsync(
+                "conv-sources",
+                "user-A",
+                "assistant",
+                "Source : p. 70.",
+                [FullVisual()],
+                [source],
+                CancellationToken.None))!;
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var history = await CreateRepository(readContext)
+            .GetConversationMessagesAsync("conv-sources", "user-A", CancellationToken.None);
+        var persisted = await readContext.ConversationMessageSourceReferences.SingleAsync();
+        var historyMessage = history!.Single();
+
+        Assert.AreEqual(source.DocumentId, persisted.DocumentId);
+        Assert.AreEqual(source.PdfPage, persisted.PdfPage);
+        Assert.IsTrue(result.Sources.Single().Id > 0);
+        CollectionAssert.AreEqual(result.Sources.ToList(), historyMessage.Sources.ToList());
+        Assert.IsNull(typeof(ConversationMessageSourceReferenceInfo).GetProperty("DocumentId"));
+        Assert.IsNull(typeof(ConversationMessageSourceReferenceInfo).GetProperty("SourceBlob"));
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            historyMessage.Sources,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.IsFalse(json.Contains("documentId", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(json.Contains("sourceBlob", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(json.Contains("https://", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(json.Contains("sig=", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_MessageVisualsAndSourcesAreAtomic()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using (var seedContext = new DiagLinkDbContext(options))
+        {
+            await seedContext.Database.EnsureCreatedAsync();
+            await seedContext.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+            await CreateRepository(seedContext).CreateConversationAsync(
+                "conv-atomic", "user-A", null, null, CancellationToken.None);
+        }
+
+        await using (var writeContext = new DiagLinkDbContext(options))
+        {
+            await Assert.ThrowsExactlyAsync<DbUpdateException>(() =>
+                CreateRepository(writeContext).AddMessageAsync(
+                    "conv-atomic",
+                    "user-A",
+                    "assistant",
+                    "Source : p. 70.",
+                    [FullVisual()],
+                    [SourceReference() with { PdfPage = 0 }],
+                    CancellationToken.None));
+        }
+
+        await using var verifyContext = new DiagLinkDbContext(options);
+        Assert.AreEqual(0, await verifyContext.ConversationMessages.CountAsync());
+        Assert.AreEqual(0, await verifyContext.ConversationMessageVisuals.CountAsync());
+        Assert.AreEqual(0, await verifyContext.ConversationMessageSourceReferences.CountAsync());
     }
 
     [TestMethod]
@@ -539,6 +641,9 @@ public class ConversationHistoryRepositoryTests
 
     private static TechnicalVisualReference TileVisual() => new(
         "manual", 71, "tile", "r02-c01", "manual_page-00071-tile-r02-c01.png", "manual/page-00071/manual_page-00071-tile-r02-c01.png");
+
+    private static TechnicalSourceReference SourceReference() => new(
+        "manual", 72, "70", "p. 70", 9, 14, 0);
 
     private static async Task SeedEmptyConversationAsync(string dbName, string conversationId, string userObjectId)
     {
