@@ -376,7 +376,9 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
             {
                 ["type"] = "web_search_20250305",
                 ["name"] = "web_search",
-                ["max_uses"] = _options.WebSearch.DiagnosticMaxUses
+                ["max_uses"] = Math.Max(
+                    _options.WebSearch.DiagnosticMaxUses,
+                    _options.WebSearch.PartsMaxUses)
             });
         }
 

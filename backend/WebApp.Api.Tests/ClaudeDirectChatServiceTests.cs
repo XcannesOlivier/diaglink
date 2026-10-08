@@ -396,7 +396,13 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    public async Task CompleteAsync_EnabledWebSearchAddsConfiguredNativeToolWithoutChangingExistingTools()
+    [DataRow(2, 3, 3)]
+    [DataRow(7, 3, 7)]
+    [DataRow(1, 9, 9)]
+    public async Task CompleteAsync_EnabledWebSearchUsesHighestConfiguredLimitWithoutChangingExistingTools(
+        int diagnosticMaxUses,
+        int partsMaxUses,
+        int expectedMaxUses)
     {
         var disabledFixture = Fixture.Create(DirectResponse("disabled"));
         var enabledFixture = Fixture.CreateWithOptions(new ClaudeDirectChatOptions
@@ -408,8 +414,8 @@ public sealed class ClaudeDirectChatServiceTests
             WebSearch = new ClaudeDirectWebSearchOptions
             {
                 Enabled = true,
-                DiagnosticMaxUses = 7,
-                PartsMaxUses = 3
+                DiagnosticMaxUses = diagnosticMaxUses,
+                PartsMaxUses = partsMaxUses
             }
         }, DirectResponse("enabled"));
 
@@ -432,7 +438,7 @@ public sealed class ClaudeDirectChatServiceTests
             webSearch.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.AreEqual("web_search_20250305", webSearch.GetProperty("type").GetString());
         Assert.AreEqual("web_search", webSearch.GetProperty("name").GetString());
-        Assert.AreEqual(7, webSearch.GetProperty("max_uses").GetInt32());
+        Assert.AreEqual(expectedMaxUses, webSearch.GetProperty("max_uses").GetInt32());
     }
 
     [TestMethod]
