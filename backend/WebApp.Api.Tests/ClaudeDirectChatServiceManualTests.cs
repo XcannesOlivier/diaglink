@@ -47,7 +47,9 @@ public sealed class ClaudeDirectChatServiceManualTests
             markerReader,
             promptProvider,
             NullLogger<ClaudeDirectMachineConfigurationResolver>.Instance);
-        var requestFactory = new ClaudeDirectChatRequestFactory(resolver);
+        var requestFactory = new ClaudeDirectChatRequestFactory(
+            resolver,
+            new GlobalCommercialPolicyProvider(Options.Create(new CommercialPolicyOptions())));
         var pageMapResolver = new TechnicalPageMapResolver(
             blobReader,
             NullLogger<TechnicalPageMapResolver>.Instance);

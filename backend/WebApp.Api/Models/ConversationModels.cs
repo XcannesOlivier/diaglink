@@ -5,6 +5,7 @@ public record ConversationSummary
     public required string Id { get; init; }
     public string? Title { get; init; }
     public long CreatedAt { get; init; }
+    public long LastActivityAt { get; init; }
     public string? MachineId { get; init; }
     public string? MachineName { get; init; }
 }
@@ -16,6 +17,8 @@ public record ConversationMessageInfo
 {
     public required string Role { get; init; }
     public required string Content { get; init; }
+    public DateTime CreatedAtUtc { get; init; }
+    public IReadOnlyList<string> Suggestions { get; init; } = [];
     public IReadOnlyList<ConversationMessageVisualInfo> Visuals { get; init; } = [];
     public IReadOnlyList<ConversationMessageSourceReferenceInfo> Sources { get; init; } = [];
 }
@@ -45,4 +48,5 @@ public record ConversationMessageSourceReferenceInfo
 public sealed record ConversationMessagePersistenceResult(
     long MessageId,
     IReadOnlyList<ConversationMessageVisualInfo> Visuals,
-    IReadOnlyList<ConversationMessageSourceReferenceInfo> Sources);
+    IReadOnlyList<ConversationMessageSourceReferenceInfo> Sources,
+    IReadOnlyList<string> Suggestions);

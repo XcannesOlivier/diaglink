@@ -7,7 +7,6 @@ import { MessageActions } from './MessageActions';
 import { TechnicalVisualGallery } from './TechnicalVisualGallery';
 import { useFormatTimestamp } from '../../hooks/useFormatTimestamp';
 import { parseContentWithCitations } from '../../utils/citationParser';
-import { extractTrailingQuestions } from '../../utils/extractTrailingQuestions';
 import type { IChatItem, IAnnotation, TechnicalSourceReference } from '../../types/chat';
 import styles from './AssistantMessage.module.css';
 
@@ -50,7 +49,7 @@ function AssistantMessageComponent({
   onLoadTechnicalSource,
   onSuggestedPromptClick,
 }: AssistantMessageProps) {
-  const formatTimestamp = useFormatTimestamp();
+  const formatTimestamp = useFormatTimestamp(!!message.more?.time);
   const [selectedSource, setSelectedSource] = useState<TechnicalSourceReference>();
   const timestamp = message.more?.time ? formatTimestamp(new Date(message.more.time)) : '';
   
@@ -75,18 +74,7 @@ function AssistantMessageComponent({
     return parseContentWithCitations(message.content, message.annotations);
   }, [message.content, message.annotations, hasAnnotations]);
 
-  // Only extract once the response is complete, so prompts don't flicker while streaming.
-  // The trailing question block is stripped from the visible text to avoid duplicating it below as clickable chips.
-  const { visibleContent, suggestedPrompts } = useMemo(() => {
-    if (isStreaming || !message.content) {
-      return { visibleContent: message.content, suggestedPrompts: [] as string[] };
-    }
-    const { questions, contentWithoutQuestions } = extractTrailingQuestions(message.content, 3);
-    return {
-      visibleContent: questions.length > 0 ? contentWithoutQuestions : message.content,
-      suggestedPrompts: questions,
-    };
-  }, [message.content, isStreaming]);
+  const suggestedPrompts = isStreaming ? [] : (message.suggestions ?? []);
 
   // Get unique annotations with consistent indices
   // If the parser found citations (inline placeholders), use those
@@ -245,8 +233,8 @@ function AssistantMessageComponent({
       ) : (
         <>
           <Suspense fallback={<Spinner size="small" />}>
-            <Markdown 
-              content={visibleContent} 
+            <Markdown
+              content={message.content}
               annotations={message.annotations}
               onCitationClick={handleCitationClick}
               sources={message.sources}
@@ -331,6 +319,7 @@ export const AssistantMessage = memo(AssistantMessageComponent, (prev, next) => 
     prev.message.annotations?.length === next.message.annotations?.length &&
     prev.message.visuals === next.message.visuals &&
     prev.message.sources === next.message.sources &&
+    prev.message.suggestions === next.message.suggestions &&
     prev.onLoadTechnicalVisual === next.onLoadTechnicalVisual &&
     prev.onLoadTechnicalSource === next.onLoadTechnicalSource &&
     prev.message.retryAttempt === next.message.retryAttempt &&

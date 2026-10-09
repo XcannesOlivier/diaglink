@@ -9,7 +9,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { Dismiss24Regular, EditRegular } from '@fluentui/react-icons';
+import { Dismiss24Regular, EditRegular, PaintBrush20Regular } from '@fluentui/react-icons';
 import { ThemePicker } from './ThemePicker';
 import { UserProfileEditDialog } from './UserProfileEditDialog';
 import { updateCompanyUser } from '../../services/userService';
@@ -22,6 +22,7 @@ interface SettingsPanelProps {
   getAccessToken: () => Promise<string | null>;
   onCurrentUserRefresh: () => Promise<void>;
   onDiagLinkSessionExpired?: () => void;
+  onOpenPersonalization: () => void;
 }
 
 const useStyles = makeStyles({
@@ -44,6 +45,9 @@ const useStyles = makeStyles({
     overflowY: 'auto',
   },
   profileActionArea: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalM,
     paddingTop: '24px',
     paddingBottom: '24px',
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -73,6 +77,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   getAccessToken,
   onCurrentUserRefresh,
   onDiagLinkSessionExpired,
+  onOpenPersonalization,
 }) => {
   const styles = useStyles();
   const [profileDialogOpen, setProfileDialogOpen] = React.useState(false);
@@ -106,12 +111,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
         {currentUser?.role === 'company_admin' && (
           <div className={styles.profileActionArea}>
-            <Button appearance="subtle" icon={<EditRegular />} className={styles.profileAction} onClick={() => setProfileDialogOpen(true)}>
-              Modifier mes informations
+            <Button appearance="subtle" icon={<PaintBrush20Regular />} className={styles.profileAction}
+              onClick={() => { onOpenChange(false); onOpenPersonalization(); }}>
+              Personnalisation
             </Button>
-            {currentUser.email && (
-              <Text className={styles.profileEmail}>{currentUser.email}</Text>
-            )}
+            <div>
+              <Button appearance="subtle" icon={<EditRegular />} className={styles.profileAction} onClick={() => setProfileDialogOpen(true)}>
+                Modifier mes informations
+              </Button>
+              {currentUser.email && (
+                <Text className={styles.profileEmail}>{currentUser.email}</Text>
+              )}
+            </div>
           </div>
         )}
       </DrawerBody>

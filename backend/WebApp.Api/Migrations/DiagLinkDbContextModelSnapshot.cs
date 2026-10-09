@@ -293,6 +293,33 @@ namespace WebApp.Api.Migrations
                         });
                 });
 
+            modelBuilder.Entity("WebApp.Api.Models.Entities.CompanyBranding", b =>
+                {
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccentColor")
+                        .HasMaxLength(7)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(7)");
+
+                    b.Property<string>("LogoBlobName")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<string>("LogoContentType")
+                        .HasMaxLength(100)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("CompanyId");
+
+                    b.ToTable("CompanyBrandings", "chat");
+                });
+
             modelBuilder.Entity("WebApp.Api.Models.Entities.CompanyWallet", b =>
                 {
                     b.Property<Guid>("CompanyId")
@@ -397,6 +424,9 @@ namespace WebApp.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("SuggestionsJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int?>("TokenCount")
                         .HasColumnType("int");
@@ -1509,6 +1539,15 @@ namespace WebApp.Api.Migrations
                     b.HasOne("WebApp.Api.Models.Entities.Company", null)
                         .WithOne()
                         .HasForeignKey("WebApp.Api.Models.Entities.BillingAccount", "CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("WebApp.Api.Models.Entities.CompanyBranding", b =>
+                {
+                    b.HasOne("WebApp.Api.Models.Entities.Company", null)
+                        .WithOne()
+                        .HasForeignKey("WebApp.Api.Models.Entities.CompanyBranding", "CompanyId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

@@ -9,6 +9,7 @@ public record StreamChunk
     public AiResponseUsage? Usage { get; init; }
     public List<TechnicalVisualReference>? Visuals { get; init; }
     public List<TechnicalSourceReference>? Sources { get; init; }
+    public List<string>? Suggestions { get; init; }
 
     /// <summary>
     /// Text content chunk (delta). Null if this chunk contains another event type.
@@ -50,6 +51,9 @@ public record StreamChunk
 
     public static StreamChunk WithSources(IReadOnlyList<TechnicalSourceReference> sources) =>
         new() { Sources = sources.ToList() };
+
+    public static StreamChunk WithSuggestions(IReadOnlyList<string> suggestions) =>
+        new() { Suggestions = suggestions.ToList() };
     
     /// <summary>
     /// Whether this chunk contains text content.
@@ -64,4 +68,6 @@ public record StreamChunk
     public bool HasVisuals => Visuals != null && Visuals.Count > 0;
 
     public bool HasSources => Sources != null && Sources.Count > 0;
+
+    public bool HasSuggestions => Suggestions != null && Suggestions.Count > 0;
 }

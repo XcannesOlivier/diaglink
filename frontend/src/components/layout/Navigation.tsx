@@ -39,8 +39,11 @@ export const Navigation: React.FC<NavigationProps> = ({ role, currentView, onSel
       size="medium"
     >
       {items.map(item => (
-        <Tab key={item.view} value={item.view}>
-          <span className={styles.tabContent}>{item.label}{item.badgeCount !== undefined && <Badge appearance="filled" color="important" size="small">{item.badgeCount}</Badge>}</span>
+        <Tab key={item.view} value={item.view} aria-label={item.label} title={item.label}>
+          <span className={styles.tabContent}>
+            <span>{item.label}</span>
+            {item.badgeCount !== undefined && <Badge appearance="filled" color="important" size="small">{item.badgeCount}</Badge>}
+          </span>
         </Tab>
       ))}
     </TabList>

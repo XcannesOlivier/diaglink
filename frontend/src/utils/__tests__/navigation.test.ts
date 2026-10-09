@@ -50,6 +50,16 @@ describe('navigation role gating', () => {
     expect(ROLE_LABELS.diaglink_super_admin).toBe('Super administrateur DiagLink');
   });
 
+  it('only company administrators can see and access personalization', () => {
+    expect(getNavItemsForRole('company_admin').some(item => item.view === 'personalization')).toBe(false);
+    expect(resolveView('personalization', 'company_admin')).toBe('personalization');
+    for (const role of ['technician', 'diaglink_super_admin'] as const) {
+      expect(getNavItemsForRole(role).some(item => item.view === 'personalization')).toBe(false);
+      expect(getAllowedViews(role)).not.toContain('personalization');
+      expect(resolveView('personalization', role)).toBe('chat');
+    }
+  });
+
   it('shows the real pending request count only when it is positive', () => {
     expect(getNavItemsForRole('diaglink_super_admin', 3).find(item => item.view === 'machine-requests')?.badgeCount).toBe(3);
     expect(getNavItemsForRole('diaglink_super_admin', 0).find(item => item.view === 'machine-requests')?.badgeCount).toBeUndefined();

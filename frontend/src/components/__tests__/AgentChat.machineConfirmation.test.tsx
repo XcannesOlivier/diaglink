@@ -72,12 +72,13 @@ describe('AgentChat machine confirmation panel',()=>{
   expect(host.querySelector('[aria-label="Confirmation de la machine sélectionnée"]')).not.toBeNull();
  });
 
- it('places the compact actions between the technical-assistant title and unchanged starter messages',async()=>{
-  await act(async()=>root.render(<StarterMessages agentName="Assistant Technique Compresseur Test Alpha" accessory={<div data-confirmation-actions/>} onPromptClick={vi.fn()}/>));
-  const actions=host.querySelector('[data-confirmation-actions]')!,prompts=host.querySelector('ul')!;
+ it('places the compact actions before the ordered non-interactive capabilities',async()=>{
+  await act(async()=>root.render(<StarterMessages agentName="Assistant Technique Compresseur Test Alpha" accessory={<div data-confirmation-actions/>}/>));
+  const actions=host.querySelector('[data-confirmation-actions]')!,capabilities=host.querySelector('ul')!;
   expect(host.textContent).toContain('Assistant Technique');expect(host.textContent).toContain('Compresseur Test Alpha');
-  expect(host.textContent).toContain('Diagnostiquer un dysfonctionnement');expect(host.textContent).toContain('Identifier un composant');expect(host.textContent).toContain('Interpréter un schéma technique');
-  expect(actions.compareDocumentPosition(prompts)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect([...capabilities.querySelectorAll('li')].map(item=>item.textContent)).toEqual(['Diagnostiquer une panne','Identifier une pièce','Comprendre un schéma','Trouver un fournisseur']);
+  expect(capabilities.querySelectorAll('button')).toHaveLength(0);
+  expect(actions.compareDocumentPosition(capabilities)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const css=readFileSync(resolve('src/components/AgentChat.module.css'),'utf8');
   expect(css).toMatch(/\.machineConfirmationCard\s*\{[^}]*width:\s*fit-content;[^}]*margin:\s*0 auto;/s);
   expect(css).toMatch(/\.machineConfirmationActions\s*\{[^}]*justify-content:\s*center;[^}]*flex-wrap:\s*wrap;/s);

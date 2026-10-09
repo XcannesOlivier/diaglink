@@ -24,7 +24,24 @@ public sealed class ClaudeDirectChatRuntime(
             machine,
             [new ClaudeDirectMessage("user", message, userImages)],
             cancellationToken);
-        var result = await chatService.CompleteAsync(request, cancellationToken);
+        ClaudeDirectChatResult? result = null;
+        await foreach (var update in chatService.StreamAsync(request, cancellationToken))
+        {
+            if (!string.IsNullOrEmpty(update.TextDelta))
+            {
+                yield return StreamChunk.Text(update.TextDelta);
+            }
+
+            if (update.CompletedResult is not null)
+            {
+                result = update.CompletedResult;
+            }
+        }
+
+        if (result is null)
+        {
+            throw new ClaudeDirectRuntimeException("Claude Direct ended without a completed result.");
+        }
 
         foreach (var toolName in ToolNames(result))
         {
@@ -46,9 +63,9 @@ public sealed class ClaudeDirectChatRuntime(
             yield return StreamChunk.WithAnnotations(result.WebCitations.Select(ToAnnotation).ToList());
         }
 
-        if (!string.IsNullOrWhiteSpace(result.FinalText))
+        if (result.Suggestions.Count > 0)
         {
-            yield return StreamChunk.Text(result.FinalText);
+            yield return StreamChunk.WithSuggestions(result.Suggestions);
         }
 
         var unrecoveredErrors = result.Errors.Where(error => !error.Recovered).ToArray();

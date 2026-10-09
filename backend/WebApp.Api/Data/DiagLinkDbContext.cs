@@ -24,6 +24,7 @@ public class DiagLinkDbContext : DbContext
     public DbSet<LoginCode> LoginCodes => Set<LoginCode>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<Company> Companies => Set<Company>();
+    public DbSet<CompanyBranding> CompanyBrandings => Set<CompanyBranding>();
     public DbSet<Machine> Machines => Set<Machine>();
     public DbSet<UserMachineAccess> UserMachineAccess => Set<UserMachineAccess>();
     public DbSet<AiUsageRecord> AiUsageRecords => Set<AiUsageRecord>();
@@ -379,6 +380,7 @@ public class DiagLinkDbContext : DbContext
             entity.HasKey(m => m.Id);
             entity.Property(m => m.Role).IsRequired().HasMaxLength(50);
             entity.Property(m => m.Content).IsRequired();
+            entity.Property(m => m.SuggestionsJson);
 
             entity.HasIndex(m => m.ConversationId);
 
@@ -475,6 +477,19 @@ public class DiagLinkDbContext : DbContext
             entity.Property(c => c.UpdatedAtUtc).HasColumnName("UpdatedAt");
 
             entity.HasIndex(c => c.Name);
+        });
+
+        modelBuilder.Entity<CompanyBranding>(entity =>
+        {
+            entity.ToTable("CompanyBrandings", Schema);
+            entity.HasKey(branding => branding.CompanyId);
+            entity.Property(branding => branding.CompanyId).ValueGeneratedNever();
+            entity.Property(branding => branding.AccentColor).HasMaxLength(7).IsUnicode(false);
+            entity.Property(branding => branding.LogoBlobName).HasMaxLength(512);
+            entity.Property(branding => branding.LogoContentType).HasMaxLength(100).IsUnicode(false);
+            entity.Property(branding => branding.UpdatedAtUtc).IsRequired();
+            entity.HasOne<Company>().WithOne().HasForeignKey<CompanyBranding>(branding => branding.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Machine>(entity =>

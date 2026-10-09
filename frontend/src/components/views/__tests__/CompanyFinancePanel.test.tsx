@@ -15,6 +15,20 @@ const consumption={machines:[
  {id:'m',name:'Compresseur',billable:true,hasPaidRights:true,includedQuotaBudget:10,resetUtc:'2026-10-14T00:00:00Z',commercialCredit:.04,users:[{id:'u1',name:'Alice',includedQuotaConsumed:1,commercialCredit:.02}]},
  {id:'i',name:'Inactive',billable:false,hasPaidRights:false,includedQuotaBudget:0,resetUtc:null,commercialCredit:0,users:[]},
 ]};
+it.each(['trialing','active','past_due','unpaid'])('brands only the activation badge without changing semantic statuses: %s',async subscriptionStatus=>{
+ request.mockImplementation((_:unknown,path:string)=>Promise.resolve({kind:'success',data:path==='/topups'?[]:{...summary,subscriptionStatus}}));
+ await act(async()=>root.render(<CompanyFinancePanel companyId="c" getAccessToken={token}/>));
+ const badge=box.querySelector('[aria-label="Abonnement"] summary span')!;
+ expect(badge.classList.contains(styles.activationBadge)).toBe(subscriptionStatus==='trialing');
+ expect(badge.classList.contains(styles.warning)).toBe(subscriptionStatus==='past_due'||subscriptionStatus==='unpaid');
+ if(subscriptionStatus==='trialing')expect(badge.textContent).toBe('Abonnement en cours d’activation');
+});
+it('uses scoped Fluent brand tokens for activation and preserves informative and warning colors',()=>{
+ const css=readFileSync(resolve('src/components/views/CompanyFinancePanel.module.css'),'utf8');
+ expect(css).toContain('.activationBadge{background:var(--colorBrandBackground2);color:var(--colorBrandForeground1)}');
+ expect(css).toContain('background:var(--diaglink-status-info-background,var(--colorBrandBackground2))');
+ expect(css).toContain('.warning{background:var(--colorStatusWarningBackground1);color:var(--colorStatusWarningForeground1);border-color:var(--colorStatusWarningBorder1)}');
+});
 it('keeps the company machine search at its intrinsic height on mobile',()=>{
  const css=readFileSync(resolve('src/components/views/CompanyFinancePanel.module.css'),'utf8');
  const mobileRule='@media(max-width:767px){.companyMachineControls{align-items:stretch;flex-direction:column;gap:12px}.companyMachineControls label,.companyMachineControls select,.companyMachineControls .machineSearch{width:100%;max-width:none}.companyMachineControls .machineSearch{flex:0 0 auto}}';

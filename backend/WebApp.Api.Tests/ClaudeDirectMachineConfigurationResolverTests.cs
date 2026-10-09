@@ -131,17 +131,59 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
 
         foreach (var expected in new[]
         {
-            "Utilise d’abord File Search avec une recherche ciblée sur la demande actuelle.",
-            "Commence normalement par une seule recherche File Search précise.",
-            "N’effectue une recherche supplémentaire que si :",
-            "Utilise get_page_image uniquement lorsqu’une vérification visuelle apporte une information nécessaire",
-            "Lorsque get_page_image est utilisé, analyse directement l’image retournée.",
-            "Trajet non confirmé de bout en bout.",
-            "Vérification incomplète."
+            "Utilise File Search comme outil documentaire principal pour les informations propres à la machine.",
+            "Effectue normalement une première recherche ciblée.",
+            "Effectue une recherche supplémentaire uniquement pour :",
+            "Utilise get_page_image uniquement lorsqu’une information nécessaire dépend réellement du contenu visuel",
+            "N’examine pas plusieurs zones lorsqu’une seule suffit.",
+            "[Confirmé / Partiellement confirmé / Non confirmé]",
+            "Partiellement confirmé — le trajet après RENVOI_Y reste à vérifier."
         })
         {
             StringAssert.Contains(prompt, expected);
         }
+    }
+
+    [TestMethod]
+    public void PromptProvider_ClaudeDirectContainsIndicativeResponseLengthGuidance()
+    {
+        var prompt = PromptProvider().GetClaudeDirectPrompt();
+
+        foreach (var expected in new[]
+        {
+            "40 à 100 mots",
+            "150 mots",
+            "50 à 120 mots",
+            "30 à 80 mots",
+            "120 mots",
+            "60 à 140 mots",
+            "200 mots",
+            "80 à 250 mots",
+            "350 mots",
+            "80 mots",
+            "150 à 300 mots"
+        })
+        {
+            StringAssert.Contains(prompt, expected);
+        }
+
+        Assert.IsFalse(prompt.Contains(
+            "jamais d’un nombre de mots prédéfini",
+            StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void PromptProvider_ClaudeDirectUsesStructuredSuggestionProtocol()
+    {
+        var prompt = PromptProvider().GetClaudeDirectPrompt();
+
+        StringAssert.Contains(prompt, "<diaglink_suggestion>");
+        StringAssert.Contains(prompt, "uniquement à la toute fin de la réponse");
+        StringAssert.Contains(prompt, "jamais plus de deux balises");
+        StringAssert.Contains(prompt, "Le caractère « ? » est une ponctuation normale");
+        Assert.IsFalse(prompt.Contains(
+            "L’interface actuelle peut transformer une phrase terminée par « ? »",
+            StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -189,7 +231,8 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
     public async Task RequestFactory_ProducesCompleteClaudeDirectChatRequest()
     {
         var fixture = Fixture.Valid();
-        var factory = new ClaudeDirectChatRequestFactory(fixture.Resolver);
+        var policyProvider = new RecordingCommercialPolicyProvider();
+        var factory = new ClaudeDirectChatRequestFactory(fixture.Resolver, policyProvider);
         var machine = Machine();
         machine.VectorStoreId = null;
         var messages = new[] { new ClaudeDirectMessage("user", "question") };
@@ -204,6 +247,31 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
         Assert.AreEqual("company/machine", request.Machine.BlobPrefix);
         Assert.AreEqual("PROMPT DIRECT", request.SystemPrompt);
         Assert.AreSame(messages, request.Messages);
+        Assert.AreEqual(machine.CompanyId, policyProvider.ResolvedCompanyIds.Single());
+        Assert.IsNotNull(request.CommercialPolicy);
+        Assert.IsTrue(request.CommercialPolicy.Enabled);
+        Assert.AreEqual("SERVER COMMERCIAL POLICY", request.CommercialPolicy.Instructions);
+        Assert.AreNotEqual(request.SystemPrompt, request.Machine.Description);
+        Assert.AreNotEqual(request.SystemPrompt, request.CommercialPolicy.Instructions);
+        Assert.AreNotEqual(request.Machine.Description, request.CommercialPolicy.Instructions);
+    }
+
+    [TestMethod]
+    public async Task RequestFactory_ResolvesEachMachinePolicyFromItsRealCompanyId()
+    {
+        var fixture = Fixture.Valid();
+        var policyProvider = new RecordingCommercialPolicyProvider();
+        var factory = new ClaudeDirectChatRequestFactory(fixture.Resolver, policyProvider);
+        var firstMachine = Machine();
+        var secondMachine = Machine();
+        secondMachine.CompanyId = Guid.Parse("99999999-8888-7777-6666-555555555555");
+
+        await factory.CreateAsync(firstMachine, []);
+        await factory.CreateAsync(secondMachine, []);
+
+        CollectionAssert.AreEqual(
+            new[] { firstMachine.CompanyId, secondMachine.CompanyId },
+            policyProvider.ResolvedCompanyIds);
     }
 
     [TestMethod]
@@ -307,6 +375,19 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
     private sealed class StaticPromptProvider : ITechnicalAssistantPromptProvider
     {
         public string GetClaudeDirectPrompt() => "PROMPT DIRECT";
+    }
+
+    private sealed class RecordingCommercialPolicyProvider : ICommercialPolicyProvider
+    {
+        public List<Guid> ResolvedCompanyIds { get; } = [];
+
+        public Task<CommercialPolicySnapshot> ResolveAsync(
+            Guid companyId,
+            CancellationToken cancellationToken = default)
+        {
+            ResolvedCompanyIds.Add(companyId);
+            return Task.FromResult(new CommercialPolicySnapshot(true, "SERVER COMMERCIAL POLICY"));
+        }
     }
 
     private sealed class CaptureLogger<T> : ILogger<T>

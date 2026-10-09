@@ -25,6 +25,7 @@ export const MessageQueue: React.FC<MessageQueueProps> = ({ messages, onRemove }
           <Button
             appearance="transparent"
             icon={<DismissRegular />}
+            data-company-accent-exempt
             size="small"
             onClick={() => onRemove(i)}
             aria-label="Supprimer le message en attente"

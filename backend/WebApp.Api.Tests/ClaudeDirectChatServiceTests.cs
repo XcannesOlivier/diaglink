@@ -21,6 +21,12 @@ public sealed class ClaudeDirectChatServiceTests
     private const string DocumentId = "dx10z-manual";
     private const string PauseTurnContentJson =
         """[{"type":"text","text":"Continuation partielle."},{"type":"text","text":"Etat opaque a conserver."}]""";
+    private static readonly string[] ValidTileIds =
+    [
+        "r01-c01", "r01-c02", "r01-c03",
+        "r02-c01", "r02-c02", "r02-c03",
+        "r03-c01", "r03-c02", "r03-c03"
+    ];
 
     [TestMethod]
     public async Task CompleteAsync_ReturnsSimpleClaudeText()
@@ -34,6 +40,173 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.AreEqual("end_turn", result.StopReason);
         Assert.HasCount(0, result.Errors);
         Assert.HasCount(0, result.WebCitations);
+    }
+
+    [TestMethod]
+    public async Task StreamAsync_ForwardsProviderDeltasAndExtractsSplitSuggestions()
+    {
+        var fixture = Fixture.Create(EventStreamResponse(
+            """{"type":"message_start","message":{"id":"msg-stream","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"stop_reason":null,"usage":{"input_tokens":3,"output_tokens":1}}}""",
+            """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Avant\n<diag"}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"link_suggestion>Où est le relais"}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" ?</diaglink_suggestion>Après"}}""",
+            """{"type":"content_block_stop","index":0}""",
+            """{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":7}}""",
+            """{"type":"message_stop"}"""));
+
+        var updates = new List<ClaudeDirectChatStreamUpdate>();
+        await foreach (var update in fixture.Service.StreamAsync(Request()))
+        {
+            updates.Add(update);
+        }
+
+        var visible = string.Concat(updates.Where(update => update.TextDelta is not null).Select(update => update.TextDelta));
+        var result = updates.Single(update => update.CompletedResult is not null).CompletedResult!;
+        Assert.AreEqual("Avant\nAprès", visible);
+        Assert.AreEqual(visible, result.FinalText);
+        CollectionAssert.AreEqual(new[] { "Où est le relais ?" }, result.Suggestions.ToArray());
+        Assert.AreEqual(3, result.Usage.InputTokens);
+        Assert.AreEqual(7, result.Usage.OutputTokens);
+        using var request = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
+        Assert.IsTrue(request.RootElement.GetProperty("stream").GetBoolean());
+    }
+
+    [TestMethod]
+    public async Task StreamAsync_RebuildsSplitToolInputAndThinkingForNextMessagesCall()
+    {
+        var fixture = Fixture.Create(
+            EventStreamResponse(
+                """{"type":"message_start","message":{"id":"msg-tool","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"stop_reason":null,"usage":{"input_tokens":4,"output_tokens":1}}}""",
+                """{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}""",
+                """{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private reasoning"}}""",
+                """{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed"}}""",
+                """{"type":"content_block_stop","index":0}""",
+                """{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool-1","name":"get_page_image","input":{}}}""",
+                """{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"page\":75,"}}""",
+                """{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"asset_type\":\"full\"}"}}""",
+                """{"type":"content_block_stop","index":1}""",
+                """{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":8}}""",
+                """{"type":"message_stop"}"""),
+            EventStreamResponse(
+                """{"type":"message_start","message":{"id":"msg-final","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}""",
+                """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""",
+                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Réponse finale"}}""",
+                """{"type":"content_block_stop","index":0}""",
+                """{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}""",
+                """{"type":"message_stop"}"""));
+
+        var updates = new List<ClaudeDirectChatStreamUpdate>();
+        await foreach (var update in fixture.Service.StreamAsync(Request()))
+        {
+            updates.Add(update);
+        }
+
+        var result = updates.Single(update => update.CompletedResult is not null).CompletedResult!;
+        Assert.AreEqual("Réponse finale", result.FinalText);
+        Assert.IsFalse(string.Concat(updates.Select(update => update.TextDelta)).Contains("private reasoning", StringComparison.Ordinal));
+        Assert.HasCount(2, fixture.Handler.Requests);
+        using var secondRequest = JsonDocument.Parse(fixture.Handler.Requests[1].Body);
+        var assistantBlocks = secondRequest.RootElement.GetProperty("messages")[1].GetProperty("content");
+        Assert.AreEqual("private reasoning", assistantBlocks[0].GetProperty("thinking").GetString());
+        Assert.AreEqual("signed", assistantBlocks[0].GetProperty("signature").GetString());
+        Assert.AreEqual(75, assistantBlocks[1].GetProperty("input").GetProperty("page").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task StreamAsync_PreservesWebFileSearchAndImageLoopThenStreamsCleanFinalText()
+    {
+        const string documentId = "develon-dx10z-manuel-utilisation-maintenance-en";
+        var fixture = Fixture.Create(
+            EventStreamResponse(
+                """{"type":"message_start","message":{"id":"msg-tools","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1}}}""",
+                """{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"web-1","name":"web_search","input":{"query":"hydraulic filter"}}}""",
+                """{"type":"content_block_stop","index":0}""",
+                """{"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"web-1","content":[]}}""",
+                """{"type":"content_block_stop","index":1}""",
+                """{"type":"content_block_start","index":2,"content_block":{"type":"mcp_tool_use","id":"mcp-1","name":"file_search","input":{}}}""",
+                """{"type":"content_block_stop","index":2}""",
+                """{"type":"content_block_start","index":3,"content_block":{"type":"mcp_tool_result","tool_use_id":"mcp-1","is_error":false,"content":[{"type":"text","text":"Document ID: __DOCUMENT_ID__"}]}}"""
+                    .Replace("__DOCUMENT_ID__", documentId, StringComparison.Ordinal),
+                """{"type":"content_block_stop","index":3}""",
+                """{"type":"content_block_start","index":4,"content_block":{"type":"tool_use","id":"tool-1","name":"get_page_image","input":{"document_id":"__DOCUMENT_ID__","page":75,"asset_type":"full"}}}"""
+                    .Replace("__DOCUMENT_ID__", documentId, StringComparison.Ordinal),
+                """{"type":"content_block_stop","index":4}""",
+                """{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":8,"server_tool_use":{"web_search_requests":1}}}""",
+                """{"type":"message_stop"}"""),
+            EventStreamResponse(
+                """{"type":"message_start","message":{"id":"msg-final","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"stop_reason":null,"usage":{"input_tokens":12,"output_tokens":1}}}""",
+                """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""",
+                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Source : "}}""",
+                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"p. 70.\n<diaglink_suggestion>Où est le relais ?</diaglink_suggestion>"}}""",
+                """{"type":"content_block_stop","index":0}""",
+                """{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":4}}""",
+                """{"type":"message_stop"}"""));
+        fixture.BlobReader.PageMapFactory = _ => PageMap(documentId);
+
+        var updates = new List<ClaudeDirectChatStreamUpdate>();
+        await foreach (var update in fixture.Service.StreamAsync(Request()))
+        {
+            updates.Add(update);
+        }
+
+        var textDeltas = updates.Where(update => update.TextDelta is not null)
+            .Select(update => update.TextDelta!)
+            .ToArray();
+        var result = updates.Single(update => update.CompletedResult is not null).CompletedResult!;
+        CollectionAssert.AreEqual(new[] { "Source : ", "p. 70.\n" }, textDeltas);
+        Assert.AreEqual("Source : p. 70.\n", result.FinalText);
+        Assert.IsFalse(result.FinalText!.Contains("tool_use", StringComparison.Ordinal));
+        CollectionAssert.AreEqual(new[] { "Où est le relais ?" }, result.Suggestions.ToArray());
+        CollectionAssert.AreEqual(new[] { "web_search", "file_search", "get_page_image" }, result.Calls[0].Tools.ToArray());
+        Assert.AreEqual(1, result.Usage.WebSearchRequests);
+        Assert.AreEqual(22, result.Usage.InputTokens);
+        Assert.AreEqual(12, result.Usage.OutputTokens);
+        Assert.AreEqual("end_turn", result.StopReason);
+        Assert.HasCount(2, fixture.Handler.Requests);
+        var source = result.Sources.Single();
+        Assert.AreEqual(result.FinalText.IndexOf(source.Label, StringComparison.Ordinal), source.StartIndex);
+        Assert.AreEqual(source.StartIndex + source.Label.Length, source.EndIndex);
+    }
+
+    [TestMethod]
+    public async Task StreamAsync_IncompleteProviderStreamKeepsPartialTextAndReturnsFailure()
+    {
+        var fixture = Fixture.Create(EventStreamResponse(
+            """{"type":"message_start","message":{"id":"msg-partial","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"stop_reason":null,"usage":{"input_tokens":3,"output_tokens":1}}}""",
+            """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Réponse interrompue"}}"""));
+
+        var updates = new List<ClaudeDirectChatStreamUpdate>();
+        await foreach (var update in fixture.Service.StreamAsync(Request()))
+        {
+            updates.Add(update);
+        }
+
+        Assert.AreEqual("Réponse interrompue", string.Concat(updates.Select(update => update.TextDelta)));
+        var result = updates.Single(update => update.CompletedResult is not null).CompletedResult!;
+        Assert.IsNull(result.FinalText);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "invalid_messages_response"));
+    }
+
+    [TestMethod]
+    public async Task StreamAsync_CancellationTokenInterruptsProviderRequest()
+    {
+        var fixture = Fixture.Create(EventStreamResponse());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        try
+        {
+            await foreach (var _ in fixture.Service.StreamAsync(Request(), cancellation.Token))
+            {
+            }
+
+            Assert.Fail("The provider request should have been cancelled.");
+        }
+        catch (Exception exception)
+        {
+            Assert.IsInstanceOfType<OperationCanceledException>(exception);
+        }
     }
 
     [TestMethod]
@@ -310,6 +483,51 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
+    public async Task CompleteAsync_AppendsActiveCommercialPolicyOnceAfterMachineContext()
+    {
+        const string instructions = "Instruction commerciale unique.";
+        var fixture = Fixture.Create(DirectResponse("ok"));
+
+        await fixture.Service.CompleteAsync(Request(new(true, instructions)));
+
+        using var body = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
+        var systemPrompt = body.RootElement.GetProperty("system")[0].GetProperty("text").GetString()!;
+        const string technicalPrompt = "Use File Search before inspecting technical images.";
+        const string machineHeader = "Contexte machine fourni par le serveur :";
+        const string policyHeader = "Politique commerciale active fournie par le serveur :";
+        Assert.IsTrue(systemPrompt.StartsWith(technicalPrompt, StringComparison.Ordinal));
+        Assert.IsTrue(systemPrompt.IndexOf(machineHeader, StringComparison.Ordinal) >
+            systemPrompt.IndexOf(technicalPrompt, StringComparison.Ordinal));
+        Assert.IsTrue(systemPrompt.IndexOf(policyHeader, StringComparison.Ordinal) >
+            systemPrompt.IndexOf(machineHeader, StringComparison.Ordinal));
+        Assert.AreEqual(1, Regex.Matches(systemPrompt, Regex.Escape(policyHeader)).Count);
+        Assert.AreEqual(1, Regex.Matches(systemPrompt, Regex.Escape(instructions)).Count);
+        Assert.AreEqual(
+            technicalPrompt + "\n\n" +
+            machineHeader + "\nMachine DX10z; use the connected technical manual.\n\n" +
+            policyHeader + "\n" + instructions,
+            systemPrompt);
+    }
+
+    [TestMethod]
+    [DataRow(false, "Instruction configurée")]
+    [DataRow(true, "")]
+    [DataRow(true, "   ")]
+    public async Task CompleteAsync_OmitsInactiveOrEmptyCommercialPolicy(
+        bool enabled,
+        string instructions)
+    {
+        var fixture = Fixture.Create(DirectResponse("ok"));
+
+        await fixture.Service.CompleteAsync(Request(new(enabled, instructions)));
+
+        var requestBody = fixture.Handler.Requests.Single().Body;
+        Assert.IsFalse(requestBody.Contains(
+            "Politique commerciale active fournie par le serveur :",
+            StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task CompleteAsync_CachingDoesNotChangeMcpOrLocalToolDefinitions()
     {
         var fixture = Fixture.Create(DirectResponse("ok"));
@@ -329,6 +547,65 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.IsTrue(tools[1].GetProperty("input_schema").GetProperty("required")
             .EnumerateArray().Select(value => value.GetString()).SequenceEqual(new[] { "page", "asset_type" }));
         Assert.IsFalse(tools[1].TryGetProperty("cache_control", out _));
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_ExposesSecuredGetPageImageContract()
+    {
+        var fixture = Fixture.Create(DirectResponse("ok"));
+
+        await fixture.Service.CompleteAsync(Request());
+
+        using var body = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
+        var tool = body.RootElement.GetProperty("tools")[1];
+        Assert.AreEqual("get_page_image", tool.GetProperty("name").GetString());
+
+        var description = tool.GetProperty("description").GetString()!;
+        StringAssert.Contains(description, "page complète");
+        StringAssert.Contains(description, "grille 3 × 3");
+        StringAssert.Contains(description, "se chevauchent de 25 %");
+        StringAssert.Contains(description, "demande directement la tuile correspondante");
+        StringAssert.Contains(description, "une seule tuile lorsqu’elle suffit");
+
+        var schema = tool.GetProperty("input_schema");
+        CollectionAssert.AreEqual(
+            new[] { "page", "asset_type" },
+            schema.GetProperty("required").EnumerateArray().Select(value => value.GetString()).ToArray());
+        var properties = schema.GetProperty("properties");
+        Assert.IsFalse(schema.GetProperty("additionalProperties").GetBoolean());
+
+        var page = properties.GetProperty("page");
+        Assert.AreEqual(1, page.GetProperty("minimum").GetInt32());
+        Assert.AreEqual(99999, page.GetProperty("maximum").GetInt32());
+
+        var documentId = properties.GetProperty("document_id");
+        CollectionAssert.AreEqual(
+            new[] { "string", "null" },
+            documentId.GetProperty("type").EnumerateArray().Select(value => value.GetString()).ToArray());
+        Assert.IsFalse(schema.GetProperty("required").EnumerateArray()
+            .Any(value => value.GetString() == "document_id"));
+
+        var assetType = properties.GetProperty("asset_type");
+        CollectionAssert.AreEqual(
+            new[] { "full", "tile" },
+            assetType.GetProperty("enum").EnumerateArray().Select(value => value.GetString()).ToArray());
+
+        var tile = properties.GetProperty("tile");
+        CollectionAssert.AreEqual(
+            new[] { "string", "null" },
+            tile.GetProperty("type").EnumerateArray().Select(value => value.GetString()).ToArray());
+        CollectionAssert.AreEqual(
+            ValidTileIds,
+            tile.GetProperty("enum").EnumerateArray()
+                .Where(value => value.ValueKind == JsonValueKind.String)
+                .Select(value => value.GetString())
+                .ToArray());
+        Assert.AreEqual(1, tile.GetProperty("enum").EnumerateArray()
+            .Count(value => value.ValueKind == JsonValueKind.Null));
+        Assert.IsFalse(tile.GetProperty("enum").EnumerateArray()
+            .Where(value => value.ValueKind == JsonValueKind.String)
+            .Select(value => value.GetString())
+            .Any(value => value is "r00-c00" or "r04-c01" or "r01-c04" or "r99-c99" or "R01-C01"));
     }
 
     [TestMethod]
@@ -439,6 +716,117 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.AreEqual("web_search_20250305", webSearch.GetProperty("type").GetString());
         Assert.AreEqual("web_search", webSearch.GetProperty("name").GetString());
         Assert.AreEqual(expectedMaxUses, webSearch.GetProperty("max_uses").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_ReducesWebSearchMaxUsesToRemainingBudget()
+    {
+        var fixture = Fixture.CreateWithOptions(
+            EnabledWebSearchOptions(),
+            WebSearchUsageResponse("partial", 10, 2, webSearchRequests: 2, stopReason: "pause_turn"),
+            DirectResponse("done"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.HasCount(0, result.Errors);
+        Assert.AreEqual(3, ReadWebSearchMaxUses(fixture.Handler.Requests[0].Body));
+        Assert.AreEqual(1, ReadWebSearchMaxUses(fixture.Handler.Requests[1].Body));
+        Assert.AreEqual(2, result.Usage.WebSearchRequests);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_RemovesWebSearchAtZeroBudgetButKeepsOtherTools()
+    {
+        var fixture = Fixture.CreateWithOptions(
+            EnabledWebSearchOptions(),
+            WebSearchUsageResponse("partial", 10, 2, webSearchRequests: 3, stopReason: "pause_turn"),
+            DirectResponse("done"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual("done", result.FinalText);
+        Assert.HasCount(0, result.Errors);
+        using var secondBody = JsonDocument.Parse(fixture.Handler.Requests[1].Body);
+        var tools = secondBody.RootElement.GetProperty("tools");
+        Assert.AreEqual(2, tools.GetArrayLength());
+        Assert.AreEqual("mcp_toolset", tools[0].GetProperty("type").GetString());
+        Assert.AreEqual("get_page_image", tools[1].GetProperty("name").GetString());
+        Assert.IsFalse(fixture.Handler.Requests[1].Body.Contains("web_search", StringComparison.Ordinal));
+        Assert.AreEqual(3, result.Usage.WebSearchRequests);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_ConsumesWebSearchBudgetAcrossThreeMessagesCalls()
+    {
+        var fixture = Fixture.CreateWithOptions(
+            EnabledWebSearchOptions(),
+            WebSearchUsageResponse("first", 10, 2, webSearchRequests: 1, stopReason: "pause_turn"),
+            WebSearchUsageResponse("second", 10, 2, webSearchRequests: 1, stopReason: "pause_turn"),
+            WebSearchUsageResponse("third", 10, 2, webSearchRequests: 1, stopReason: "pause_turn"),
+            DirectResponse("done"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual("done", result.FinalText);
+        Assert.HasCount(0, result.Errors);
+        CollectionAssert.AreEqual(
+            new int?[] { 3, 2, 1, null },
+            fixture.Handler.Requests.Select(request => ReadWebSearchMaxUses(request.Body)).ToArray());
+        Assert.AreEqual(3, result.Usage.WebSearchRequests);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_ReportsDefensiveWebSearchBudgetExceededError()
+    {
+        var fixture = Fixture.CreateWithOptions(
+            EnabledWebSearchOptions(),
+            WebSearchUsageResponse("unexpected", 10, 2, webSearchRequests: 4));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        var error = result.Errors.Single();
+        Assert.AreEqual("web_search_budget_exceeded", error.Code);
+        Assert.AreEqual(1, error.CallNumber);
+        Assert.AreEqual(4, result.Usage.WebSearchRequests);
+        Assert.HasCount(1, fixture.Handler.Requests);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_WebBudgetExhaustionDoesNotDisablePageImageOrFileSearch()
+    {
+        var fixture = Fixture.CreateWithOptions(
+            EnabledWebSearchOptions(),
+            WebSearchUsageResponse("partial", 10, 2, webSearchRequests: 3, stopReason: "pause_turn"),
+            ToolResponse(),
+            DirectResponse("done"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual("done", result.FinalText);
+        Assert.HasCount(0, result.Errors);
+        Assert.HasCount(1, result.Visuals);
+        using var secondBody = JsonDocument.Parse(fixture.Handler.Requests[1].Body);
+        var tools = secondBody.RootElement.GetProperty("tools");
+        Assert.AreEqual("mcp_toolset", tools[0].GetProperty("type").GetString());
+        Assert.AreEqual("get_page_image", tools[1].GetProperty("name").GetString());
+        Assert.IsFalse(fixture.Handler.Requests.Skip(1)
+            .Any(request => request.Body.Contains("web_search", StringComparison.Ordinal)));
+        Assert.AreEqual(3, result.Usage.WebSearchRequests);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_MaxUsesExceededResultDoesNotRetryOrFailConversation()
+    {
+        var fixture = Fixture.CreateWithOptions(
+            EnabledWebSearchOptions(),
+            WebSearchMaxUsesExceededResponse());
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual("recherches déjà obtenues", result.FinalText);
+        Assert.HasCount(0, result.Errors);
+        Assert.HasCount(1, fixture.Handler.Requests);
+        Assert.AreEqual(3, result.Usage.WebSearchRequests);
     }
 
     [TestMethod]
@@ -713,16 +1101,89 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    public async Task CompleteAsync_RejectsInvalidTileBeforeBlobRead()
+    [DataRow("r00-c00")]
+    [DataRow("r04-c01")]
+    [DataRow("r01-c04")]
+    [DataRow("r04-c04")]
+    [DataRow("r99-c99")]
+    [DataRow("R01-C01")]
+    [DataRow("../../secret")]
+    public async Task CompleteAsync_RejectsInvalidTileBeforeBlobRead(string tile)
     {
         var fixture = Fixture.Create(
-            ToolResponse(assetType: "tile", tile: "../../secret"),
+            ToolResponse(assetType: "tile", tile: tile),
             DirectResponse("handled"));
 
         var result = await fixture.Service.CompleteAsync(Request());
 
         Assert.HasCount(0, fixture.BlobReader.RequestedNames);
         Assert.IsTrue(result.Errors.Any(error => error.Code == "invalid_image_request"));
+    }
+
+    [TestMethod]
+    [DynamicData(nameof(ValidTiles))]
+    public async Task CompleteAsync_AcceptsEveryAvailableTile(string tile)
+    {
+        var fixture = Fixture.Create(
+            ToolResponse(assetType: "tile", tile: tile),
+            DirectResponse("done"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.IsFalse(result.Errors.Any(error => error.Code == "invalid_image_request"));
+        Assert.AreEqual(tile, result.Visuals.Single().Tile);
+        StringAssert.EndsWith(
+            fixture.BlobReader.RequestedNames.Single(),
+            $"{DocumentId}_page-00075-tile-{tile}.png");
+    }
+
+    public static IEnumerable<object[]> ValidTiles =>
+        ValidTileIds.Select(tile => new object[] { tile });
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task CompleteAsync_RejectsTileAssetWithoutTile(bool includeNullTile)
+    {
+        var fixture = Fixture.Create(
+            ToolResponse(assetType: "tile", tile: null, includeTile: includeNullTile),
+            DirectResponse("handled"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.HasCount(0, fixture.BlobReader.RequestedNames);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "invalid_image_request"));
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_RejectsFullAssetWithTile()
+    {
+        var fixture = Fixture.Create(
+            ToolResponse(assetType: "full", tile: "r01-c01"),
+            DirectResponse("handled"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.HasCount(0, fixture.BlobReader.RequestedNames);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "invalid_image_request"));
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task CompleteAsync_AcceptsFullAssetWithNullOrMissingTile(bool includeNullTile)
+    {
+        var fixture = Fixture.Create(
+            ToolResponse(assetType: "full", tile: null, includeTile: includeNullTile),
+            DirectResponse("done"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.HasCount(0, result.Errors);
+        Assert.AreEqual("full", result.Visuals.Single().AssetType);
+        StringAssert.EndsWith(
+            fixture.BlobReader.RequestedNames.Single(),
+            $"{DocumentId}_page-00075-full.png");
     }
 
     [TestMethod]
@@ -856,14 +1317,15 @@ public sealed class ClaudeDirectChatServiceTests
     [TestMethod]
     public async Task CompleteAsync_AggregatesWebSearchRequestsAcrossPauseTurnCalls()
     {
-        var fixture = Fixture.Create(
-            WebSearchUsageResponse("partial", 10, 2, webSearchRequests: 2, stopReason: "pause_turn"),
-            WebSearchUsageResponse("done", 20, 5, webSearchRequests: 3));
+        var fixture = Fixture.CreateWithOptions(
+            EnabledWebSearchOptions(),
+            WebSearchUsageResponse("partial", 10, 2, webSearchRequests: 1, stopReason: "pause_turn"),
+            WebSearchUsageResponse("done", 20, 5, webSearchRequests: 2));
 
         var result = await fixture.Service.CompleteAsync(Request());
 
-        CollectionAssert.AreEqual(new long[] { 2, 3 }, result.Calls.Select(call => call.WebSearchRequests).ToArray());
-        Assert.AreEqual(5, result.Usage.WebSearchRequests);
+        CollectionAssert.AreEqual(new long[] { 1, 2 }, result.Calls.Select(call => call.WebSearchRequests).ToArray());
+        Assert.AreEqual(3, result.Usage.WebSearchRequests);
         Assert.AreEqual(30, result.Usage.InputTokens);
         Assert.AreEqual(7, result.Usage.OutputTokens);
         Assert.AreEqual(37, result.Usage.TotalTokens);
@@ -996,7 +1458,8 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.IsTrue(result.Errors.Any(error => error.Code == "tool_loop_limit"));
     }
 
-    private static ClaudeDirectChatRequest Request() => new(
+    private static ClaudeDirectChatRequest Request(
+        CommercialPolicySnapshot? commercialPolicy = null) => new(
         new(
             ProjectEndpoint,
             "dx10z-toolbox",
@@ -1006,7 +1469,8 @@ public sealed class ClaudeDirectChatServiceTests
             "company/machine",
             "Machine DX10z; use the connected technical manual."),
         "Use File Search before inspecting technical images.",
-        [new("user", "How do I replace the hydraulic filter?")]);
+        [new("user", "How do I replace the hydraulic filter?")],
+        commercialPolicy ?? new(false, string.Empty));
 
     private static HttpResponseMessage DirectResponse(string text, long inputTokens = 1, long outputTokens = 1) =>
         JsonResponse(JsonSerializer.Serialize(new
@@ -1017,6 +1481,14 @@ public sealed class ClaudeDirectChatServiceTests
             content = new object[] { new { type = "text", text } },
             usage = new { input_tokens = inputTokens, output_tokens = outputTokens }
         }));
+
+    private static HttpResponseMessage EventStreamResponse(params string[] events) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(
+            string.Concat(events.Select(value => $"data: {value}\n\n")),
+            Encoding.UTF8,
+            "text/event-stream")
+    };
 
     private static HttpResponseMessage PauseTurnResponse() =>
         JsonResponse($$"""
@@ -1199,20 +1671,75 @@ public sealed class ClaudeDirectChatServiceTests
             }
         }));
 
+    private static HttpResponseMessage WebSearchMaxUsesExceededResponse() =>
+        JsonResponse("""
+        {
+          "id":"msg-web-limit",
+          "model":"claude-sonnet-5",
+          "stop_reason":"end_turn",
+          "content":[
+            {"type":"server_tool_use","id":"web-limit","name":"web_search","input":{"query":"extra search"}},
+            {
+              "type":"web_search_tool_result",
+              "tool_use_id":"web-limit",
+              "content":{"type":"web_search_tool_result_error","error_code":"max_uses_exceeded"}
+            },
+            {"type":"text","text":"recherches déjà obtenues"}
+          ],
+          "usage":{
+            "input_tokens":10,
+            "output_tokens":2,
+            "server_tool_use":{"web_search_requests":3}
+          }
+        }
+        """);
+
+    private static ClaudeDirectChatOptions EnabledWebSearchOptions(int maxMessageCalls = 4) => new()
+    {
+        FoundryAnthropicEndpoint = "https://resource.test/anthropic",
+        Deployment = "claude-sonnet-5",
+        MaxMessageCalls = maxMessageCalls,
+        MaxImageBytes = 1024,
+        WebSearch = new ClaudeDirectWebSearchOptions
+        {
+            Enabled = true,
+            DiagnosticMaxUses = 2,
+            PartsMaxUses = 3
+        }
+    };
+
+    private static int? ReadWebSearchMaxUses(string requestBody)
+    {
+        using var body = JsonDocument.Parse(requestBody);
+        foreach (var tool in body.RootElement.GetProperty("tools").EnumerateArray())
+        {
+            if (tool.TryGetProperty("name", out var name) && name.GetString() == "web_search")
+            {
+                return tool.GetProperty("max_uses").GetInt32();
+            }
+        }
+
+        return null;
+    }
+
     private static HttpResponseMessage ToolResponse(
         string? documentId = DocumentId,
         string assetType = "full",
         string? tile = null,
         long inputTokens = 10,
         long outputTokens = 2,
-        string[]? allowedDocumentIds = null)
+        string[]? allowedDocumentIds = null,
+        bool includeTile = true)
     {
         var input = new Dictionary<string, object?>
         {
             ["page"] = 75,
-            ["asset_type"] = assetType,
-            ["tile"] = tile
+            ["asset_type"] = assetType
         };
+        if (includeTile)
+        {
+            input["tile"] = tile;
+        }
         if (documentId is not null)
         {
             input["document_id"] = documentId;

@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useContext, useEffect, useRef } from 'react';
 import { useThemeContext } from '../../contexts/ThemeContext';
+import { CompanyAccentContext } from '../../contexts/CompanyAccentContext';
 import styles from './Waves.module.css';
 
 interface WavesProps {
@@ -18,6 +19,7 @@ export const Waves: React.FC<WavesProps> = ({ paused = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number | undefined>(undefined);
   const { currentTheme } = useThemeContext();
+  const accentColor = useContext(CompanyAccentContext);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -43,6 +45,11 @@ export const Waves: React.FC<WavesProps> = ({ paused = false }) => {
 
     // Colors based on theme
     const getWaveColors = () => {
+      if (accentColor) {
+        const channels = [1, 3, 5].map(offset => Number.parseInt(accentColor.slice(offset, offset + 2), 16));
+        const alpha = currentTheme === 'Dark' ? [0.1, 0.08, 0.06] : [0.15, 0.12, 0.1];
+        return alpha.map(opacity => `rgba(${channels.join(', ')}, ${opacity})`);
+      }
       if (currentTheme === 'Dark') {
         return [
           'rgba(102, 126, 234, 0.1)',
@@ -118,7 +125,7 @@ export const Waves: React.FC<WavesProps> = ({ paused = false }) => {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [paused, currentTheme]);
+  }, [paused, currentTheme, accentColor]);
 
   return <canvas ref={canvasRef} className={styles.wavesCanvas} aria-hidden="true" />;
 };

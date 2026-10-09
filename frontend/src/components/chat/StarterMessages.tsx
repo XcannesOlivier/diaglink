@@ -1,40 +1,31 @@
 import type { ReactNode } from 'react';
 import { Body1, Subtitle1 } from '@fluentui/react-components';
+import {
+  BoxSearch20Regular,
+  BuildingShop20Regular,
+  DocumentSearch20Regular,
+  Wrench20Regular,
+} from '@fluentui/react-icons';
 import styles from './StarterMessages.module.css';
 
 interface IStarterMessageProps {
   agentName?: string;
   agentDescription?: string;
-  /**
-   * Starter prompts from agent metadata.
-   * If not provided, falls back to default prompts.
-   * 
-   * Configure in Microsoft Foundry portal under agent Configuration > Starter prompts.
-   * Prompts are stored as newline-separated text in the "starterPrompts" metadata key.
-   */
-  starterPrompts?: string[];
   accessory?: ReactNode;
-  onPromptClick?: (prompt: string) => void;
 }
 
-// Default starter prompts when none are configured in Microsoft Foundry
-const defaultStarterPrompts = [
-  "Diagnostiquer un dysfonctionnement",
-  "Identifier un composant",
-  "Interpréter un schéma technique",
+const capabilities = [
+  { label: 'Diagnostiquer une panne', icon: Wrench20Regular },
+  { label: 'Identifier une pièce', icon: BoxSearch20Regular },
+  { label: 'Comprendre un schéma', icon: DocumentSearch20Regular },
+  { label: 'Trouver un fournisseur', icon: BuildingShop20Regular },
 ];
 
 export const StarterMessages = ({
   agentName,
   agentDescription,
-  starterPrompts,
   accessory,
-  onPromptClick,
 }: IStarterMessageProps): ReactNode => {
-  // Use agent-provided prompts or fall back to defaults
-  const prompts = starterPrompts && starterPrompts.length > 0 
-    ? starterPrompts 
-    : defaultStarterPrompts;
   const displayAgentName = agentName?.replace(/-/g, ' ').trim();
   const mobileTitlePrefix = 'Assistant Technique';
   const mobileMachineName = displayAgentName?.startsWith(mobileTitlePrefix)
@@ -68,22 +59,17 @@ export const StarterMessages = ({
 
       {accessory}
 
-      {onPromptClick && (
-        <ul className={styles.promptList}>
-          {prompts.map((prompt, index) => (
-            <li key={`prompt-${index}`}>
-              <button
-                className={styles.promptCard}
-                onClick={() => onPromptClick(prompt)}
-                type="button"
-                title={prompt}
-              >
-                <span className={styles.promptText}>{prompt}</span>
-              </button>
+      <div className={styles.capabilitySection}>
+        <Body1 className={styles.capabilityIntro}>DiagLink vous aide à :</Body1>
+        <ul className={styles.capabilityList}>
+          {capabilities.map(({ label, icon: Icon }) => (
+            <li className={styles.capabilityItem} key={label}>
+              <Icon aria-hidden="true" className={styles.capabilityIcon} />
+              <span className={styles.capabilityText}>{label}</span>
             </li>
           ))}
         </ul>
-      )}
+      </div>
     </div>
   );
 };

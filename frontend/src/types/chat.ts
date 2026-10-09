@@ -7,6 +7,7 @@ export interface IChatItem {
   annotations?: IAnnotation[]; // Citations/references from AI agent
   visuals?: TechnicalVisual[]; // Technical illustrations selected by the agent
   sources?: TechnicalSourceReference[]; // Verified private PDF references from the backend
+  suggestions?: string[]; // Backend-validated follow-up prompts
   activeToolUse?: string; // Currently active tool (e.g. "file_search", "code_interpreter")
   retryAttempt?: number; // Current retry attempt (set during retries)
   maxRetries?: number; // Max retry attempts (set during retries)

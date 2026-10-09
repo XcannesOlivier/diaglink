@@ -1,7 +1,7 @@
 .zeroprompt {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
   align-items: center;
   justify-content: center;
 
@@ -68,82 +68,59 @@
   }
 }
 
-/* Starter prompts list - card-style layout with responsive wrapping */
-.promptList {
+.capabilitySection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.capabilityIntro {
+  color: var(--colorNeutralForeground3);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.capabilityList {
   list-style: none;
-  padding: 0 1rem;
+  width: min(360px, calc(100% - 2rem));
+  padding: 0;
   margin: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  justify-content: center;
-  max-width: 900px;
+  flex-direction: column;
+  gap: 6px;
 }
 
-/* Card-style prompt buttons */
-.promptCard {
-  background: var(--colorNeutralBackground2);
-  border: 2px solid transparent;
-  border-radius: var(--borderRadiusMedium, 0.5rem);
-  padding: 1rem 1.25rem;
-  cursor: pointer;
-  min-height: 4.5rem;
-  max-width: 18rem;
-  width: 100%;
+.capabilityItem {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  justify-content: center;
-  text-align: center;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
-  font-family: inherit;
+  gap: 12px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 14px;
+  background: var(--colorNeutralBackground2);
+  border: 1px solid var(--colorNeutralStroke3);
+  border-radius: var(--borderRadiusLarge, 0.75rem);
+  text-align: left;
 }
 
-.promptCard:hover {
-  background: var(--colorNeutralBackground2Hover);
-  border-color: var(--colorBrandStroke1);
+.capabilityIcon {
+  flex: 0 0 auto;
+  color: var(--colorBrandForeground1);
 }
 
-.promptCard:focus-visible {
-  outline: 2px solid var(--colorBrandStroke1);
-  outline-offset: 2px;
-}
-
-.promptText {
+.capabilityText {
   font-size: 0.9375rem;
-  line-height: 1.4;
+  line-height: 1.35;
   word-break: break-word;
   color: var(--colorNeutralForeground1);
 }
 
-/* Responsive: Stack vertically and hide 3rd+ on mobile */
 @media (max-width: 600px) {
-  .promptList {
-    flex-direction: column;
-    align-items: stretch;
-    padding: 0 0.5rem;
-  }
-
-  .promptCard {
-    max-width: 100%;
-    min-height: 3.5rem;
-  }
-}
-
-/* Tablet: show all, horizontal wrap */
-@media (min-width: 601px) and (max-width: 900px) {
-  .promptCard {
-    max-width: 15rem;
-  }
-}
-
-/* Desktop: larger cards */
-@media (min-width: 901px) {
-  .promptCard {
-    min-height: 5rem;
-    padding: 1.25rem 1.5rem;
-  }
-
-  .promptText {
-    font-size: 1rem;
+  .capabilityList {
+    width: calc(100% - 1rem);
   }
 }

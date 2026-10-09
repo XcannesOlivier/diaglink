@@ -10,4 +10,13 @@ public record CurrentUserResponse
     public string? FirstName { get; init; }
     public string? LastName { get; init; }
     public string? PhoneNumber { get; init; }
+    public CurrentCompanyBrandingResponse? CompanyBranding { get; init; }
+}
+
+public sealed record CurrentCompanyBrandingResponse
+{
+    public string? CompanyName { get; init; }
+    public string? AccentColor { get; init; }
+    public bool HasLogo { get; init; }
+    public string? LogoVersion { get; init; }
 }

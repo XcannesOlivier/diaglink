@@ -7,8 +7,9 @@
 .cards h3{margin:0 0 12px;font-size:16px;line-height:1.4;font-weight:600}.cards strong{font-size:26px;font-variant-numeric:tabular-nums}
 .cardHeading{align-items:flex-start;gap:8px}.cardHeading h3{margin:0;flex:1 1 160px}.card{box-sizing:border-box}
 .intro,.muted,.note,.footer{color:var(--colorNeutralForeground2);line-height:1.6}.muted{margin:8px 0 16px}.note{font-size:13px;margin:12px 0}.metric{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:20px 0;font-variant-numeric:tabular-nums}.metric strong{font-size:32px;line-height:1.2;letter-spacing:-.6px}.metric span{color:var(--colorNeutralForeground2);font-size:14px}
-.badge,.warning{display:inline-flex;align-items:center;padding:4px 9px;border:1px solid var(--colorNeutralStroke2);border-radius:6px;font-size:12px;line-height:1.5;font-weight:600;background:var(--colorBrandBackground2);color:var(--colorBrandForeground1);max-width:100%;box-sizing:border-box}
+.badge,.warning{display:inline-flex;align-items:center;padding:4px 9px;border:1px solid var(--colorNeutralStroke2);border-radius:6px;font-size:12px;line-height:1.5;font-weight:600;background:var(--diaglink-status-info-background,var(--colorBrandBackground2));color:var(--diaglink-status-info-foreground,var(--colorBrandForeground1));max-width:100%;box-sizing:border-box}
 .warning{background:var(--colorStatusWarningBackground1);color:var(--colorStatusWarningForeground1);border-color:var(--colorStatusWarningBorder1)}
+.activationBadge{background:var(--colorBrandBackground2);color:var(--colorBrandForeground1)}
 .barLabel{font-size:13px;margin-bottom:8px;color:var(--colorNeutralForeground2);font-variant-numeric:tabular-nums}.barLabel strong,.barLabel span:last-child{font-size:13px;color:var(--colorNeutralForeground1);font-weight:600}
 .progress,.exhaustedProgress,.emptyBar,.walletBar{display:block;width:100%;height:10px;border:0;border-radius:5px;overflow:hidden;background:var(--colorNeutralBackground4);appearance:none}
 .progress::-webkit-progress-bar,.exhaustedProgress::-webkit-progress-bar{background:var(--colorNeutralBackground4)}

@@ -360,7 +360,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           onRemove={handleRemoveFile}
           disabled={disabled}
         />
-        <div className={styles.inputWrapper}>
+        <div className={styles.inputWrapper} data-disabled={disabled || undefined}>
         <ChatInputFluent
           aria-label="Zone de saisie du chat"
           aria-describedby={showCounter ? charCounterId : undefined}

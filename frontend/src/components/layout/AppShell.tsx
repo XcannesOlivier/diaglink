@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   makeStyles,
+  mergeClasses,
   tokens,
   Drawer,
   DrawerHeader,
@@ -11,14 +12,17 @@ import {
   Badge,
 } from '@fluentui/react-components';
 import { Dismiss24Regular, Mail24Regular, Settings24Regular } from '@fluentui/react-icons';
+import { CompanyAccentProvider } from './CompanyAccentProvider';
 import { useAppState } from '../../hooks/useAppState';
 import { useAuth } from '../../hooks/useAuth';
 import { AgentChat } from '../AgentChat';
 import { Navigation } from './Navigation';
 import { UserBadge } from './UserBadge';
+import { CompanyLogo } from './CompanyLogo';
 import { MachinesView } from '../views/MachinesView';
 import { UsersView } from '../views/UsersView';
 import { CompanyView } from '../views/CompanyView';
+import { CompanyBrandingView } from '../views/CompanyBrandingView';
 import { CompaniesView } from '../views/CompaniesView';
 import { DiagLinkAdminView } from '../views/DiagLinkAdminView';
 import { MachineRequestsView } from '../views/MachineRequestsView';
@@ -29,6 +33,7 @@ import { getNavItemsForRole, resolveView, ROLE_LABELS } from '../../utils/naviga
 import type { AppView } from '../../types/navigation';
 import { listMachineRequests, type MachineRequestDetail, type MachineRequestListItem } from '../../services/machineRequestAdminApi';
 import { fetchCurrentUser } from '../../services/currentUserService';
+import { useCompanyBrandingLogo } from '../../hooks/useCompanyBrandingLogo';
 
 const useStyles = makeStyles({
   shell: {
@@ -48,6 +53,11 @@ const useStyles = makeStyles({
     flexShrink: 0,
     '@media (max-width: 1000px)': {
       display: 'none',
+    },
+  },
+  companyHeader: {
+    '@media (max-width: 1400px)': {
+      gap: tokens.spacingHorizontalS,
     },
   },
   brand: {
@@ -72,13 +82,28 @@ const useStyles = makeStyles({
       display: 'none',
     },
   },
+  companyNav: {
+    minWidth: 'max-content',
+  },
   userBadge: {
+    minWidth: 0,
     '@media (max-width: 1000px)': {
       display: 'none',
     },
   },
   settingsButton: {
     '@media (max-width: 1000px)': {
+      display: 'none',
+    },
+  },
+  companyHeaderAction: {
+    flexShrink: 0,
+    '@media (max-width: 1400px)': {
+      minWidth: '32px',
+    },
+  },
+  desktopActionLabel: {
+    '@media (max-width: 1400px)': {
       display: 'none',
     },
   },
@@ -121,10 +146,22 @@ const useStyles = makeStyles({
   },
   mobileUserInfo: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalM,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  mobileUserDetails: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: tokens.spacingVerticalXS,
+    minWidth: 0,
+    flex: 1,
+  },
+  mobileCompanyLogo: {
+    maxHeight: '32px',
+    maxWidth: '80px',
   },
   mobileUserEmail: {
     overflowWrap: 'break-word',
@@ -177,10 +214,17 @@ export const AppShell: React.FC<AppShellProps> = ({
   onDiagLinkSessionExpired,
 }) => {
   const styles = useStyles();
-  const { auth, ui, state, dispatch } = useAppState();
+  const { auth, branding, ui, state, dispatch } = useAppState();
   const { getAccessToken } = useAuth();
   const currentUser = auth.currentUser;
+  const companyLogoUrl = currentUser?.role !== 'diaglink_super_admin' &&
+    currentUser?.companyBranding?.hasLogo &&
+    branding.companyId === currentUser.companyId &&
+    branding.logoVersion === currentUser.companyBranding.logoVersion
+      ? branding.logoObjectUrl
+      : null;
   const currentView = ui.currentView;
+  const compactCompanyHeader = !!companyLogoUrl || currentUser?.role === 'company_admin';
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSupportContactOpen, setIsSupportContactOpen] = useState(false);
@@ -188,14 +232,21 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [machineRequestsLoading, setMachineRequestsLoading] = useState(false);
   const [machineRequestsError, setMachineRequestsError] = useState(false);
   const [machineRequestsListResetKey, setMachineRequestsListResetKey] = useState(0);
+  useCompanyBrandingLogo(onDiagLinkSessionExpired);
+
+  const shellStyle = {
+    '--diaglink-company-accent': currentUser?.companyBranding?.accentColor ?? 'var(--colorBrandForeground1)',
+  } as React.CSSProperties;
 
   const refreshCurrentUser = useCallback(async () => {
     const result = await fetchCurrentUser(getAccessToken);
     if (result.currentUser) {
       dispatch({ type: 'AUTH_CURRENT_USER_LOADED', currentUser: result.currentUser });
+      return true;
     } else if (result.diagLinkSessionExpired) {
       onDiagLinkSessionExpired?.();
     }
+    return false;
   }, [dispatch, getAccessToken, onDiagLinkSessionExpired]);
 
   const loadMachineRequests = useCallback(async () => {
@@ -276,37 +327,42 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const mobileNavItems = getNavItemsForRole(currentUser?.role, pendingMachineRequestCount);
   const canContactSupport = currentUser?.role === 'technician' || currentUser?.role === 'company_admin';
-  const showMobileViewCloseButton = ['companies', 'users', 'machines', 'machine-requests', 'diaglink-admin'].includes(currentView);
+  const showMobileViewCloseButton = ['companies', 'users', 'machines', 'machine-requests', 'diaglink-admin', 'personalization'].includes(currentView);
 
   return (
-    <div className={styles.shell}>
-      <header className={styles.header}>
+    <CompanyAccentProvider className={styles.shell} style={shellStyle}
+      accentColor={currentUser?.companyBranding?.accentColor ?? null}>
+      <header className={mergeClasses(styles.header, compactCompanyHeader && styles.companyHeader)}>
         <div className={styles.brand}>
           {/* Header brand logo removed per request (keep page logo intact) */}
         </div>
-        <div className={styles.nav}>
+        <div className={mergeClasses(styles.nav, compactCompanyHeader && styles.companyNav)}>
           <Navigation role={currentUser?.role} currentView={currentView} onSelectView={handleSelectDesktopView} pendingMachineRequestCount={pendingMachineRequestCount} />
         </div>
         {canContactSupport && (
           <Button
-            className={styles.settingsButton}
+            className={mergeClasses(styles.settingsButton, compactCompanyHeader && styles.companyHeaderAction)}
             appearance="subtle"
             icon={<Mail24Regular />}
+            aria-label="Contacter DiagLink"
+            title="Contacter DiagLink"
             onClick={handleOpenSupportContact}
           >
-            Contacter DiagLink
+            <span className={compactCompanyHeader ? styles.desktopActionLabel : undefined}>Contacter DiagLink</span>
           </Button>
         )}
         <Button
-          className={styles.settingsButton}
+          className={mergeClasses(styles.settingsButton, compactCompanyHeader && styles.companyHeaderAction)}
           appearance="subtle"
           icon={<Settings24Regular />}
+          aria-label="Paramètres"
+          title="Paramètres"
           onClick={handleOpenSettings}
         >
-          Paramètres
+          <span className={compactCompanyHeader ? styles.desktopActionLabel : undefined}>Paramètres</span>
         </Button>
         <div className={styles.userBadge}>
-          <UserBadge currentUser={currentUser} />
+          <UserBadge currentUser={currentUser} companyLogoUrl={companyLogoUrl} />
         </div>
       </header>
 
@@ -365,12 +421,19 @@ export const AppShell: React.FC<AppShellProps> = ({
           </Button>
           {currentUser && (
             <div className={styles.mobileUserInfo}>
-              <Text className={styles.mobileUserEmail}>
-                {[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ') || currentUser.email}
-              </Text>
-              <Badge appearance="tint" color="informative">
-                {ROLE_LABELS[currentUser.role]}
-              </Badge>
+              <div className={styles.mobileUserDetails}>
+                <Text className={styles.mobileUserEmail}>
+                  {[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ') || currentUser.email}
+                </Text>
+                <Badge appearance="tint" color="informative">
+                  {ROLE_LABELS[currentUser.role]}
+                </Badge>
+              </div>
+              <CompanyLogo
+                className={styles.mobileCompanyLogo}
+                logoObjectUrl={companyLogoUrl}
+                companyName={currentUser.companyBranding?.companyName}
+              />
             </div>
           )}
           <div className={styles.mobileDrawerBranding}>
@@ -414,6 +477,16 @@ export const AppShell: React.FC<AppShellProps> = ({
           <CompanyView machine={state.machine.selected ?? undefined} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired}
             onReturnToChat={currentUser?.role === 'company_admin' ? () => handleSelectView('chat') : undefined} />
         )}
+        {currentView === 'personalization' && (
+          <CompanyBrandingView
+            key={currentUser?.companyId}
+            currentUser={currentUser}
+            logoObjectUrl={companyLogoUrl}
+            getAccessToken={getAccessToken}
+            onCurrentUserRefresh={refreshCurrentUser}
+            onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+          />
+        )}
         {currentView === 'companies' && (
           <CompaniesView getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} />
         )}
@@ -445,9 +518,10 @@ export const AppShell: React.FC<AppShellProps> = ({
         onOpenChange={setIsSettingsOpen}
         currentUser={currentUser}
         getAccessToken={getAccessToken}
-        onCurrentUserRefresh={refreshCurrentUser}
+        onCurrentUserRefresh={async () => { await refreshCurrentUser(); }}
         onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+        onOpenPersonalization={() => handleSelectView('personalization')}
       />
-    </div>
+    </CompanyAccentProvider>
   );
 };

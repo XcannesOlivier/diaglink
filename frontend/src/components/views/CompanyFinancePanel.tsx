@@ -111,7 +111,7 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
           </div>
         </article>
         <details className={`${styles.card} ${styles.subscription}`} aria-label="Abonnement">
-        <summary className={`${styles.cardHeading} ${styles.subscriptionSummary}`}><h3>Abonnement</h3><span className={data.subscriptionStatus==='past_due'||data.subscriptionStatus==='unpaid'?styles.warning:styles.badge}>{data.subscriptionStatus?(labels[data.subscriptionStatus]??'À vérifier'):'Aucun abonnement'}</span></summary>
+        <summary className={`${styles.cardHeading} ${styles.subscriptionSummary}`}><h3>Abonnement</h3><span className={data.subscriptionStatus==='past_due'||data.subscriptionStatus==='unpaid'?styles.warning:`${styles.badge}${data.subscriptionStatus==='trialing'?` ${styles.activationBadge}`:''}`}>{data.subscriptionStatus?(labels[data.subscriptionStatus]??'À vérifier'):'Aucun abonnement'}</span></summary>
         <dl className={styles.details}>
         <dt>Prochaine échéance</dt><dd>{data.nextDueUtc&&!data.cancelAtPeriodEnd&&data.subscriptionStatus!=='canceled'?new Date(data.nextDueUtc).toLocaleString('fr-FR'):'—'}</dd>
         <dt>Nombre total de machines</dt><dd>{machines?.length??'Indisponible'}</dd>

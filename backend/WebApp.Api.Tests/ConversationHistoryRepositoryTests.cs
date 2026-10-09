@@ -55,6 +55,207 @@ public class ConversationHistoryRepositoryTests
     }
 
     [TestMethod]
+    public async Task ListConversationsForUserAsync_WithoutMessages_UsesCreatedAtAsLastActivityAt()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var createdAtUtc = new DateTime(2026, 10, 1, 8, 30, 0, DateTimeKind.Utc);
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            writeContext.Conversations.Add(new Conversation
+            {
+                Id = Guid.NewGuid(),
+                ConversationPublicId = "conversation-without-messages",
+                UserObjectId = "user-A",
+                CreatedAtUtc = createdAtUtc,
+                UpdatedAtUtc = createdAtUtc.AddDays(2)
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var summary = (await CreateRepository(readContext)
+            .ListConversationsForUserAsync("user-A", null, CancellationToken.None)).Single();
+        var expectedTimestamp = new DateTimeOffset(createdAtUtc).ToUnixTimeSeconds();
+
+        Assert.AreEqual(expectedTimestamp, summary.CreatedAt);
+        Assert.AreEqual(expectedTimestamp, summary.LastActivityAt);
+    }
+
+    [TestMethod]
+    public async Task ListConversationsForUserAsync_WithOneMessage_UsesMessageCreatedAtAsLastActivityAt()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var createdAtUtc = new DateTime(2026, 10, 1, 8, 30, 0, DateTimeKind.Utc);
+        var messageCreatedAtUtc = new DateTime(2026, 10, 5, 14, 7, 57, DateTimeKind.Utc);
+        var conversationId = Guid.NewGuid();
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            writeContext.Conversations.Add(new Conversation
+            {
+                Id = conversationId,
+                ConversationPublicId = "conversation-with-one-message",
+                UserObjectId = "user-A",
+                CreatedAtUtc = createdAtUtc,
+                UpdatedAtUtc = messageCreatedAtUtc
+            });
+            writeContext.ConversationMessages.Add(new ConversationMessage
+            {
+                ConversationId = conversationId,
+                Role = "assistant",
+                Content = "answer",
+                CreatedAtUtc = messageCreatedAtUtc
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var summary = (await CreateRepository(readContext)
+            .ListConversationsForUserAsync("user-A", null, CancellationToken.None)).Single();
+
+        Assert.AreEqual(new DateTimeOffset(createdAtUtc).ToUnixTimeSeconds(), summary.CreatedAt);
+        Assert.AreEqual(new DateTimeOffset(messageCreatedAtUtc).ToUnixTimeSeconds(), summary.LastActivityAt);
+    }
+
+    [TestMethod]
+    public async Task ListConversationsForUserAsync_WithMultipleMessages_UsesLatestMessageAndIgnoresUpdatedAt()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var createdAtUtc = new DateTime(2026, 10, 1, 8, 30, 0, DateTimeKind.Utc);
+        var firstMessageAtUtc = new DateTime(2026, 10, 5, 14, 7, 57, DateTimeKind.Utc);
+        var latestMessageAtUtc = new DateTime(2026, 10, 8, 9, 12, 34, DateTimeKind.Utc);
+        var conversationId = Guid.NewGuid();
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            writeContext.Conversations.Add(new Conversation
+            {
+                Id = conversationId,
+                ConversationPublicId = "conversation-with-multiple-messages",
+                UserObjectId = "user-A",
+                CreatedAtUtc = createdAtUtc,
+                UpdatedAtUtc = latestMessageAtUtc.AddDays(1)
+            });
+            writeContext.ConversationMessages.AddRange(
+                new ConversationMessage
+                {
+                    ConversationId = conversationId,
+                    Role = "user",
+                    Content = "question",
+                    CreatedAtUtc = firstMessageAtUtc
+                },
+                new ConversationMessage
+                {
+                    ConversationId = conversationId,
+                    Role = "assistant",
+                    Content = "answer",
+                    CreatedAtUtc = latestMessageAtUtc
+                });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var summary = (await CreateRepository(readContext)
+            .ListConversationsForUserAsync("user-A", null, CancellationToken.None)).Single();
+        var expectedLastActivityAt = new DateTimeOffset(latestMessageAtUtc).ToUnixTimeSeconds();
+
+        Assert.AreEqual(new DateTimeOffset(createdAtUtc).ToUnixTimeSeconds(), summary.CreatedAt);
+        Assert.AreEqual(expectedLastActivityAt, summary.LastActivityAt);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            summary,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        Assert.AreEqual(expectedLastActivityAt, document.RootElement.GetProperty("lastActivityAt").GetInt64());
+    }
+
+    [TestMethod]
+    public async Task ListConversationsForUserAsync_OrdersByLastActivityThenStableId()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var oldActiveId = Guid.Parse("00000000-0000-0000-0000-000000000010");
+        var newerInactiveId = Guid.Parse("00000000-0000-0000-0000-000000000020");
+        var updatedOnlyId = Guid.Parse("00000000-0000-0000-0000-000000000030");
+        var tieLowId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var tieHighId = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var oldActivityAtUtc = new DateTime(2026, 10, 10, 12, 0, 0, DateTimeKind.Utc);
+        var newerCreationAtUtc = new DateTime(2026, 10, 9, 12, 0, 0, DateTimeKind.Utc);
+        var tiedActivityAtUtc = new DateTime(2026, 10, 8, 12, 0, 0, DateTimeKind.Utc);
+        var updatedOnlyCreationAtUtc = new DateTime(2026, 10, 2, 12, 0, 0, DateTimeKind.Utc);
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            writeContext.Conversations.AddRange(
+                new Conversation
+                {
+                    Id = oldActiveId,
+                    ConversationPublicId = "old-active",
+                    UserObjectId = "user-A",
+                    CreatedAtUtc = new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc),
+                    UpdatedAtUtc = oldActivityAtUtc
+                },
+                new Conversation
+                {
+                    Id = newerInactiveId,
+                    ConversationPublicId = "newer-inactive",
+                    UserObjectId = "user-A",
+                    CreatedAtUtc = newerCreationAtUtc,
+                    UpdatedAtUtc = newerCreationAtUtc
+                },
+                new Conversation
+                {
+                    Id = updatedOnlyId,
+                    ConversationPublicId = "updated-only",
+                    UserObjectId = "user-A",
+                    CreatedAtUtc = updatedOnlyCreationAtUtc,
+                    UpdatedAtUtc = oldActivityAtUtc.AddDays(10)
+                },
+                new Conversation
+                {
+                    Id = tieLowId,
+                    ConversationPublicId = "tie-low",
+                    UserObjectId = "user-A",
+                    CreatedAtUtc = tiedActivityAtUtc,
+                    UpdatedAtUtc = tiedActivityAtUtc
+                },
+                new Conversation
+                {
+                    Id = tieHighId,
+                    ConversationPublicId = "tie-high",
+                    UserObjectId = "user-A",
+                    CreatedAtUtc = tiedActivityAtUtc,
+                    UpdatedAtUtc = tiedActivityAtUtc
+                });
+            writeContext.ConversationMessages.Add(new ConversationMessage
+            {
+                ConversationId = oldActiveId,
+                Role = "assistant",
+                Content = "recent answer",
+                CreatedAtUtc = oldActivityAtUtc
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var summaries = await CreateRepository(readContext)
+            .ListConversationsForUserAsync("user-A", null, CancellationToken.None);
+
+        CollectionAssert.AreEqual(
+            new[] { "old-active", "newer-inactive", "tie-high", "tie-low", "updated-only" },
+            summaries.Select(summary => summary.Id).ToArray());
+        Assert.AreEqual(
+            new DateTimeOffset(oldActivityAtUtc).ToUnixTimeSeconds(),
+            summaries.Single(summary => summary.Id == "old-active").LastActivityAt);
+        Assert.AreEqual(
+            new DateTimeOffset(newerCreationAtUtc).ToUnixTimeSeconds(),
+            summaries.Single(summary => summary.Id == "newer-inactive").LastActivityAt);
+        Assert.AreEqual(
+            new DateTimeOffset(updatedOnlyCreationAtUtc).ToUnixTimeSeconds(),
+            summaries.Single(summary => summary.Id == "updated-only").LastActivityAt);
+    }
+
+    [TestMethod]
     public async Task AddMessageAsync_OtherUsersConversationId_DoesNotPersistMessage()
     {
         var dbName = Guid.NewGuid().ToString();
@@ -507,6 +708,44 @@ public class ConversationHistoryRepositoryTests
     }
 
     [TestMethod]
+    public async Task GetConversationMessagesAsync_ReturnsPersistedCreatedAtUtc()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        const string conversationPublicId = "conv-created-at";
+        var createdAtUtc = new DateTime(2026, 10, 5, 14, 7, 57, DateTimeKind.Utc);
+        await SeedEmptyConversationAsync(dbName, conversationPublicId, "user-A");
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            var conversationId = await writeContext.Conversations
+                .Where(conversation => conversation.ConversationPublicId == conversationPublicId)
+                .Select(conversation => conversation.Id)
+                .SingleAsync();
+            writeContext.ConversationMessages.Add(new ConversationMessage
+            {
+                ConversationId = conversationId,
+                Role = "assistant",
+                Content = "answer",
+                CreatedAtUtc = createdAtUtc
+            });
+            await writeContext.SaveChangesAsync();
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var messages = await CreateRepository(readContext)
+            .GetConversationMessagesAsync(conversationPublicId, "user-A", CancellationToken.None);
+
+        var message = messages!.Single();
+        Assert.AreEqual(createdAtUtc, message.CreatedAtUtc);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            message,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        Assert.AreEqual(createdAtUtc, document.RootElement.GetProperty("createdAtUtc").GetDateTime());
+    }
+
+    [TestMethod]
     public async Task GetConversationMessagesAsync_LegacyMessageReturnsEmptyVisuals()
     {
         var dbName = Guid.NewGuid().ToString();
@@ -519,6 +758,7 @@ public class ConversationHistoryRepositoryTests
         var message = messages!.Single();
         Assert.HasCount(0, message.Visuals);
         Assert.HasCount(0, message.Sources);
+        Assert.HasCount(0, message.Suggestions);
     }
 
     [TestMethod]
@@ -641,6 +881,37 @@ public class ConversationHistoryRepositoryTests
 
     private static TechnicalVisualReference TileVisual() => new(
         "manual", 71, "tile", "r02-c01", "manual_page-00071-tile-r02-c01.png", "manual/page-00071/manual_page-00071-tile-r02-c01.png");
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_PersistsSuggestionsOutsideContentAndReturnsThemInHistory()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-suggestions", "user-A");
+        await using (var writeContext = CreateContext(dbName))
+        {
+            await CreateRepository(writeContext).AddMessageAsync(
+                "conv-suggestions",
+                "user-A",
+                "assistant",
+                "Réponse visible",
+                [],
+                [],
+                ["Où est le relais ?"],
+                CancellationToken.None);
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var entity = await readContext.ConversationMessages.SingleAsync();
+        var history = await CreateRepository(readContext)
+            .GetConversationMessagesAsync("conv-suggestions", "user-A", CancellationToken.None);
+
+        Assert.AreEqual("Réponse visible", entity.Content);
+        Assert.IsFalse(entity.Content.Contains("diaglink_suggestion", StringComparison.Ordinal));
+        CollectionAssert.AreEqual(
+            new[] { "Où est le relais ?" },
+            System.Text.Json.JsonSerializer.Deserialize<string[]>(entity.SuggestionsJson!)!);
+        CollectionAssert.AreEqual(new[] { "Où est le relais ?" }, history!.Single().Suggestions.ToArray());
+    }
 
     private static TechnicalSourceReference SourceReference() => new(
         "manual", 72, "70", "p. 70", 9, 14, 0);

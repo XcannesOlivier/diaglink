@@ -90,6 +90,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
           disabled={disabled}
           aria-label="Microphone"
           aria-pressed={isListening}
+          data-company-accent-exempt={isListening || undefined}
           className={`${styles.voiceButton} ${isListening ? styles.listening : ''}`}
         >
           {isListening && <span className={styles.pulsingDot} />}

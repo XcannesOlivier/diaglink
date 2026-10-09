@@ -41,13 +41,20 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
   const { dispatchToast: dispatchMachineToast } = useToastController(machineToasterId);
   const conversationListRequest = useRef<{ generation: number; controller: AbortController } | null>(null);
   const conversationMessagesRequest = useRef<{ generation: number; controller: AbortController } | null>(null);
+  const conversationRefreshRef = useRef<() => void>(() => undefined);
   const selectedMachineId = state.machine.selected?.id;
 
   // Create service instances
   const apiUrl = import.meta.env.VITE_API_URL || '/api';
   
   const chatService = useMemo(() => {
-    return new ChatService(apiUrl, getAccessToken, dispatch, onDiagLinkSessionExpired);
+    return new ChatService(
+      apiUrl,
+      getAccessToken,
+      dispatch,
+      onDiagLinkSessionExpired,
+      () => conversationRefreshRef.current()
+    );
   }, [apiUrl, getAccessToken, dispatch, onDiagLinkSessionExpired]);
 
   const handleSendMessage = async (text: string, files?: File[]) => {
@@ -168,7 +175,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     }
   }, [chat.regenerateText, chat.status, chat.currentConversationId, chatService, dispatch]);
 
-  const loadConversations = useCallback(async (limit: number, appendFrom?: number) => {
+  const loadConversations = useCallback(async (limit: number) => {
     conversationListRequest.current?.controller.abort();
     const request = {
       generation: (conversationListRequest.current?.generation ?? 0) + 1,
@@ -179,17 +186,20 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     try {
       const result = await chatService.listConversations(limit, selectedMachineId, request.controller.signal);
       if (request.controller.signal.aborted || conversationListRequest.current?.generation !== request.generation) return;
-      const conversations = appendFrom === undefined ? result.conversations : result.conversations.slice(appendFrom);
-      const hasMore = appendFrom === undefined
-        ? result.hasMore
-        : conversations.length > 0 && result.hasMore;
-      dispatch({ type: 'CONVERSATIONS_SET_LIST', conversations, hasMore, append: appendFrom !== undefined });
+      dispatch({ type: 'CONVERSATIONS_SET_LIST', conversations: result.conversations, hasMore: result.hasMore });
     } catch (error) {
       if (request.controller.signal.aborted || conversationListRequest.current?.generation !== request.generation) return;
       dispatch({ type: 'CONVERSATIONS_LOADING_DONE' });
       throw error;
     }
   }, [chatService, dispatch, selectedMachineId]);
+
+  conversationRefreshRef.current = () => {
+    const limit = Math.max(CONVERSATIONS_PAGE_SIZE, state.conversations.list.length);
+    void loadConversations(limit).catch(error => {
+      console.error('Failed to refresh conversations after chat completion:', error);
+    });
+  };
 
   useEffect(() => {
     conversationMessagesRequest.current?.controller.abort();
@@ -247,7 +257,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
   const handleLoadMoreConversations = useCallback(async () => {
     try {
       const currentCount = state.conversations.list.length;
-      await loadConversations(currentCount + CONVERSATIONS_PAGE_SIZE, currentCount);
+      await loadConversations(currentCount + CONVERSATIONS_PAGE_SIZE);
     } catch (error) {
       console.error('Failed to load more conversations:', error);
     }
@@ -277,7 +287,8 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           content: msg.content,
           visuals: msg.role === 'assistant' ? msg.visuals : undefined,
           sources: msg.role === 'assistant' ? msg.sources : undefined,
-          more: { time: new Date().toISOString() },
+          suggestions: msg.role === 'assistant' ? msg.suggestions : undefined,
+          more: msg.createdAtUtc ? { time: msg.createdAtUtc } : undefined,
         }));
 
       dispatch({ type: 'CHAT_LOAD_CONVERSATION', conversationId, messages: chatItems });

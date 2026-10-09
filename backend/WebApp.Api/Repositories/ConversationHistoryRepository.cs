@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using WebApp.Api.Data;
 using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
@@ -56,6 +57,7 @@ public class ConversationHistoryRepository
             content,
             Array.Empty<TechnicalVisualReference>(),
             Array.Empty<TechnicalSourceReference>(),
+            Array.Empty<string>(),
             cancellationToken);
         return result?.MessageId;
     }
@@ -74,6 +76,7 @@ public class ConversationHistoryRepository
             content,
             visuals,
             Array.Empty<TechnicalSourceReference>(),
+            Array.Empty<string>(),
             cancellationToken);
 
     public async Task<ConversationMessagePersistenceResult?> AddMessageAsync(
@@ -83,6 +86,25 @@ public class ConversationHistoryRepository
         string content,
         IReadOnlyList<TechnicalVisualReference> visuals,
         IReadOnlyList<TechnicalSourceReference> sources,
+        CancellationToken cancellationToken) =>
+        await AddMessageAsync(
+            conversationPublicId,
+            userObjectId,
+            role,
+            content,
+            visuals,
+            sources,
+            Array.Empty<string>(),
+            cancellationToken);
+
+    public async Task<ConversationMessagePersistenceResult?> AddMessageAsync(
+        string conversationPublicId,
+        string userObjectId,
+        string role,
+        string content,
+        IReadOnlyList<TechnicalVisualReference> visuals,
+        IReadOnlyList<TechnicalSourceReference> sources,
+        IReadOnlyList<string> suggestions,
         CancellationToken cancellationToken)
     {
         // Ownership check and lookup in the same query â€” never write to another user's conversation.
@@ -105,6 +127,7 @@ public class ConversationHistoryRepository
             ConversationId = conversation.Id,
             Role = role,
             Content = content,
+            SuggestionsJson = suggestions.Count == 0 ? null : JsonSerializer.Serialize(suggestions),
             IsSummarized = false,
             CreatedAtUtc = now
         };
@@ -156,7 +179,8 @@ public class ConversationHistoryRepository
             message.Sources
                 .OrderBy(source => source.DisplayOrder)
                 .Select(ToSourceInfo)
-                .ToList());
+                .ToList(),
+            suggestions.ToArray());
     }
 
     /// <summary>
@@ -280,8 +304,18 @@ public class ConversationHistoryRepository
         }
 
         var conversations = await query
-            .OrderByDescending(c => c.CreatedAtUtc)
-            .Select(c => new { c.Id, c.ConversationPublicId, c.CreatedAtUtc, c.MachineId })
+            .Select(c => new
+            {
+                c.Id,
+                c.ConversationPublicId,
+                c.CreatedAtUtc,
+                LastActivityAtUtc = c.Messages
+                    .Select(m => (DateTime?)m.CreatedAtUtc)
+                    .Max() ?? c.CreatedAtUtc,
+                c.MachineId
+            })
+            .OrderByDescending(c => c.LastActivityAtUtc)
+            .ThenByDescending(c => c.Id)
             .ToListAsync(cancellationToken);
 
         if (conversations.Count == 0)
@@ -316,6 +350,7 @@ public class ConversationHistoryRepository
                 Id = c.ConversationPublicId,
                 Title = BuildTitle(firstUserMessageByConversation.GetValueOrDefault(c.Id)),
                 CreatedAt = new DateTimeOffset(c.CreatedAtUtc, TimeSpan.Zero).ToUnixTimeSeconds(),
+                LastActivityAt = new DateTimeOffset(c.LastActivityAtUtc, TimeSpan.Zero).ToUnixTimeSeconds(),
                 MachineId = c.MachineId?.ToString(),
                 MachineName = c.MachineId.HasValue ? machineNamesById.GetValueOrDefault(c.MachineId.Value) : null
             })
@@ -353,6 +388,8 @@ public class ConversationHistoryRepository
             {
                 Role = m.Role,
                 Content = m.Content,
+                CreatedAtUtc = m.CreatedAtUtc,
+                Suggestions = DeserializeSuggestions(m.SuggestionsJson),
                 Visuals = m.Visuals
                     .OrderBy(v => v.DisplayOrder)
                     .Select(ToVisualInfo)
@@ -363,6 +400,23 @@ public class ConversationHistoryRepository
                     .ToList()
             })
             .ToList();
+    }
+
+    private static IReadOnlyList<string> DeserializeSuggestions(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(json) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     private static ConversationMessageVisualInfo ToVisualInfo(ConversationMessageVisual visual) => new()

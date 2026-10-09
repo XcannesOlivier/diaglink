@@ -5,7 +5,7 @@ import { parseTechnicalSources } from './technicalSources';
  * SSE event types from Azure AI Agent streaming API.
  * Contract: Backend sends Server-Sent Events with these event types.
  */
-export type SseEventType = 'conversationId' | 'chunk' | 'annotations' | 'visuals' | 'sources' | 'toolUse' | 'usage' | 'done' | 'error';
+export type SseEventType = 'conversationId' | 'chunk' | 'annotations' | 'visuals' | 'sources' | 'suggestions' | 'toolUse' | 'usage' | 'done' | 'error';
 
 export interface SseEvent {
   type: SseEventType;
@@ -61,6 +61,13 @@ export interface SseSourcesEvent extends SseEvent {
   type: 'sources';
   data: {
     sources: TechnicalSourceReference[];
+  };
+}
+
+export interface SseSuggestionsEvent extends SseEvent {
+  type: 'suggestions';
+  data: {
+    suggestions: string[];
   };
 }
 

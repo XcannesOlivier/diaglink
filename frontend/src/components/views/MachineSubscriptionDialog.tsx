@@ -135,8 +135,8 @@ export function MachineSubscriptionDialog({ open, machine, companyId, token, act
         </DialogContent>
         <DialogActions className={companyScoped?styles.companyActions:undefined} {...(companyScoped?{'data-company-machine-actions':true}:{})}>
           {confirming
-            ? <><Button appearance="secondary" disabled={busy} onClick={()=>{setConfirming(false);setError('');}}>Annuler</Button><Button appearance="primary" className={action==='cancel'?styles.destructive:undefined} disabled={busy||!actionEnabled} onClick={()=>void changeSubscription()}>{busy?<><Spinner size="tiny"/> {busyLabel}</>:confirmLabel}</Button></>
-            : <><Button appearance="secondary" disabled={busy} onClick={close}>Annuler</Button><Button appearance={action==='cancel'?'secondary':'primary'} className={action==='cancel'?styles.destructive:undefined} disabled={!actionEnabled} onClick={()=>setConfirming(true)}>{actionLabel}</Button></>}
+            ? <><Button appearance="secondary" disabled={busy} onClick={()=>{setConfirming(false);setError('');}}>Annuler</Button><Button appearance="primary" data-company-accent-exempt={action==='cancel'||undefined} className={action==='cancel'?styles.destructive:undefined} disabled={busy||!actionEnabled} onClick={()=>void changeSubscription()}>{busy?<><Spinner size="tiny"/> {busyLabel}</>:confirmLabel}</Button></>
+            : <><Button appearance="secondary" disabled={busy} onClick={close}>Annuler</Button><Button appearance={action==='cancel'?'secondary':'primary'} data-company-accent-exempt={action==='cancel'||undefined} className={action==='cancel'?styles.destructive:undefined} disabled={!actionEnabled} onClick={()=>setConfirming(true)}>{actionLabel}</Button></>}
         </DialogActions>
       </DialogBody>
     </DialogSurface>

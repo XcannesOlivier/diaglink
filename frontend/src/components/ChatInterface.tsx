@@ -46,7 +46,7 @@ interface ChatInterfaceProps {
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
-  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onLoadTechnicalVisual, onLoadTechnicalSource, hasMessages, disabled, agentName, agentDescription, starterPrompts, starterAccessory, onChangeMachine } = props;
+  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onLoadTechnicalVisual, onLoadTechnicalSource, hasMessages, disabled, agentName, agentDescription, starterAccessory, onChangeMachine } = props;
   const deferredMessages = useDeferredValue(messages);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [liveRegionMessage, setLiveRegionMessage] = useState<string>('');
@@ -103,8 +103,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
       return () => clearTimeout(timer);
     }
   }, [isStreaming, status, messages, streamingMessageId]);
-
-  const effectiveStarterPrompts = starterPrompts && starterPrompts.length > 0 ? starterPrompts : undefined;
 
   const handleSendMessage = (messageText: string, files?: File[]) => {
     if (!messageText.trim() || disabled) return;
@@ -197,9 +195,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
             <StarterMessages 
               agentName={agentName}
               agentDescription={agentDescription}
-              starterPrompts={effectiveStarterPrompts}
               accessory={starterAccessory}
-              onPromptClick={handleStarterPromptClick}
             />
           ) : (
             <>

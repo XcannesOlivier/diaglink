@@ -24,8 +24,6 @@ vi.mock('../../core/Markdown', () => ({
     <p data-source-count={sources?.length ?? 0} data-source-label={sources?.[0]?.label}>{content}</p>
   ),
 }));
-vi.mock('../../../hooks/useFormatTimestamp', () => ({ useFormatTimestamp: () => () => 'à l’instant' }));
-
 describe('chat message presentation', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -44,9 +42,12 @@ describe('chat message presentation', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.useRealTimers();
   });
 
   it('keeps only the assistant timestamp and omits feedback actions', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T10:00:20Z'));
     await act(async () => root.render(
       <>
         <UserMessage message={{ id: 'user-1', role: 'user', content: 'Question', more: { time: '2026-10-01T10:00:00Z' } }} />
@@ -62,12 +63,43 @@ describe('chat message presentation', () => {
     const assistantMessage = container.querySelector<HTMLElement>('[data-testid="assistant-message"]');
 
     expect(userMessage?.querySelector('time')).toBeNull();
-    expect(userMessage?.textContent).not.toContain('à l’instant');
-    expect(assistantMessage?.textContent).toContain('à l’instant');
+    expect(userMessage?.textContent).not.toContain("à l'instant");
+    expect(assistantMessage?.textContent).toContain("à l'instant");
     expect(assistantMessage?.querySelector('button[aria-label="Bonne réponse"]')).toBeNull();
     expect(assistantMessage?.querySelector('button[aria-label="Mauvaise réponse"]')).toBeNull();
     expect(assistantMessage?.querySelector('button[aria-label="Copier le message"]')).not.toBeNull();
     expect(assistantMessage?.querySelector('button[aria-label="Régénérer la réponse"]')).not.toBeNull();
+  });
+
+  it('refreshes a memoized assistant timestamp every minute without changing its source value', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T10:00:20Z'));
+    const originalTimestamp = '2026-10-01T10:00:00Z';
+    const message = { id: 'refreshing', role: 'assistant' as const, content: 'Réponse', more: { time: originalTimestamp } };
+
+    await act(async () => root.render(<AssistantMessage message={message} />));
+    expect(container.textContent).toContain("à l'instant");
+
+    await act(async () => vi.advanceTimersByTime(60000));
+
+    expect(container.textContent).toContain('il y a 1 minute');
+    expect(message.more.time).toBe(originalTimestamp);
+  });
+
+  it('refreshes the timestamp to yesterday when the local calendar day changes', async () => {
+    vi.useFakeTimers();
+    const messageDate = new Date(2026, 9, 8, 23, 59, 20);
+    vi.setSystemTime(new Date(2026, 9, 8, 23, 59, 40));
+    const originalTimestamp = messageDate.toISOString();
+    const message = { id: 'midnight', role: 'assistant' as const, content: 'Réponse', more: { time: originalTimestamp } };
+
+    await act(async () => root.render(<AssistantMessage message={message} />));
+    expect(container.textContent).toContain("à l'instant");
+
+    await act(async () => vi.advanceTimersByTime(60000));
+
+    expect(container.textContent).toContain('Hier à 23:59');
+    expect(message.more.time).toBe(originalTimestamp);
   });
 
   it('keeps file-search citations as non-downloadable documentary references', async () => {
@@ -167,7 +199,8 @@ describe('chat message presentation', () => {
       <AssistantMessage
         message={{
           id: 'assistant-visuals', role: 'assistant',
-          content: 'Réponse principale\n\nQuestions suggérées :\n- Voulez-vous poursuivre ?',
+          content: 'Réponse principale',
+          suggestions: ['Voulez-vous poursuivre ?'],
           visuals: [
             { id: 1, documentId: 'manual', page: 71, assetType: 'tile', tile: 'r02-c01', name: 'a.png', displayOrder: 0 },
             { id: 2, documentId: 'manual', page: 72, assetType: 'full', tile: null, name: 'b.png', displayOrder: 1 },
@@ -188,6 +221,29 @@ describe('chat message presentation', () => {
     expect(cards[1].textContent).toContain('Page complète');
     expect(cards[1].compareDocumentPosition(question!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(loadVisual).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an ordinary trailing question visible and creates chips only from structured suggestions', async () => {
+    const onSuggestedPromptClick = vi.fn();
+    await act(async () => root.render(
+      <AssistantMessage
+        message={{
+          id: 'structured-suggestions',
+          role: 'assistant',
+          content: 'Quelle tension obtiens-tu aux bornes de la batterie ?',
+          suggestions: ['Où se trouve le relais de démarreur ?'],
+        }}
+        onSuggestedPromptClick={onSuggestedPromptClick}
+      />,
+    ));
+
+    expect(container.textContent).toContain('Quelle tension obtiens-tu aux bornes de la batterie ?');
+    const buttons = Array.from(container.querySelectorAll('button'));
+    expect(buttons.some(button => button.textContent === 'Quelle tension obtiens-tu aux bornes de la batterie ?')).toBe(false);
+    const suggestion = buttons.find(button => button.textContent === 'Où se trouve le relais de démarreur ?');
+    expect(suggestion).toBeDefined();
+    await act(async () => suggestion?.click());
+    expect(onSuggestedPromptClick).toHaveBeenCalledWith('Où se trouve le relais de démarreur ?');
   });
 
   it('shows a neutral unavailable state when image loading fails', async () => {

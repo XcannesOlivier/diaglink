@@ -37,6 +37,14 @@ export async function fetchCurrentUser(
       firstName: data.firstName,
       lastName: data.lastName,
       phoneNumber: data.phoneNumber,
+      companyBranding: data.companyBranding == null
+        ? data.companyBranding
+        : {
+            companyName: data.companyBranding.companyName,
+            accentColor: data.companyBranding.accentColor,
+            hasLogo: data.companyBranding.hasLogo,
+            logoVersion: data.companyBranding.logoVersion,
+          },
     },
     diagLinkSessionExpired: false,
   };

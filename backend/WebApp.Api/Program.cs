@@ -7,6 +7,7 @@ using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
 using WebApp.Api.Repositories;
 using WebApp.Api.Services;
+using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -159,6 +160,7 @@ builder.Services.AddAuthorization(options =>
 
     AddRolePolicy("TechnicianOrAbove", DiagLinkRoles.Technician, DiagLinkRoles.CompanyAdmin, DiagLinkRoles.SuperAdmin);
     AddRolePolicy("CompanyAdminOrAbove", DiagLinkRoles.CompanyAdmin, DiagLinkRoles.SuperAdmin);
+    AddRolePolicy("CompanyUserOnly", DiagLinkRoles.Technician, DiagLinkRoles.CompanyAdmin);
     AddRolePolicy("SuperAdminOnly", DiagLinkRoles.SuperAdmin);
     AddRolePolicy("SupportContact", DiagLinkRoles.Technician, DiagLinkRoles.CompanyAdmin);
 
@@ -182,6 +184,9 @@ builder.Services
 builder.Services.AddHttpClient(ClaudeConversationSummarizer.HttpClientName);
 builder.Services.Configure<ClaudeDirectChatOptions>(
     builder.Configuration.GetSection(ClaudeDirectChatOptions.SectionName));
+builder.Services.Configure<CommercialPolicyOptions>(
+    builder.Configuration.GetSection(CommercialPolicyOptions.SectionName));
+builder.Services.AddSingleton<ICommercialPolicyProvider, GlobalCommercialPolicyProvider>();
 builder.Services.AddSingleton<Azure.Core.TokenCredential>(_ =>
 {
     var managedIdentityClientId = builder.Configuration["MANAGED_IDENTITY_CLIENT_ID"];
@@ -266,6 +271,7 @@ builder.Services.AddScoped<MachineAccessService>();
 builder.Services.AddScoped<TechnicalVisualAccessService>();
 builder.Services.AddScoped<MachineAssistantResolutionService>();
 builder.Services.AddScoped<CompanyDirectoryService>();
+builder.Services.AddScoped<ICompanyBrandingService, CompanyBrandingService>();
 builder.Services.AddScoped<CompanyOnboardingService>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MachineAssignmentService>();
@@ -292,6 +298,8 @@ builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationH
         builder.Services.AddScoped<WebApp.Api.Services.IClaudeDirectChatRuntime, WebApp.Api.Services.ClaudeDirectChatRuntime>();
         builder.Services.AddScoped<WebApp.Api.Services.IMachineRequestBlobClient, WebApp.Api.Services.AzureMachineRequestBlobClient>();
         builder.Services.AddScoped<WebApp.Api.Services.MachineRequestStorageService>();
+        builder.Services.AddScoped<WebApp.Api.Services.ICompanyBrandingBlobClient, WebApp.Api.Services.AzureCompanyBrandingBlobClient>();
+        builder.Services.AddScoped<WebApp.Api.Services.ICompanyLogoStorageService, WebApp.Api.Services.CompanyLogoStorageService>();
         builder.Services.AddScoped<WebApp.Api.Services.RequestReceivedNotificationService>();
         builder.Services.AddScoped<WebApp.Api.Services.EmailOutboxProcessor>();
         builder.Services.AddHostedService<WebApp.Api.Services.EmailOutboxWorker>();
@@ -338,6 +346,7 @@ app.MapTechnicalVisualEndpoints(ScopePolicyName);
 app.MapTechnicalSourceEndpoints(ScopePolicyName);
 app.MapAdditionalMachineRequests();
 app.MapAdditionalDocumentsRequests();
+app.MapCompanyBranding();
 app.MapAdminMachineRequests();
 app.MapPost("/api/stripe/webhooks/machine-additions", StripeSubscriptionWebhook.HandleHttpAsync)
     .AllowAnonymous();
@@ -721,6 +730,8 @@ app.MapPost("/api/auth/validate-session", async (
 app.MapGet("/api/auth/me", async (
     HttpContext httpContext,
     DiagLinkUserLookupService userLookupService,
+    CompanyDirectoryService companyDirectoryService,
+    ICompanyBrandingService companyBrandingService,
     CancellationToken cancellationToken) =>
 {
     var userId = httpContext.User.FindFirst(DiagLinkClaimTypes.UserId)?.Value;
@@ -744,6 +755,30 @@ app.MapGet("/api/auth/me", async (
         return Results.Forbid();
     }
 
+    CurrentCompanyBrandingResponse? companyBranding = null;
+    if (string.Equals(role, DiagLinkRoles.Technician, StringComparison.Ordinal) ||
+        string.Equals(role, DiagLinkRoles.CompanyAdmin, StringComparison.Ordinal))
+    {
+        if (!Guid.TryParse(companyId, out var parsedCompanyId))
+        {
+            return Results.Forbid();
+        }
+
+        var company = await companyDirectoryService.GetCompanyByIdAsync(parsedCompanyId, cancellationToken);
+        var branding = await companyBrandingService.GetAsync(parsedCompanyId, cancellationToken);
+        var hasLogo = !string.IsNullOrWhiteSpace(branding?.LogoBlobName) &&
+            !string.IsNullOrWhiteSpace(branding.LogoContentType);
+        companyBranding = new CurrentCompanyBrandingResponse
+        {
+            CompanyName = company?.Name,
+            AccentColor = branding?.AccentColor,
+            HasLogo = hasLogo,
+            LogoVersion = hasLogo
+                ? branding!.UpdatedAtUtc.Ticks.ToString(CultureInfo.InvariantCulture)
+                : null
+        };
+    }
+
     return Results.Ok(new CurrentUserResponse
     {
         UserId = userId,
@@ -752,7 +787,8 @@ app.MapGet("/api/auth/me", async (
         Email = user.Email,
         FirstName = user.FirstName,
         LastName = user.LastName,
-        PhoneNumber = user.PhoneNumber
+        PhoneNumber = user.PhoneNumber,
+        CompanyBranding = companyBranding
     });
 })
 .RequireAuthorization("TechnicianOrAbove")
@@ -1343,6 +1379,7 @@ app.MapPost("/api/chat/stream", async (
         var assistantText = new StringBuilder();
         var assistantVisuals = new TechnicalVisualAccumulator();
         var assistantSources = new List<TechnicalSourceReference>();
+        var assistantSuggestions = new List<string>();
         Guid? sqlConversationId = null;
         // Captured from the authorized machine, never the caller's company claim.
         var machineCompanyId = resolvedMachine?.CompanyId;
@@ -1388,6 +1425,11 @@ app.MapPost("/api/chat/stream", async (
             {
                 assistantSources.AddRange(chunk.Sources);
             }
+            else if (chunk.HasSuggestions && chunk.Suggestions != null)
+            {
+                assistantSuggestions.AddRange(chunk.Suggestions);
+                await WriteSuggestionsEvent(httpContext.Response, chunk.Suggestions, cancellationToken);
+            }
             else if (chunk.IsText && chunk.TextDelta != null)
             {
                 assistantText.Append(chunk.TextDelta);
@@ -1415,6 +1457,7 @@ app.MapPost("/api/chat/stream", async (
                     assistantText.ToString(),
                     assistantVisuals.Items,
                     assistantSources,
+                    assistantSuggestions,
                     cancellationToken);
                 measurement = measurement with { AssistantMessageId = persistedAssistantMessage?.MessageId };
                 measurements[measurement.EventId] = measurement;
@@ -1550,6 +1593,13 @@ static async Task WriteAnnotationsEvent(HttpResponse response, List<WebApp.Api.M
             quote = a.Quote
         })
     });
+    await response.WriteAsync($"data: {json}\n\n", ct);
+    await response.Body.FlushAsync(ct);
+}
+
+static async Task WriteSuggestionsEvent(HttpResponse response, IReadOnlyList<string> suggestions, CancellationToken ct)
+{
+    var json = System.Text.Json.JsonSerializer.Serialize(new { type = "suggestions", suggestions });
     await response.WriteAsync($"data: {json}\n\n", ct);
     await response.Body.FlushAsync(ct);
 }

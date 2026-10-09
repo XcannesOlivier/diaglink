@@ -284,6 +284,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ files, onRemove, disab
               disabled={disabled}
               aria-label={`Supprimer ${file.name}`}
               className={styles.removeButton}
+              data-company-accent-exempt
             />
           </div>
         );

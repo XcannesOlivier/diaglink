@@ -88,8 +88,8 @@ describe('ChatService', () => {
     it('parses conversations and hasMore from response', async () => {
       const mockResponse = {
         conversations: [
-          { id: 'c1', title: 'Conv 1', createdAt: 1 },
-          { id: 'c2', title: 'Conv 2', createdAt: 2 },
+          { id: 'c1', title: 'Conv 1', createdAt: 1791180000, lastActivityAt: 1791446400 },
+          { id: 'c2', title: 'Conv 2', createdAt: 1791266400, lastActivityAt: 1791352800 },
         ],
         hasMore: true,
       };
@@ -101,6 +101,9 @@ describe('ChatService', () => {
       const result = await chatService.listConversations();
 
       expect(result.conversations).toHaveLength(2);
+      expect(result.conversations[0].createdAt).toBe(1791180000);
+      expect(result.conversations[0].lastActivityAt).toBe(1791446400);
+      expect(result.conversations[0].lastActivityAt).not.toBe(result.conversations[0].createdAt);
       expect(result.hasMore).toBe(true);
     });
 
@@ -144,7 +147,8 @@ describe('ChatService', () => {
 
   describe('getConversationMessages', () => {
     it('calls GET to the correct URL', async () => {
-      const mockMessages = [{ role: 'user', content: 'Hello' }];
+      const createdAtUtc = '2026-10-05T14:07:57Z';
+      const mockMessages = [{ role: 'user', content: 'Hello', createdAtUtc }];
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
         json: () => Promise.resolve(mockMessages),
@@ -162,6 +166,7 @@ describe('ChatService', () => {
         }),
       );
       expect(result).toEqual([{ ...mockMessages[0], sources: [] }]);
+      expect(result[0].createdAtUtc).toBe(createdAtUtc);
     });
 
     it('throws on non-ok response', async () => {
@@ -197,7 +202,7 @@ describe('ChatService', () => {
           ], sources: [
             { id: 22, pdfPage: 75, displayPage: '73', label: 'p. 73', startIndex: 20, endIndex: 25, displayOrder: 1 },
             { id: 21, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: 8, endIndex: 13, displayOrder: 0, documentId: 'private' },
-          ] },
+          ], suggestions: ['Où est le relais ?'] },
           { role: 'assistant', content: 'Ancien message' },
         ]),
       }));
@@ -208,8 +213,10 @@ describe('ChatService', () => {
       expect(result[0].visuals?.[1]).not.toHaveProperty('assetKey');
       expect(result[0].sources?.map(source => source.id)).toEqual([21, 22]);
       expect(result[0].sources?.[0]).not.toHaveProperty('documentId');
+      expect(result[0].suggestions).toEqual(['Où est le relais ?']);
       expect(result[1].visuals).toBeUndefined();
       expect(result[1].sources).toEqual([]);
+      expect(result[1].suggestions).toBeUndefined();
     });
   });
 
@@ -316,6 +323,7 @@ describe('ChatService', () => {
       'data: {"type":"usage","promptTokens":10,"completionTokens":5,"totalTokens":15,"duration":100}\n',
       'data: {"type":"visuals","visuals":[{"id":1,"documentId":"manual","page":74,"assetType":"full","tile":null,"name":"page.png","displayOrder":0}]}\n',
       'data: {"type":"sources","sources":[{"id":123,"pdfPage":74,"displayPage":"72","label":"p. 72","startIndex":9,"endIndex":14,"displayOrder":0}]}\n',
+      'data: {"type":"suggestions","suggestions":["Où est le relais ?"]}\n',
       'data: {"type":"done"}\n',
     ].join('');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream, { status: 200 })));
@@ -324,14 +332,91 @@ describe('ChatService', () => {
 
     const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls.map(call => call[0] as AppAction);
     const terminalActions = actions.filter(action =>
-      ['CHAT_STREAM_USAGE', 'CHAT_STREAM_VISUALS', 'CHAT_STREAM_SOURCES', 'CHAT_STREAM_COMPLETE'].includes(action.type));
+      ['CHAT_STREAM_USAGE', 'CHAT_STREAM_VISUALS', 'CHAT_STREAM_SOURCES', 'CHAT_STREAM_SUGGESTIONS', 'CHAT_STREAM_COMPLETE'].includes(action.type));
     expect(terminalActions.map(action => action.type)).toEqual([
       'CHAT_STREAM_USAGE',
       'CHAT_STREAM_VISUALS',
       'CHAT_STREAM_SOURCES',
+      'CHAT_STREAM_SUGGESTIONS',
       'CHAT_STREAM_COMPLETE',
     ]);
     expect(terminalActions[0]).toMatchObject({ type: 'CHAT_STREAM_USAGE', messageId: expect.any(String) });
     expect(terminalActions[2]).toMatchObject({ type: 'CHAT_STREAM_SOURCES', sources: [{ id: 123, pdfPage: 74 }] });
+    expect(terminalActions[3]).toMatchObject({ type: 'CHAT_STREAM_SUGGESTIONS', suggestions: ['Où est le relais ?'] });
+  });
+
+  it('notifies conversation completion only when the done event is received', async () => {
+    const onConversationCompleted = vi.fn();
+    chatService = new ChatService(
+      '/api',
+      mockGetAccessToken,
+      mockDispatch,
+      undefined,
+      onConversationCompleted,
+    );
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response([
+      'data: {"type":"chunk","content":"RÃ©ponse"}\n',
+      'data: {"type":"done"}\n',
+    ].join(''), { status: 200 })));
+
+    await chatService.sendMessage('Question', 'conversation');
+
+    expect(onConversationCompleted).toHaveBeenCalledTimes(1);
+  });
+  it('does not retry when the stream fails after a visible chunk', async () => {
+    const encoder = new TextEncoder();
+
+    let readCount = 0;
+
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          readCount++;
+
+          if (readCount === 1) {
+            controller.enqueue(
+              encoder.encode(
+                'data: {"type":"chunk","content":"Réponse partielle"}\n\n'
+              )
+            );
+            return;
+          }
+
+          controller.error(new Error('stream failed after partial content'));
+        },
+      },
+      {
+        highWaterMark: 0,
+      }
+    );
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(stream, { status: 200 }));
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    await chatService.sendMessage('Question', 'conv');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls.map(
+      call => call[0] as AppAction
+    );
+
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'CHAT_STREAM_CHUNK',
+          content: 'Réponse partielle',
+        }),
+        expect.objectContaining({
+          type: 'CHAT_ERROR',
+        }),
+      ])
+    );
+
+    expect(actions.some(action => action.type === 'CHAT_STREAM_RETRY')).toBe(false);
+    expect(actions.some(action => action.type === 'CHAT_RECOVER_MESSAGE')).toBe(false);
   });
 });

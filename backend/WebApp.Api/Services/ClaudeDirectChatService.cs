@@ -1,7 +1,9 @@
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading.Channels;
 using Azure.Core;
 using Microsoft.Extensions.Options;
 using WebApp.Api.Models;
@@ -9,8 +11,8 @@ using WebApp.Api.Models;
 namespace WebApp.Api.Services;
 
 /// <summary>
-/// Non-streaming Claude Messages orchestration used by the server-selected Claude Direct runtime.
-/// The SSE endpoint adapts its final result without exposing credentials or image bytes.
+/// Claude Messages orchestration used by the server-selected Claude Direct runtime.
+/// Provider text deltas are streamed while every response is also reconstructed for tool round-trips.
 /// </summary>
 public sealed class ClaudeDirectChatService : IClaudeDirectChatService
 {
@@ -26,9 +28,12 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
     private static readonly Regex ToolboxPartPattern = new(
         @"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z",
         RegexOptions.CultureInvariant);
-    private static readonly Regex TilePattern = new(
-        @"\Ar\d{2}-c\d{2}\z",
-        RegexOptions.CultureInvariant);
+    private static readonly string[] ValidTileIds =
+    [
+        "r01-c01", "r01-c02", "r01-c03",
+        "r02-c01", "r02-c02", "r02-c03",
+        "r03-c01", "r03-c02", "r03-c03"
+    ];
     private static readonly Regex DocumentIdMarkerPattern = new(
         @"\bDocument\s+ID\s*:\s*(?<id>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?=\s|$)",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
@@ -56,9 +61,53 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         _logger = logger;
     }
 
-    public async Task<ClaudeDirectChatResult> CompleteAsync(
+    public Task<ClaudeDirectChatResult> CompleteAsync(
         ClaudeDirectChatRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        CompleteCoreAsync(request, null, aggregateAllStreamedText: false, cancellationToken);
+
+    public async IAsyncEnumerable<ClaudeDirectChatStreamUpdate> StreamAsync(
+        ClaudeDirectChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var channel = Channel.CreateUnbounded<ClaudeDirectChatStreamUpdate>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = true
+        });
+
+        var producer = ProduceAsync();
+        await foreach (var update in channel.Reader.ReadAllAsync(cancellationToken))
+        {
+            yield return update;
+        }
+
+        await producer;
+
+        async Task ProduceAsync()
+        {
+            try
+            {
+                var result = await CompleteCoreAsync(
+                    request,
+                    (text, ct) => channel.Writer.WriteAsync(ClaudeDirectChatStreamUpdate.Text(text), ct),
+                    aggregateAllStreamedText: true,
+                    cancellationToken);
+                await channel.Writer.WriteAsync(ClaudeDirectChatStreamUpdate.Completed(result), cancellationToken);
+                channel.Writer.TryComplete();
+            }
+            catch (Exception exception)
+            {
+                channel.Writer.TryComplete(exception);
+            }
+        }
+    }
+
+    private async Task<ClaudeDirectChatResult> CompleteCoreAsync(
+        ClaudeDirectChatRequest request,
+        Func<string, CancellationToken, ValueTask>? onVisibleText,
+        bool aggregateAllStreamedText,
+        CancellationToken cancellationToken)
     {
         var usageTraceId = Guid.NewGuid().ToString("N")[..8];
         var toolUses = new List<ClaudeDirectToolUse>();
@@ -102,10 +151,47 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         string? finalText = null;
         string? finalModel = null;
         string? finalStopReason = null;
+        // This is currently the absolute per-request Web Search budget. A request profile may select
+        // one of the configured limits in the future without changing the cumulative enforcement below.
+        var webSearchBudget = Math.Max(
+            _options.WebSearch.DiagnosticMaxUses,
+            _options.WebSearch.PartsMaxUses);
+        long webSearchUsed = 0;
+        var suggestionParser = new DiagLinkSuggestionStreamParser();
+        var visibleText = new StringBuilder();
+
+        async ValueTask AcceptTextDeltaAsync(string delta)
+        {
+            foreach (var part in suggestionParser.Push(delta))
+            {
+                visibleText.Append(part);
+                if (onVisibleText is not null)
+                {
+                    await onVisibleText(part, cancellationToken);
+                }
+            }
+        }
+
+        async ValueTask CompleteVisibleTextAsync()
+        {
+            foreach (var part in suggestionParser.Complete())
+            {
+                visibleText.Append(part);
+                if (onVisibleText is not null)
+                {
+                    await onVisibleText(part, cancellationToken);
+                }
+            }
+        }
 
         for (var callNumber = 1; callNumber <= _options.MaxMessageCalls; callNumber++)
         {
-            using var httpRequest = BuildHttpRequest(request, history, accessToken.Token);
+            var webSearchRemaining = webSearchBudget - (int)webSearchUsed;
+            using var httpRequest = BuildHttpRequest(
+                request,
+                history,
+                accessToken.Token,
+                webSearchRemaining);
             HttpResponseMessage httpResponse;
             try
             {
@@ -142,13 +228,26 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                 }
 
                 JsonDocument responseDocument;
+                var streamedResponse = string.Equals(
+                    httpResponse.Content.Headers.ContentType?.MediaType,
+                    "text/event-stream",
+                    StringComparison.OrdinalIgnoreCase);
                 try
                 {
                     await using var responseStream = await httpResponse.Content.ReadAsStreamAsync(cancellationToken);
-                    responseDocument = await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken);
+                    responseDocument = streamedResponse
+                        ? await ReadStreamingResponseAsync(
+                            responseStream,
+                            aggregateAllStreamedText ? AcceptTextDeltaAsync : static _ => ValueTask.CompletedTask,
+                            cancellationToken)
+                        : await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken);
                 }
-                catch (JsonException)
+                catch (Exception exception) when (exception is JsonException or InvalidDataException)
                 {
+                    _logger.LogWarning(
+                        "Claude direct Messages stream was invalid. CallNumber={CallNumber}, ErrorType={ErrorType}",
+                        callNumber,
+                        exception.GetType().Name);
                     errors.Add(new("invalid_messages_response", "The Claude Messages API returned invalid JSON.", callNumber));
                     break;
                 }
@@ -168,6 +267,17 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                     calls.Add(callUsage);
                     finalModel = callUsage.Model;
                     finalStopReason = callUsage.StopReason;
+
+                    if (callUsage.WebSearchRequests > webSearchBudget - webSearchUsed)
+                    {
+                        errors.Add(new(
+                            "web_search_budget_exceeded",
+                            $"The cumulative Web Search usage exceeded the configured budget of {webSearchBudget} requests.",
+                            callNumber));
+                        break;
+                    }
+
+                    webSearchUsed += callUsage.WebSearchRequests;
 
                     if (!root.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
                     {
@@ -238,7 +348,13 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
 
                     if (localCalls.Length == 0)
                     {
-                        finalText = ReadText(content);
+                        if (!streamedResponse || !aggregateAllStreamedText)
+                        {
+                            await AcceptTextDeltaAsync(ReadText(content));
+                        }
+
+                        await CompleteVisibleTextAsync();
+                        finalText = visibleText.ToString();
                         break;
                     }
 
@@ -317,13 +433,17 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
             calls,
             finalModel,
             finalStopReason,
-            errors);
+            errors) with
+        {
+            Suggestions = suggestionParser.Suggestions.ToArray()
+        };
     }
 
     private HttpRequestMessage BuildHttpRequest(
         ClaudeDirectChatRequest request,
         List<Dictionary<string, object?>> history,
-        string token)
+        string token,
+        int webSearchRemaining)
     {
         var endpoint = new Uri(new Uri(_options.FoundryAnthropicEndpoint.TrimEnd('/') + "/"), "v1/messages");
         var tools = new List<object>
@@ -337,10 +457,14 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
             {
                 ["name"] = "get_page_image",
                 ["description"] =
-                    "Lit côté serveur une image PNG technique appartenant à la machine courante. " +
-                    "Utilise ce tool après avoir reçu le résultat de File Search lorsqu’une inspection visuelle est nécessaire; " +
-                    "ne l’appelle pas en parallèle avec File Search. document_id doit reprendre exactement l’identifiant du document " +
-                    "retourné par File Search, généralement le nom de fichier sans extension, et non le nom de la machine.",
+                    "Retourne à Claude une image PNG technique appartenant à la machine courante, après exploitation de File Search lorsqu’une inspection visuelle est nécessaire. " +
+                    "Ne l’appelle pas en parallèle avec File Search ni pour reconfirmer une information déjà suffisamment établie. " +
+                    "asset_type=\"full\" retourne la page complète : utilise-le pour le contexte général, l’organisation d’un schéma, la localisation d’une zone ou les relations entre éléments éloignés. " +
+                    "asset_type=\"tile\" retourne une zone détaillée de la grille 3 × 3 : utilise une tuile pour lire un petit texte ou repère, examiner un connecteur, une broche ou un symbole, suivre précisément un conducteur ou un trajet, vérifier un détail graphique ou analyser une zone déjà localisée. " +
+                    "Si File Search ou le contexte permet déjà de connaître précisément la zone à examiner, demande directement la tuile correspondante sans charger d’abord la page complète. " +
+                    "Demande normalement une seule tuile lorsqu’elle suffit ; si un élément traverse plusieurs zones, demande uniquement les tuiles supplémentaires nécessaires. " +
+                    "Les tuiles adjacentes se chevauchent de 25 % : ne demande pas automatiquement une tuile voisine pour un élément proche d’un bord. " +
+                    "Lorsque File Search fournit clairement un Document ID, utilise exactement cet identifiant comme document_id et jamais le nom de la machine ; sinon, omets document_id ou utilise null afin que le backend le résolve parmi les documents autorisés.",
                 ["input_schema"] = new Dictionary<string, object?>
                 {
                     ["type"] = "object",
@@ -350,18 +474,29 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                         {
                             ["type"] = new[] { "string", "null" },
                             ["description"] =
-                                "Identifiant exact retourné par File Search. Omettre si File Search ne l’expose pas clairement."
+                                "Document ID exact fourni clairement par File Search. Ne jamais utiliser le nom de la machine. Omettre ou utiliser null si File Search ne fournit pas clairement de Document ID."
                         },
-                        ["page"] = new Dictionary<string, object?> { ["type"] = "integer", ["minimum"] = 1 },
+                        ["page"] = new Dictionary<string, object?>
+                        {
+                            ["type"] = "integer",
+                            ["minimum"] = 1,
+                            ["maximum"] = 99999,
+                            ["description"] = "Numéro de page correspondant aux assets d’image."
+                        },
                         ["asset_type"] = new Dictionary<string, object?>
                         {
                             ["type"] = "string",
-                            ["enum"] = new[] { "full", "tile" }
+                            ["enum"] = new[] { "full", "tile" },
+                            ["description"] = "full = image complète de la page ; tile = zone détaillée de la grille 3 × 3."
                         },
                         ["tile"] = new Dictionary<string, object?>
                         {
                             ["type"] = new[] { "string", "null" },
-                            ["description"] = "Identifiant rNN-cNN requis uniquement pour asset_type=tile."
+                            ["enum"] = ValidTileIds.Cast<object?>().Append(null).ToArray(),
+                            ["description"] =
+                                "Requis uniquement pour asset_type=\"tile\" ; doit être absent ou null pour asset_type=\"full\". " +
+                                "r01/r02/r03 désignent les parties haute/centrale/basse et c01/c02/c03 les parties gauche/centrale/droite. " +
+                                "Les zones adjacentes se chevauchent de 25 %."
                         }
                     },
                     ["required"] = new[] { "page", "asset_type" },
@@ -370,15 +505,13 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
             }
         };
 
-        if (_options.WebSearch.Enabled)
+        if (_options.WebSearch.Enabled && webSearchRemaining > 0)
         {
             tools.Add(new Dictionary<string, object?>
             {
                 ["type"] = "web_search_20250305",
                 ["name"] = "web_search",
-                ["max_uses"] = Math.Max(
-                    _options.WebSearch.DiagnosticMaxUses,
-                    _options.WebSearch.PartsMaxUses)
+                ["max_uses"] = webSearchRemaining
             });
         }
 
@@ -386,6 +519,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         {
             ["model"] = _options.Deployment,
             ["max_tokens"] = 4096,
+            ["stream"] = true,
             ["system"] = new object[]
             {
                 new Dictionary<string, object?>
@@ -425,6 +559,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         message.Headers.Add("anthropic-version", AnthropicVersion);
         message.Headers.Add("anthropic-beta", McpBeta);
+        message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         return message;
     }
 
@@ -748,9 +883,9 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         }
 
         if ((assetType == "full" && tile is not null) ||
-            (assetType == "tile" && (tile is null || !TilePattern.IsMatch(tile))))
+            (assetType == "tile" && (tile is null || !ValidTileIds.Contains(tile, StringComparer.Ordinal))))
         {
-            error = "tile must be null for full assets and match rNN-cNN for tile assets.";
+            error = "tile must be null for full assets and one of r01-c01 through r03-c03 for tile assets.";
             return false;
         }
 
@@ -779,9 +914,27 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
     {
         var prompt = request.SystemPrompt?.Trim() ?? string.Empty;
         var machineDescription = request.Machine.Description?.Trim() ?? string.Empty;
-        return string.IsNullOrEmpty(machineDescription)
-            ? prompt
-            : $"{prompt}\n\nContexte machine fourni par le serveur :\n{machineDescription}";
+        var commercialInstructions = request.CommercialPolicy is { Enabled: true }
+            ? request.CommercialPolicy.Instructions?.Trim() ?? string.Empty
+            : string.Empty;
+        var sections = new List<string>();
+
+        if (!string.IsNullOrEmpty(prompt))
+        {
+            sections.Add(prompt);
+        }
+
+        if (!string.IsNullOrEmpty(machineDescription))
+        {
+            sections.Add($"Contexte machine fourni par le serveur :\n{machineDescription}");
+        }
+
+        if (!string.IsNullOrEmpty(commercialInstructions))
+        {
+            sections.Add($"Politique commerciale active fournie par le serveur :\n{commercialInstructions}");
+        }
+
+        return string.Join("\n\n", sections);
     }
 
     internal static void ExtractAllowedDocumentIds(
@@ -1063,21 +1216,35 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         var hasCreationDetail = usageElement.TryGetProperty("cache_creation", out var cacheCreationDetail);
         if (hasCreationDetail)
         {
-            if (cacheCreationDetail.ValueKind != JsonValueKind.Object ||
-                !TryReadOptionalTokenCount(cacheCreationDetail, "ephemeral_5m_input_tokens", out cacheCreation5mTokens) ||
-                !TryReadOptionalTokenCount(cacheCreationDetail, "ephemeral_1h_input_tokens", out cacheCreation1hTokens) ||
-                cacheCreation5mTokens > cacheCreationTokens ||
-                cacheCreation1hTokens != cacheCreationTokens - cacheCreation5mTokens)
-            {
-                error = new("invalid_messages_response", "The Claude response contains inconsistent cache creation usage.", callNumber);
-                return false;
-            }
-        }
-        else
-        {
-            // The legacy API shape only exposes the aggregate. Claude's default ephemeral TTL is 5 minutes.
-            cacheCreation5mTokens = cacheCreationTokens;
-        }
+             if (cacheCreationDetail.ValueKind != JsonValueKind.Object ||
+                 !TryReadOptionalTokenCount(
+                 cacheCreationDetail,
+             "ephemeral_5m_input_tokens",
+            out cacheCreation5mTokens) ||
+        !TryReadOptionalTokenCount(
+            cacheCreationDetail,
+            "ephemeral_1h_input_tokens",
+            out cacheCreation1hTokens))
+    {
+        error = new(
+            "invalid_messages_response",
+            "The Claude response contains invalid cache creation usage.",
+            callNumber);
+        return false;
+    }
+
+    // Anthropic may expose an aggregate cache_creation_input_tokens value
+    // without a matching TTL breakdown. The aggregate remains authoritative.
+    if (cacheCreation5mTokens + cacheCreation1hTokens != cacheCreationTokens)
+    {
+        cacheCreation5mTokens = cacheCreationTokens;
+        cacheCreation1hTokens = 0;
+    }
+}
+else
+{
+    cacheCreation5mTokens = cacheCreationTokens;
+}
 
         usage = new(
             callNumber,
@@ -1224,6 +1391,70 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                 .Where(block => GetString(block, "type") == "text")
                 .Select(block => GetString(block, "text"))
                 .Where(text => !string.IsNullOrWhiteSpace(text)));
+
+    private static async Task<JsonDocument> ReadStreamingResponseAsync(
+        Stream responseStream,
+        Func<string, ValueTask> onTextDelta,
+        CancellationToken cancellationToken)
+    {
+        var accumulator = new AnthropicMessageStreamAccumulator();
+        using var reader = new StreamReader(
+            responseStream,
+            Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true,
+            leaveOpen: true);
+        var data = new StringBuilder();
+
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+            {
+                await ProcessEventAsync();
+                break;
+            }
+
+            if (line.Length == 0)
+            {
+                await ProcessEventAsync();
+                continue;
+            }
+
+            if (line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                if (data.Length > 0)
+                {
+                    data.Append('\n');
+                }
+
+                var value = line.AsSpan("data:".Length);
+                if (!value.IsEmpty && value[0] == ' ')
+                {
+                    value = value[1..];
+                }
+
+                data.Append(value);
+            }
+        }
+
+        return accumulator.BuildDocument();
+
+        async ValueTask ProcessEventAsync()
+        {
+            if (data.Length == 0)
+            {
+                return;
+            }
+
+            using var document = JsonDocument.Parse(data.ToString());
+            data.Clear();
+            var textDelta = accumulator.Apply(document.RootElement);
+            if (!string.IsNullOrEmpty(textDelta))
+            {
+                await onTextDelta(textDelta);
+            }
+        }
+    }
 
     private static string? ReadRequestId(HttpResponseMessage response)
     {

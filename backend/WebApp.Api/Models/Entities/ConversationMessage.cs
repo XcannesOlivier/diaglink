@@ -9,6 +9,7 @@ public class ConversationMessage
     public Guid ConversationId { get; set; }
     public required string Role { get; set; }
     public required string Content { get; set; }
+    public string? SuggestionsJson { get; set; }
     public int? TokenCount { get; set; }
     public bool IsSummarized { get; set; }
     public DateTime CreatedAtUtc { get; set; }

@@ -24,7 +24,7 @@ import { parseTechnicalSources } from '../utils/technicalSources';
 /**
  * ChatService handles all chat-related API operations.
  * Dispatches AppContext actions for state management.
- * 
+ *
  * @example
  * ```typescript
  * const chatService = new ChatService(
@@ -32,7 +32,7 @@ import { parseTechnicalSources } from '../utils/technicalSources';
  *   getAccessToken,
  *   dispatch
  * );
- * 
+ *
  * // Send a message with images
  * await chatService.sendMessage(
  *   'Analyze this image',
@@ -46,6 +46,7 @@ export class ChatService {
   private getAccessToken: () => Promise<string | null>;
   private dispatch: Dispatch<AppAction>;
   private onDiagLinkSessionExpired?: () => void;
+  private onConversationCompleted?: () => void;
   private currentStreamAbort?: AbortController;
   // Flag indicating an intentional user cancellation of the active stream.
   private streamCancelled = false;
@@ -56,12 +57,14 @@ export class ChatService {
     apiUrl: string,
     getAccessToken: () => Promise<string | null>,
     dispatch: Dispatch<AppAction>,
-    onDiagLinkSessionExpired?: () => void
+    onDiagLinkSessionExpired?: () => void,
+    onConversationCompleted?: () => void
   ) {
     this.apiUrl = apiUrl;
     this.getAccessToken = getAccessToken;
     this.dispatch = dispatch;
     this.onDiagLinkSessionExpired = onDiagLinkSessionExpired;
+    this.onConversationCompleted = onConversationCompleted;
   }
 
   /**
@@ -92,7 +95,7 @@ export class ChatService {
 
   /**
    * Prepare a Claude Direct message payload with optional PNG/JPEG images.
-   * 
+   *
    * @param text - Message text content
    * @param files - Optional array of images
    * @returns Payload with content, image URIs, and attachment metadata
@@ -111,9 +114,9 @@ export class ChatService {
     if (files && files.length > 0) {
       try {
         const results = await convertFilesToDataUris(files);
-        
+
         imageDataUris = results.map((r) => r.dataUri);
-        
+
         // Create attachment metadata for UI display
         attachments = createAttachmentMetadata(results);
       } catch (error) {
@@ -128,7 +131,7 @@ export class ChatService {
 
   /**
    * Construct request body for chat API.
-   * 
+   *
    * @param message - User message text
    * @param conversationId - Current conversation ID (null for new conversations)
    * @param imageDataUris - Array of base64 data URIs for images
@@ -153,7 +156,7 @@ export class ChatService {
   /**
    * Initiate streaming fetch request to chat API.
    * Validates response and throws typed errors on failure.
-   * 
+   *
    * @param url - API endpoint URL
    * @param token - Access token
    * @param body - Request body
@@ -263,6 +266,7 @@ export class ChatService {
     // Usage events describe individual attempts, not an idempotent total for this UI message.
     const maxRetries = 3;
     let lastError: unknown;
+    let hasReceivedVisibleChunk = false;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -286,39 +290,75 @@ export class ChatService {
           this.currentStreamAbort.signal
         );
 
-        await this.processStream(response, assistantMessageId, currentConversationId);
+        await this.processStream(
+          response,
+          assistantMessageId,
+          currentConversationId,
+          () => {
+            hasReceivedVisibleChunk = true;
+          }
+        );
         this.currentStreamAbort = undefined;
         this.streamCancelled = false;
         return;
-      } catch (error) {
-        lastError = error;
-        this.currentStreamAbort = undefined;
-        this.streamCancelled = false;
+       } catch (error) {
+         lastError = error;
+         this.currentStreamAbort = undefined;
+         this.streamCancelled = false;
 
-        // User cancelled
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          return;
-        }
+         // User cancelled
+         if (error instanceof DOMException && error.name === 'AbortError') {
+           return;
+         }
 
-        if (isTokenExpiredError(error)) {
-          this.dispatch({ type: 'AUTH_TOKEN_EXPIRED' });
-          throw error;
-        }
+         if (isTokenExpiredError(error)) {
+           this.dispatch({ type: 'AUTH_TOKEN_EXPIRED' });
+           throw error;
+         }
 
-        if (isAppError(error) && error.code === 'AiCreditExhausted') {
-          this.dispatch({ type: 'CHAT_RECOVER_MESSAGE', messageText, error, retryCount: 0 });
-          throw error;
-        }
+         if (isAppError(error) && error.code === 'AiCreditExhausted') {
+           this.dispatch({
+             type: 'CHAT_RECOVER_MESSAGE',
+             messageText,
+             error,
+             retryCount: 0,
+           });
+           throw error;
+         }
 
-        if (isAppError(error) && error.code === 'AUTH') {
-          this.dispatch({ type: 'CHAT_ERROR', error });
-          throw error;
-        }
+         if (isAppError(error) && error.code === 'AUTH') {
+           this.dispatch({ type: 'CHAT_ERROR', error });
+           throw error;
+         }
+
+         // Never retry a provider request after visible content has already
+         // been streamed to the user. A retry could create another billable call.
+         if (hasReceivedVisibleChunk) {
+           const appError: AppError = isAppError(error)
+             ? error
+             : createAppError(error, getErrorCodeFromMessage(error));
+
+           this.dispatch({
+             type: 'CHAT_ERROR',
+             error: appError,
+           });
+
+           trackException(
+             error instanceof Error ? error : new Error(String(error)),
+             {
+               context: 'sendMessage-after-partial-stream',
+               retryCount: String(attempt - 1),
+             }
+           );
+
+           return;
+         }
 
         if (attempt === maxRetries) {
           break;
         }
       }
+
     }
 
     trackException(lastError instanceof Error ? lastError : new Error(String(lastError)), {
@@ -341,7 +381,7 @@ export class ChatService {
   /**
    * Process Server-Sent Events stream from the API.
    * Implements duplicate chunk suppression to prevent UI flicker.
-   * 
+   *
    * @param response - Fetch Response object with SSE stream
    * @param messageId - ID of the assistant message being streamed
    * @param currentConversationId - Current conversation ID (null for new conversations)
@@ -350,7 +390,8 @@ export class ChatService {
   private async processStream(
     response: Response,
     messageId: string,
-    currentConversationId: string | null
+    currentConversationId: string | null,
+    onVisibleChunk?: () => void
   ): Promise<void> {
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
@@ -411,11 +452,16 @@ export class ChatService {
 
             case 'chunk':
               if (event.data.content !== lastChunkContent) {
+                if (event.data.content.length > 0) {
+                  onVisibleChunk?.();
+                }
+
                 this.dispatch({
                   type: 'CHAT_STREAM_CHUNK',
                   messageId,
                   content: event.data.content,
                 });
+
                 lastChunkContent = event.data.content;
               }
               break;
@@ -444,6 +490,18 @@ export class ChatService {
                 messageId,
                 sources: event.data.sources,
               });
+              break;
+
+            case 'suggestions':
+              if (Array.isArray(event.data.suggestions)) {
+                this.dispatch({
+                  type: 'CHAT_STREAM_SUGGESTIONS',
+                  messageId,
+                  suggestions: event.data.suggestions.filter(
+                    (value: unknown): value is string => typeof value === 'string'
+                  ),
+                });
+              }
               break;
 
             case 'toolUse':
@@ -475,6 +533,7 @@ export class ChatService {
 
             case 'done':
               this.dispatch({ type: 'CHAT_STREAM_COMPLETE', messageId });
+              this.onConversationCompleted?.();
               return;
 
             case 'error': {
@@ -634,8 +693,12 @@ export class ChatService {
       return {
         role: typeof message.role === 'string' ? message.role : '',
         content: typeof message.content === 'string' ? message.content : '',
+        ...(typeof message.createdAtUtc === 'string' ? { createdAtUtc: message.createdAtUtc } : {}),
         ...(visuals.length > 0 ? { visuals } : {}),
         sources,
+        ...(Array.isArray(message.suggestions)
+          ? { suggestions: message.suggestions.filter((value): value is string => typeof value === 'string') }
+          : {}),
       };
     });
   }

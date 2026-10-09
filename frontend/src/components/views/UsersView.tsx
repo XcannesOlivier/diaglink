@@ -949,6 +949,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                                   appearance="subtle"
                                   icon={<DeleteRegular />}
                                   className={`${styles.dangerButton} ${styles.fullWidthButton}`}
+                                data-company-accent-exempt
                                   onClick={() => openDeleteDialog(user)}
                                 >
                                   Désactiver l'accès
@@ -968,6 +969,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                                 appearance="outline"
                                 icon={<DeleteRegular />}
                                 className={`${styles.dangerButton} ${styles.fullWidthButton}`}
+                          data-company-accent-exempt
                                 onClick={() => openPermanentDeleteDialog(user)}
                               >
                                 Supprimer l'utilisateur
@@ -1101,7 +1103,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                 <Button appearance="secondary" disabled={deleting} onClick={() => setDeleteTarget(null)}>
                   Annuler
                 </Button>
-                <Button appearance="primary" className={styles.dangerButton} disabled={deleting} onClick={handleConfirmDelete}>
+                <Button appearance="primary" data-company-accent-exempt className={styles.dangerButton} disabled={deleting} onClick={handleConfirmDelete}>
                   {deleting ? <Spinner size="tiny" /> : 'Désactiver'}
                 </Button>
               </DialogActions>
@@ -1122,7 +1124,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                 <Button appearance="secondary" disabled={permanentlyDeleting} onClick={() => setPermanentDeleteTarget(null)}>
                   Annuler
                 </Button>
-                <Button appearance="primary" className={styles.dangerButton} disabled={permanentlyDeleting} onClick={handleConfirmPermanentDelete}>
+                <Button appearance="primary" data-company-accent-exempt className={styles.dangerButton} disabled={permanentlyDeleting} onClick={handleConfirmPermanentDelete}>
                   {permanentlyDeleting ? <Spinner size="tiny" /> : 'Supprimer définitivement'}
                 </Button>
               </DialogActions>
@@ -1248,6 +1250,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                             appearance="subtle"
                             icon={<DeleteRegular />}
                             className={`${styles.dangerButton} ${styles.fullWidthButton}`}
+                            data-company-accent-exempt
                             onClick={() => openDeleteDialog(user)}
                           >
                             Désactiver l'accès
@@ -1267,6 +1270,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                           appearance="outline"
                           icon={<DeleteRegular />}
                           className={`${styles.dangerButton} ${styles.fullWidthButton}`}
+                           data-company-accent-exempt
                           onClick={() => openPermanentDeleteDialog(user)}
                         >
                           Supprimer l'utilisateur
@@ -1398,7 +1402,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
               <Button appearance="secondary" disabled={deleting} onClick={() => setDeleteTarget(null)}>
                 Annuler
               </Button>
-              <Button appearance="primary" className={styles.dangerButton} disabled={deleting} onClick={handleConfirmDelete}>
+              <Button appearance="primary" data-company-accent-exempt className={styles.dangerButton} disabled={deleting} onClick={handleConfirmDelete}>
                 {deleting ? <Spinner size="tiny" /> : 'Désactiver'}
               </Button>
             </DialogActions>
@@ -1419,7 +1423,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
               <Button appearance="secondary" disabled={permanentlyDeleting} onClick={() => setPermanentDeleteTarget(null)}>
                 Annuler
               </Button>
-              <Button appearance="primary" className={styles.dangerButton} disabled={permanentlyDeleting} onClick={handleConfirmPermanentDelete}>
+              <Button appearance="primary" data-company-accent-exempt className={styles.dangerButton} disabled={permanentlyDeleting} onClick={handleConfirmPermanentDelete}>
                 {permanentlyDeleting ? <Spinner size="tiny" /> : 'Supprimer définitivement'}
               </Button>
             </DialogActions>
@@ -1429,4 +1433,3 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
     </ViewRoot>
   );
 };
-

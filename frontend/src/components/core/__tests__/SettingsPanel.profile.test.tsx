@@ -26,27 +26,62 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-async function render(role: 'company_admin' | 'technician' = 'company_admin', refresh = vi.fn(), email = 'admin@acme.test') {
+async function render(role: 'company_admin' | 'technician' | 'diaglink_super_admin' = 'company_admin', refresh = vi.fn(), email = 'admin@acme.test',
+  openPersonalization = vi.fn(), openChange = vi.fn()) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => root!.render(
     <SettingsPanel
       isOpen
-      onOpenChange={vi.fn()}
+      onOpenChange={openChange}
       currentUser={{ userId: 'admin1', companyId: 'c1', role, email, firstName: 'Jean', lastName: 'Dupont', phoneNumber: '000' }}
       getAccessToken={vi.fn().mockResolvedValue('token')}
       onCurrentUserRefresh={refresh}
+      onOpenPersonalization={openPersonalization}
     />
   ));
   return refresh;
 }
 
 describe('SettingsPanel profile editing', () => {
+  it('opens personalization for the company administrator and closes settings', async () => {
+    const open = vi.fn();
+    const close = vi.fn();
+    await render('company_admin', vi.fn(), 'admin@acme.test', open, close);
+    const entry = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Personnalisation')!;
+    expect(entry.querySelector('svg')).not.toBeNull();
+    await act(async () => entry.click());
+    expect(close).toHaveBeenCalledWith(false);
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it.each(['technician', 'diaglink_super_admin'] as const)('does not expose personalization for %s', async role => {
+    await render(role);
+    expect(document.body.textContent).not.toContain('Personnalisation');
+  });
+  it('groups personalization below the separator and before profile editing with consistent spacing', async () => {
+    await render();
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const personalization = buttons.find(button => button.textContent === 'Personnalisation')!;
+    const edit = buttons.find(button => button.textContent === 'Modifier mes informations')!;
+    const area = personalization.parentElement!;
+    expect(area.contains(edit)).toBe(true);
+    expect(area.firstElementChild).toBe(personalization);
+    expect(personalization.nextElementSibling?.contains(edit)).toBe(true);
+    expect(area.textContent).not.toContain('Apparence');
+    const styles = getComputedStyle(area);
+    expect(styles.paddingTop).toBe('24px');
+    expect(styles.paddingBottom).toBe('24px');
+    expect(styles.display).toBe('flex');
+    expect(styles.flexDirection).toBe('column');
+    expect(styles.rowGap).toBe('var(--spacingVerticalM)');
+  });
   it('place l’action de profil dans le flux avec 24 px au-dessus et en dessous', () => {
     const source = readFileSync(resolve('src/components/core/SettingsPanel.tsx'), 'utf8');
     expect(source).toContain("paddingTop: '24px'");
     expect(source).toContain("paddingBottom: '24px'");
+    expect(source).toContain('borderTop: `1px solid ${tokens.colorNeutralStroke2}`');
     expect(source).toContain("overflowY: 'auto'");
     expect(source).not.toContain("marginTop: 'auto'");
   });
@@ -89,6 +124,7 @@ describe('SettingsPanel profile editing', () => {
         currentUser={{ userId: 'admin1', companyId: 'c1', role: 'company_admin', email: 'nouvelle@acme.test' }}
         getAccessToken={vi.fn().mockResolvedValue('token')}
         onCurrentUserRefresh={refresh}
+        onOpenPersonalization={vi.fn()}
       />
     ));
 

@@ -124,16 +124,17 @@ const useStyles = makeStyles({
   },
 });
 
-function formatDate(timestamp: number): string {
+export function formatDate(timestamp: number): string {
   const date = new Date(timestamp * 1000); // Backend sends Unix seconds
   const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const conversationDay = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((today - conversationDay) / (1000 * 60 * 60 * 24));
 
   if (diffDays === 0) return "Aujourd'hui";
   if (diffDays === 1) return 'Hier';
   if (diffDays < 7) return `Il y a ${diffDays} jours`;
-  return date.toLocaleDateString();
+  return date.toLocaleDateString('fr-FR');
 }
 
 export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
@@ -294,7 +295,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                       {conversation.title || 'Sans titre'}
                     </Text>
                     <Text className={styles.conversationDate}>
-                      {formatDate(conversation.createdAt)}
+                      {formatDate(conversation.lastActivityAt)}
                     </Text>
                   </div>
                   <Button
@@ -302,6 +303,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                     icon={<Delete24Regular />}
                     size="small"
                     className={styles.deleteButton}
+                    data-company-accent-exempt
                     aria-label={`Supprimer la conversation : ${conversation.title || 'Sans titre'}`}
                     onClick={(e) => handleDelete(e, conversation.id)}
                   />

@@ -30,7 +30,7 @@
   min-width: 0;
 }
 
-.inputWrapper:focus-within {
+.inputWrapper:not([data-disabled]):not(:has([aria-invalid='true'])):focus-within {
   border-color: var(--colorBrandStroke1);
   box-shadow: var(--shadow8);
 }

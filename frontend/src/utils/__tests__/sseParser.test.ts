@@ -72,6 +72,15 @@ describe('parseSseLine', () => {
       });
     });
 
+    it('parses a structured suggestions event', () => {
+      const event = parseSseLine('data: {"type":"suggestions","suggestions":["Où est le relais ?"]}');
+
+      expect(event).toEqual({
+        type: 'suggestions',
+        data: { suggestions: ['Où est le relais ?'] },
+      });
+    });
+
     it('parses and validates one source reference', () => {
       const result = parseSseLine('data: {"type":"sources","sources":[{"id":123,"pdfPage":74,"displayPage":"72","label":"p. 72","startIndex":9,"endIndex":14,"displayOrder":0}]}');
 

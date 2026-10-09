@@ -13,6 +13,7 @@ function createInitialState(): AppState {
       error: null,
       currentUser: null,
     },
+    branding: { ...initialAppState.branding },
     chat: {
       status: 'idle',
       messages: [],
@@ -66,6 +67,75 @@ function createMockUser(overrides: Partial<AccountInfo> = {}): AccountInfo {
 }
 
 describe('appReducer', () => {
+  describe('branding state', () => {
+    it('initializes an empty logo slice', () => {
+      expect(initialAppState.branding).toEqual({
+        companyId: null,
+        logoVersion: null,
+        logoObjectUrl: null,
+      });
+      expect(createInitialState().branding).toEqual(initialAppState.branding);
+      expect(createInitialState().branding).not.toBe(initialAppState.branding);
+    });
+
+    it('publishes the loaded logo without changing server metadata', () => {
+      const state = createInitialState();
+      const result = appReducer(state, {
+        type: 'COMPANY_LOGO_LOADED',
+        companyId: 'c1',
+        logoVersion: 'v1',
+        logoObjectUrl: 'blob:company-v1',
+      });
+
+      expect(result.branding).toEqual({
+        companyId: 'c1',
+        logoVersion: 'v1',
+        logoObjectUrl: 'blob:company-v1',
+      });
+      expect(result.auth).toBe(state.auth);
+      expect(state.branding).toEqual(initialAppState.branding);
+    });
+
+    it.each(['AUTH_TOKEN_EXPIRED', 'AUTH_CURRENT_USER_CLEARED', 'COMPANY_LOGO_CLEARED'] as const)(
+      'keeps a safe empty logo slice after %s',
+      type => {
+        const state = createInitialState();
+        state.branding = { companyId: 'c1', logoVersion: 'v1', logoObjectUrl: 'blob:company-v1' };
+
+        expect(appReducer(state, { type }).branding).toEqual(initialAppState.branding);
+      },
+    );
+
+    it('preserves the cached logo when company and version match', () => {
+      const state = createInitialState();
+      state.branding = { companyId: 'c1', logoVersion: 'v1', logoObjectUrl: 'blob:company-v1' };
+
+      const result = appReducer(state, {
+        type: 'AUTH_CURRENT_USER_LOADED',
+        currentUser: {
+          userId: 'u1',
+          companyId: 'c1',
+          role: 'technician',
+          companyBranding: { companyName: 'Acme', accentColor: null, hasLogo: true, logoVersion: 'v1' },
+        },
+      });
+
+      expect(result.branding).toBe(state.branding);
+    });
+
+    it('keeps a safe empty logo slice when currentUser has no branding', () => {
+      const state = createInitialState();
+      state.branding = { companyId: 'c1', logoVersion: 'v1', logoObjectUrl: 'blob:company-v1' };
+
+      const result = appReducer(state, {
+        type: 'AUTH_CURRENT_USER_LOADED',
+        currentUser: { userId: 'u1', companyId: 'c1', role: 'technician' },
+      });
+
+      expect(result.branding).toEqual(initialAppState.branding);
+    });
+  });
+
   describe('AUTH_INITIALIZED', () => {
     it('sets status to authenticated with user', () => {
       const state = createInitialState();
@@ -478,6 +548,25 @@ describe('appReducer', () => {
       const completed = appReducer(afterSources, { type: 'CHAT_STREAM_COMPLETE', messageId: 'assistant' });
       expect(completed.chat.status).toBe('idle');
       expect(completed.chat.streamingMessageId).toBeUndefined();
+    });
+  });
+
+  describe('CHAT_STREAM_SUGGESTIONS', () => {
+    it('associates structured suggestions only with the addressed assistant message', () => {
+      const state = createInitialState();
+      state.chat.messages = [
+        createMockMessage({ id: 'assistant', role: 'assistant' }),
+        createMockMessage({ id: 'other', role: 'assistant' }),
+      ];
+
+      const result = appReducer(state, {
+        type: 'CHAT_STREAM_SUGGESTIONS',
+        messageId: 'assistant',
+        suggestions: ['Où est le relais ?'],
+      });
+
+      expect(result.chat.messages[0].suggestions).toEqual(['Où est le relais ?']);
+      expect(result.chat.messages[1].suggestions).toBeUndefined();
     });
   });
 
@@ -996,7 +1085,7 @@ describe('appReducer', () => {
     it('sets isLoading to true and preserves other conversation state', () => {
       const state = createInitialState();
       state.conversations.sidebarOpen = true;
-      state.conversations.list = [{ id: 'c1', title: 'Test', createdAt: 1 }];
+      state.conversations.list = [{ id: 'c1', title: 'Test', createdAt: 1, lastActivityAt: 1 }];
 
       const result = appReducer(state, { type: 'CONVERSATIONS_LOADING' });
 
@@ -1011,7 +1100,7 @@ describe('appReducer', () => {
       const state = createInitialState();
       state.conversations.isLoading = true;
       state.conversations.sidebarOpen = true;
-      state.conversations.list = [{ id: 'c1', title: 'Existing', createdAt: 1 }];
+      state.conversations.list = [{ id: 'c1', title: 'Existing', createdAt: 1, lastActivityAt: 1 }];
       state.conversations.hasMore = true;
 
       const result = appReducer(state, { type: 'CONVERSATIONS_LOADING_DONE' });
@@ -1028,8 +1117,8 @@ describe('appReducer', () => {
       const state = createInitialState();
       state.conversations.isLoading = true;
       const conversations = [
-        { id: 'c1', title: 'Conv 1', createdAt: 1 },
-        { id: 'c2', title: 'Conv 2', createdAt: 2 },
+        { id: 'c1', title: 'Conv 1', createdAt: 1, lastActivityAt: 1 },
+        { id: 'c2', title: 'Conv 2', createdAt: 2, lastActivityAt: 2 },
       ];
 
       const result = appReducer(state, {
@@ -1043,10 +1132,33 @@ describe('appReducer', () => {
       expect(result.conversations.isLoading).toBe(false);
     });
 
+    it('replaces a stale prefix with the exact reordered backend prefix', () => {
+      const state = createInitialState();
+      const summary = (id: string, timestamp: number) => ({
+        id,
+        title: id,
+        createdAt: timestamp,
+        lastActivityAt: timestamp,
+      });
+      state.conversations.list = ['A', 'B', 'C', 'D', 'E']
+        .map((id, index) => summary(id, index));
+      const reorderedPrefix = ['F', 'A', 'B', 'C', 'D', 'E', 'G', 'H', 'I', 'J']
+        .map((id, index) => summary(id, index));
+
+      const result = appReducer(state, {
+        type: 'CONVERSATIONS_SET_LIST',
+        conversations: reorderedPrefix,
+        hasMore: false,
+      });
+
+      expect(result.conversations.list.map(conversation => conversation.id))
+        .toEqual(['F', 'A', 'B', 'C', 'D', 'E', 'G', 'H', 'I', 'J']);
+    });
+
     it('appends to existing list when append is true', () => {
       const state = createInitialState();
-      state.conversations.list = [{ id: 'c1', title: 'Existing', createdAt: 1 }];
-      const newConversations = [{ id: 'c2', title: 'New', createdAt: 2 }];
+      state.conversations.list = [{ id: 'c1', title: 'Existing', createdAt: 1, lastActivityAt: 1 }];
+      const newConversations = [{ id: 'c2', title: 'New', createdAt: 2, lastActivityAt: 2 }];
 
       const result = appReducer(state, {
         type: 'CONVERSATIONS_SET_LIST',
@@ -1098,9 +1210,9 @@ describe('appReducer', () => {
     it('removes conversation by ID from list', () => {
       const state = createInitialState();
       state.conversations.list = [
-        { id: 'c1', title: 'Conv 1', createdAt: 1 },
-        { id: 'c2', title: 'Conv 2', createdAt: 2 },
-        { id: 'c3', title: 'Conv 3', createdAt: 3 },
+        { id: 'c1', title: 'Conv 1', createdAt: 1, lastActivityAt: 1 },
+        { id: 'c2', title: 'Conv 2', createdAt: 2, lastActivityAt: 2 },
+        { id: 'c3', title: 'Conv 3', createdAt: 3, lastActivityAt: 3 },
       ];
 
       const result = appReducer(state, { type: 'CONVERSATIONS_REMOVE', conversationId: 'c2' });
@@ -1112,8 +1224,8 @@ describe('appReducer', () => {
     it('preserves other conversations', () => {
       const state = createInitialState();
       state.conversations.list = [
-        { id: 'c1', title: 'Conv 1', createdAt: 1 },
-        { id: 'c2', title: 'Conv 2', createdAt: 2 },
+        { id: 'c1', title: 'Conv 1', createdAt: 1, lastActivityAt: 1 },
+        { id: 'c2', title: 'Conv 2', createdAt: 2, lastActivityAt: 2 },
       ];
 
       const result = appReducer(state, { type: 'CONVERSATIONS_REMOVE', conversationId: 'c1' });
@@ -1424,6 +1536,10 @@ describe('appReducer', () => {
           "auth.error",
           "auth.status",
           "auth.user",
+          "branding",
+          "branding.companyId",
+          "branding.logoObjectUrl",
+          "branding.logoVersion",
           "chat",
           "chat.currentConversationId",
           "chat.editSnapshot",

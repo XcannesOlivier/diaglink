@@ -12,6 +12,7 @@ export interface ConversationSummary {
   id: string;
   title: string | null;
   createdAt: number;
+  lastActivityAt: number;
   machineId?: string | null;
   machineName?: string | null;
 }
@@ -19,8 +20,10 @@ export interface ConversationSummary {
 export interface ConversationMessageInfo {
   role: string;
   content: string;
+  createdAtUtc?: string;
   visuals?: TechnicalVisual[];
   sources?: TechnicalSourceReference[];
+  suggestions?: string[];
 }
 
 /**
@@ -36,6 +39,13 @@ export interface AppState {
     // DiagLink identity (role/companyId), resolved server-side via GET /api/auth/me — populated for
     // both the Microsoft and the DiagLink OTP authentication paths, independently of `status`/`user` above.
     currentUser: CurrentUser | null;
+  };
+
+  // Runtime-only company assets. Object URLs stay separate from the server-owned CurrentUser DTO.
+  branding: {
+    companyId: string | null;
+    logoVersion: string | null;
+    logoObjectUrl: string | null;
   };
   
   // Chat operations state
@@ -83,6 +93,8 @@ export type AppAction =
   | { type: 'AUTH_TOKEN_EXPIRED' }
   | { type: 'AUTH_CURRENT_USER_LOADED'; currentUser: CurrentUser }
   | { type: 'AUTH_CURRENT_USER_CLEARED' }
+  | { type: 'COMPANY_LOGO_LOADED'; companyId: string; logoVersion: string | null; logoObjectUrl: string }
+  | { type: 'COMPANY_LOGO_CLEARED' }
 
   // Navigation actions
   | { type: 'UI_SET_VIEW'; view: AppView }
@@ -95,6 +107,7 @@ export type AppAction =
   | { type: 'CHAT_STREAM_ANNOTATIONS'; messageId: string; annotations: IAnnotation[] }
   | { type: 'CHAT_STREAM_VISUALS'; messageId: string; visuals: TechnicalVisual[] }
   | { type: 'CHAT_STREAM_SOURCES'; messageId: string; sources: TechnicalSourceReference[] }
+  | { type: 'CHAT_STREAM_SUGGESTIONS'; messageId: string; suggestions: string[] }
   | { type: 'CHAT_STREAM_TOOL_USE'; messageId: string; toolName: string }
   | { type: 'CHAT_STREAM_USAGE'; messageId: string; usage: IUsageInfo }
   | { type: 'CHAT_STREAM_COMPLETE'; messageId: string }
@@ -136,6 +149,11 @@ export const initialAppState: AppState = {
     user: null,
     error: null,
     currentUser: null,
+  },
+  branding: {
+    companyId: null,
+    logoVersion: null,
+    logoObjectUrl: null,
   },
   chat: {
     status: 'idle',

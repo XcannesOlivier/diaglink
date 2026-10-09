@@ -20,6 +20,7 @@ const NAV_ITEMS_BY_ROLE: Record<DiagLinkRole, NavItem[]> = {
     { view: 'history', label: 'Historique' },
     { view: 'users', label: 'Utilisateurs' },
     { view: 'company', label: 'Crédits et abonnement' },
+    { view: 'personalization', label: 'Personnalisation' },
   ],
   diaglink_super_admin: [
     { view: 'chat', label: 'Chat / Assistance' },
@@ -47,7 +48,7 @@ export function getNavItemsForRole(role: DiagLinkRole | undefined, pendingMachin
       : item);
   }
   return role === 'technician' || role === 'company_admin'
-    ? items.filter(item => item.view !== 'history')
+    ? items.filter(item => item.view !== 'history' && item.view !== 'personalization')
     : items;
 }
 

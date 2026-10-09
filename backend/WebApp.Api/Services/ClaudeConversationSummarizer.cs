@@ -133,21 +133,33 @@ public sealed class ClaudeConversationSummarizer : IConversationSummarizer
 
             var cacheCreation5mTokens = 0;
             var cacheCreation1hTokens = 0;
+
             if (usageElement.TryGetProperty("cache_creation", out var cacheCreationDetail))
             {
-                if (cacheCreationDetail.ValueKind != JsonValueKind.Object ||
-                    !TryReadOptionalNonNegativeInt(cacheCreationDetail, "ephemeral_5m_input_tokens", out cacheCreation5mTokens) ||
-                    !TryReadOptionalNonNegativeInt(cacheCreationDetail, "ephemeral_1h_input_tokens", out cacheCreation1hTokens) ||
-                    cacheCreation5mTokens > cacheCreationTokens ||
-                    cacheCreation1hTokens != cacheCreationTokens - cacheCreation5mTokens)
-                {
-                    throw new InvalidOperationException("The Claude summary response contains inconsistent cache creation usage.");
-                }
+               if (cacheCreationDetail.ValueKind != JsonValueKind.Object ||
+                   !TryReadOptionalNonNegativeInt(
+                       cacheCreationDetail,
+                       "ephemeral_5m_input_tokens",
+                    out cacheCreation5mTokens) ||
+                   !TryReadOptionalNonNegativeInt(
+                    cacheCreationDetail,
+                    "ephemeral_1h_input_tokens",
+                    out cacheCreation1hTokens))
+            {
+                throw new InvalidOperationException(
+                    "The Claude summary response contains invalid cache creation usage.");
             }
-            else
+
+            if (cacheCreation5mTokens + cacheCreation1hTokens != cacheCreationTokens)
             {
                 cacheCreation5mTokens = cacheCreationTokens;
+                cacheCreation1hTokens = 0;
             }
+}
+else
+{
+    cacheCreation5mTokens = cacheCreationTokens;
+}
 
             var text = string.Join(
                 Environment.NewLine,

@@ -19,7 +19,8 @@ public sealed record ClaudeDirectMessage(
 public sealed record ClaudeDirectChatRequest(
     ClaudeDirectMachineContext Machine,
     string SystemPrompt,
-    IReadOnlyList<ClaudeDirectMessage> Messages);
+    IReadOnlyList<ClaudeDirectMessage> Messages,
+    CommercialPolicySnapshot CommercialPolicy);
 
 public sealed record ClaudeDirectToolUse(
     string Id,
@@ -101,4 +102,17 @@ public sealed record ClaudeDirectChatResult(
     IReadOnlyList<ClaudeDirectError> Errors)
 {
     public IReadOnlyList<ClaudeDirectWebCitation> WebCitations { get; init; } = [];
+    public IReadOnlyList<string> Suggestions { get; init; } = [];
+}
+
+public sealed record ClaudeDirectChatStreamUpdate
+{
+    private ClaudeDirectChatStreamUpdate() { }
+
+    public string? TextDelta { get; private init; }
+    public ClaudeDirectChatResult? CompletedResult { get; private init; }
+
+    public static ClaudeDirectChatStreamUpdate Text(string text) => new() { TextDelta = text };
+    public static ClaudeDirectChatStreamUpdate Completed(ClaudeDirectChatResult result) =>
+        new() { CompletedResult = result };
 }

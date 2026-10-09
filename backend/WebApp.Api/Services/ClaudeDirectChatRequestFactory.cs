@@ -4,7 +4,8 @@ using WebApp.Api.Models.Entities;
 namespace WebApp.Api.Services;
 
 public sealed class ClaudeDirectChatRequestFactory(
-    IClaudeDirectMachineConfigurationResolver resolver)
+    IClaudeDirectMachineConfigurationResolver resolver,
+    ICommercialPolicyProvider commercialPolicyProvider)
     : IClaudeDirectChatRequestFactory
 {
     public async Task<ClaudeDirectChatRequest> CreateAsync(
@@ -16,6 +17,9 @@ public sealed class ClaudeDirectChatRequestFactory(
         ArgumentNullException.ThrowIfNull(messages);
 
         var configuration = await resolver.ResolveAsync(machine, cancellationToken);
+        var commercialPolicy = await commercialPolicyProvider.ResolveAsync(
+            machine.CompanyId,
+            cancellationToken);
         return new(
             new(
                 configuration.ProjectEndpoint,
@@ -26,6 +30,7 @@ public sealed class ClaudeDirectChatRequestFactory(
                 configuration.BlobPrefix,
                 configuration.Description),
             configuration.SystemPrompt,
-            messages);
+            messages,
+            commercialPolicy);
     }
 }

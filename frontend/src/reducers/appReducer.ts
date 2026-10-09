@@ -39,16 +39,29 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           status: 'unauthenticated',
           currentUser: null,
         },
+        branding: {
+          companyId: null,
+          logoVersion: null,
+          logoObjectUrl: null,
+        },
       };
 
-    case 'AUTH_CURRENT_USER_LOADED':
+    case 'AUTH_CURRENT_USER_LOADED': {
+      const requestedBranding = action.currentUser.companyBranding;
+      const keepCurrentLogo = requestedBranding?.hasLogo === true &&
+        state.branding.companyId === action.currentUser.companyId &&
+        state.branding.logoVersion === requestedBranding.logoVersion;
       return {
         ...state,
         auth: {
           ...state.auth,
           currentUser: action.currentUser,
         },
+        branding: keepCurrentLogo
+          ? state.branding
+          : { companyId: null, logoVersion: null, logoObjectUrl: null },
       };
+    }
 
     case 'AUTH_CURRENT_USER_CLEARED':
       return {
@@ -56,6 +69,31 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         auth: {
           ...state.auth,
           currentUser: null,
+        },
+        branding: {
+          companyId: null,
+          logoVersion: null,
+          logoObjectUrl: null,
+        },
+      };
+
+    case 'COMPANY_LOGO_LOADED':
+      return {
+        ...state,
+        branding: {
+          companyId: action.companyId,
+          logoVersion: action.logoVersion,
+          logoObjectUrl: action.logoObjectUrl,
+        },
+      };
+
+    case 'COMPANY_LOGO_CLEARED':
+      return {
+        ...state,
+        branding: {
+          companyId: null,
+          logoVersion: null,
+          logoObjectUrl: null,
         },
       };
 
@@ -214,6 +252,20 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
       updatedMessages[messageIndex] = {
         ...updatedMessages[messageIndex],
         sources: parseTechnicalSources(action.sources),
+      };
+      return { ...state, chat: { ...state.chat, messages: updatedMessages } };
+    }
+
+    case 'CHAT_STREAM_SUGGESTIONS': {
+      const messageIndex = state.chat.messages.findIndex(
+        msg => msg.id === action.messageId && msg.role === 'assistant'
+      );
+      if (messageIndex === -1) return state;
+
+      const updatedMessages = [...state.chat.messages];
+      updatedMessages[messageIndex] = {
+        ...updatedMessages[messageIndex],
+        suggestions: action.suggestions,
       };
       return { ...state, chat: { ...state.chat, messages: updatedMessages } };
     }
