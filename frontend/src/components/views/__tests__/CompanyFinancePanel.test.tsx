@@ -15,10 +15,52 @@ const consumption={machines:[
  {id:'m',name:'Compresseur',billable:true,hasPaidRights:true,includedQuotaBudget:10,resetUtc:'2026-10-14T00:00:00Z',commercialCredit:.04,users:[{id:'u1',name:'Alice',includedQuotaConsumed:1,commercialCredit:.02}]},
  {id:'i',name:'Inactive',billable:false,hasPaidRights:false,includedQuotaBudget:0,resetUtc:null,commercialCredit:0,users:[]},
 ]};
+it('marks the selected preset with a check and updates it from buttons and free amount',async()=>{
+ request.mockImplementation((_:unknown,path:string)=>Promise.resolve({kind:'success',data:path==='/topups'?[]:summary}));
+ await act(async()=>root.render(<CompanyFinancePanel companyId="c" getAccessToken={token}/>));
+ const preset=(amount:string)=>[...box.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent===`${amount} €`)!;
+ expect(preset('20').getAttribute('aria-pressed')).toBe('true');
+ expect(preset('20').querySelector('svg')).not.toBeNull();
+ await act(async()=>preset('50').click());
+ expect(preset('50').getAttribute('aria-pressed')).toBe('true');
+ expect(preset('50').querySelector('svg')).not.toBeNull();
+ expect(preset('20').querySelector('svg')).toBeNull();
+ const input=box.querySelector<HTMLInputElement>('[inputmode="decimal"]')!;
+ expect(input.value).toBe('50');
+ await act(async()=>{
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'35');
+  input.dispatchEvent(new Event('input',{bubbles:true}));
+ });
+ expect(box.querySelector('[aria-pressed="true"]')).toBeNull();
+ expect(request.mock.calls.every(call=>call[2]===undefined)).toBe(true);
+});
+it('scopes the visual polish to company finance and excludes disabled fields',()=>{
+ const css=readFileSync(resolve('src/components/views/CompanyFinancePanel.module.css'),'utf8');
+ expect(css).toContain('.companyAmountInput:not(:has(input:disabled))');
+ expect(css).toContain('.companyAmountInput input:not(:disabled)');
+ expect(css).toContain('.companyAmountButtons button{min-height:40px;white-space:nowrap}');
+ expect(css).toContain('.buttons.companyAmountButtons{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}');
+ expect(css).toContain('@media(max-width:1200px){.companyCards .companyQuotaMetrics{grid-template-columns:minmax(0,1fr)}}');
+ expect(css).toContain('.companyCards .machineConsumptionCard{border:0;box-shadow:none;padding:16px}');
+});
+it('separates subscription, included quotas and shared credit with independent section headings',async()=>{
+ request.mockImplementation((_:unknown,path:string)=>Promise.resolve({kind:'success',data:path==='/topups'?[]:summary}));
+ await act(async()=>root.render(<CompanyFinancePanel companyId="c" getAccessToken={token}/>));
+ expect([...box.querySelectorAll('h2')].map(heading=>heading.textContent)).toEqual(['Abonnement','Machines et quotas','Crédit supplémentaire']);
+ const subscription=box.querySelector<HTMLDetailsElement>('[aria-label="Abonnement"]')!;
+ expect(subscription.querySelector('summary')?.textContent).toContain('Statut et facturation de vos machines actives.');
+ expect(subscription.open).toBe(false);
+ expect(box.querySelector('[aria-label="Machines et quotas"] > p')?.textContent).toContain('propre à chaque machine');
+ expect(box.querySelector('[aria-label="Crédit supplémentaire"] > p')?.textContent).toContain('solde partagé');
+ const css=readFileSync(resolve('src/components/views/CompanyFinancePanel.module.css'),'utf8');
+ expect(css).toContain('grid-template-areas:"machines subscription" "machines wallet"');
+ expect(css).toContain('@media(max-width:1000px){.companyCards{grid-template-columns:minmax(0,1fr);grid-template-areas:"subscription" "machines" "wallet";grid-template-rows:auto}}');
+ expect(css).toContain('.companyCards>.card{box-shadow:none}');
+});
 it.each(['trialing','active','past_due','unpaid'])('brands only the activation badge without changing semantic statuses: %s',async subscriptionStatus=>{
  request.mockImplementation((_:unknown,path:string)=>Promise.resolve({kind:'success',data:path==='/topups'?[]:{...summary,subscriptionStatus}}));
  await act(async()=>root.render(<CompanyFinancePanel companyId="c" getAccessToken={token}/>));
- const badge=box.querySelector('[aria-label="Abonnement"] summary span')!;
+ const badge=box.querySelector('[aria-label="Abonnement"] summary > span')!;
  expect(badge.classList.contains(styles.activationBadge)).toBe(subscriptionStatus==='trialing');
  expect(badge.classList.contains(styles.warning)).toBe(subscriptionStatus==='past_due'||subscriptionStatus==='unpaid');
  if(subscriptionStatus==='trialing')expect(badge.textContent).toBe('Abonnement en cours d’activation');
@@ -40,10 +82,10 @@ it.each([false,true])('shows cancellation only when scheduled: %s',async(cancelA
  request.mockImplementation((_:unknown,path:string)=>Promise.resolve({kind:'success',data:path==='/topups'?[]:{...summary,cancelAtPeriodEnd}}));
  await act(async()=>root.render(<CompanyFinancePanel companyId="c" getAccessToken={token}/>));
  const subscription=box.querySelector<HTMLDetailsElement>('[aria-label="Abonnement"]')!;
- const rightColumn=subscription.parentElement!;
- expect(rightColumn.classList.contains(styles.companyFinanceRightColumn)).toBe(true);
- expect(rightColumn.firstElementChild?.getAttribute('aria-label')).toBe('Crédit supplémentaire');
- expect(rightColumn.querySelectorAll('[aria-label="Abonnement"]')).toHaveLength(1);
+ const cards=subscription.parentElement!;
+ expect(cards.classList.contains(styles.companyCards)).toBe(true);
+ expect([...cards.children].map(child=>child.getAttribute('aria-label'))).toEqual(['Abonnement','Machines et quotas','Crédit supplémentaire']);
+ expect(cards.querySelectorAll('[aria-label="Abonnement"]')).toHaveLength(1);
  expect(box.querySelector('[aria-label="Machines et quotas"]')?.contains(subscription)).toBe(false);
  expect(subscription.open).toBe(false);
  await act(async()=>subscription.querySelector('summary')!.click());expect(subscription.open).toBe(true);

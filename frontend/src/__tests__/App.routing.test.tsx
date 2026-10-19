@@ -103,6 +103,22 @@ describe('main application routes', () => {
   it('renders the public demonstration page directly', async () => {
     await renderAt('/demonstration');
     expect(container?.textContent).toContain('Découvrez DiagLink en situation réelle.');
+    expect(container?.querySelector('iframe')).toBeNull();
+    expect(container?.querySelector('img[alt="Aperçu de la démonstration DiagLink sur ordinateur"]')?.getAttribute('src'))
+      .toBe('https://i.ytimg.com/vi/CU0pD2v5pvI/maxresdefault.jpg');
+    expect(container?.textContent).toContain('Démonstration Mobile bientôt disponible');
+
+    const playButton = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Lire la démonstration DiagLink sur ordinateur"]',
+    );
+    await act(async () => playButton?.click());
+
+    const video = container?.querySelector('iframe');
+    expect(video?.getAttribute('src')).toBe('https://www.youtube-nocookie.com/embed/CU0pD2v5pvI');
+    expect(video?.getAttribute('title')).toBe('Démonstration DiagLink sur ordinateur');
+    expect(video?.hasAttribute('allowfullscreen')).toBe(true);
+    expect(container?.textContent).toContain('Démonstration Mobile bientôt disponible');
+
     const setupLink = [...container!.querySelectorAll('a')]
       .find(link => link.textContent === 'Configurer ma première machine');
     expect(setupLink?.getAttribute('href')).toBe('/commencer');

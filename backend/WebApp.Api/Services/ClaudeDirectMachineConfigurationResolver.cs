@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -40,9 +41,18 @@ public sealed class ClaudeDirectMachineConfigurationResolver(
         }
 
         var markerBlobName = $"{blobPrefix}/.foundry/toolbox.json";
+        var markerStopwatch = Stopwatch.StartNew();
         await using var markerStream = await markerReader.OpenReadAsync(markerBlobName, cancellationToken);
         if (markerStream is null)
         {
+            logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} DurationMs={DurationMs} Outcome={Outcome} Bytes={Bytes}",
+                Activity.Current?.TraceId.ToString() ?? "unavailable",
+                "ClaudeDirectMachineConfigurationResolver",
+                "ToolboxMarkerRead",
+                markerStopwatch.ElapsedMilliseconds,
+                "not_found",
+                0);
             throw ConfigurationError("toolbox_marker_missing", "The machine Toolbox marker was not found.");
         }
 
@@ -50,6 +60,14 @@ public sealed class ClaudeDirectMachineConfigurationResolver(
         try
         {
             var markerBytes = await ReadBoundedAsync(markerStream, MaxMarkerBytes, cancellationToken);
+            logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} DurationMs={DurationMs} Outcome={Outcome} Bytes={Bytes}",
+                Activity.Current?.TraceId.ToString() ?? "unavailable",
+                "ClaudeDirectMachineConfigurationResolver",
+                "ToolboxMarkerRead",
+                markerStopwatch.ElapsedMilliseconds,
+                "success",
+                markerBytes.Length);
             marker = JsonSerializer.Deserialize<ToolboxMarker>(markerBytes)
                 ?? throw new JsonException("Marker deserialized to null.");
         }

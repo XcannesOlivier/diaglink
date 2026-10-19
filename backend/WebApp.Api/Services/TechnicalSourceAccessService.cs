@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using WebApp.Api.Data;
+using WebApp.Api.Models;
 
 namespace WebApp.Api.Services;
 
@@ -70,9 +71,21 @@ public sealed class TechnicalSourceAccessService(
             candidate.DocumentId,
             [candidate.DisplayPage],
             cancellationToken);
-        if (pageMap is null ||
-            !pageMap.PdfPagesByDisplayPage.TryGetValue(candidate.DisplayPage, out var currentPdfPage) ||
-            currentPdfPage != candidate.PdfPage)
+        if (pageMap is null)
+        {
+            logger.LogDebug("Technical source access rejected. Outcome={Outcome}", "page_map_mismatch");
+            return new(TechnicalSourceAccessKind.NotFound);
+        }
+
+        var physicalReferenceIsCurrent =
+            TechnicalSourcePageStorage.TryReadPdfPage(candidate.DisplayPage, out var storedPdfPage) &&
+            storedPdfPage == candidate.PdfPage &&
+            pageMap.PdfPages.Contains(candidate.PdfPage);
+        var displayReferenceIsCurrent =
+            !TechnicalSourcePageStorage.TryReadPdfPage(candidate.DisplayPage, out _) &&
+            pageMap.PdfPagesByDisplayPage.TryGetValue(candidate.DisplayPage, out var currentPdfPages) &&
+            currentPdfPages.Contains(candidate.PdfPage);
+        if (!physicalReferenceIsCurrent && !displayReferenceIsCurrent)
         {
             logger.LogDebug("Technical source access rejected. Outcome={Outcome}", "page_map_mismatch");
             return new(TechnicalSourceAccessKind.NotFound);

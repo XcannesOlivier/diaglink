@@ -386,40 +386,46 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         <div className={styles.buttonRow}>
           <div className={styles.actionButtons}>
             <MachineDocuments key={machineId ?? 'no-machine'} machineId={machineId} />
-            <Tooltip content="Joindre un fichier" relationship="label" withArrow>
-              <Button
-                appearance="subtle"
-                icon={<Attach24Regular />}
-                onClick={handleAttachClick}
-                disabled={disabled}
-                aria-label="Joindre un fichier"
-              />
-            </Tooltip>
-            <VoiceInput
-              onTranscript={handleVoiceTranscript}
-              disabled={disabled}
-            />
-            {onNewChat && (
-              <Tooltip content="Nouvelle conversation" relationship="label" withArrow>
+            <div className={styles.actionGroup} role="group" aria-label="Pièces jointes et saisie vocale">
+              <Tooltip content="Joindre un fichier" relationship="label" withArrow>
                 <Button
                   appearance="subtle"
-                  icon={<ChatAdd24Regular />}
-                  onClick={onNewChat}
-                  disabled={disabled || !hasMessages}
-                  aria-label="Nouvelle conversation"
-                />
-              </Tooltip>
-            )}
-            {onToggleSidebar && (
-              <Tooltip content="Historique des conversations" relationship="label" withArrow>
-                <Button
-                  appearance="subtle"
-                  icon={<History24Regular />}
-                  onClick={onToggleSidebar}
+                  icon={<Attach24Regular />}
+                  onClick={handleAttachClick}
                   disabled={disabled}
-                  aria-label="Historique des conversations"
+                  aria-label="Joindre un fichier"
                 />
               </Tooltip>
+              <VoiceInput
+                onTranscript={handleVoiceTranscript}
+                disabled={disabled}
+              />
+            </div>
+            {(onNewChat || onToggleSidebar) && (
+              <div className={`${styles.actionGroup} ${styles.conversationActions}`} role="group" aria-label="Conversations">
+                {onNewChat && (
+                  <Tooltip content="Nouvelle conversation" relationship="label" withArrow>
+                    <Button
+                      appearance="subtle"
+                      icon={<ChatAdd24Regular />}
+                      onClick={onNewChat}
+                      disabled={disabled || !hasMessages}
+                      aria-label="Nouvelle conversation"
+                    />
+                  </Tooltip>
+                )}
+                {onToggleSidebar && (
+                  <Tooltip content="Historique des conversations" relationship="label" withArrow>
+                    <Button
+                      appearance="subtle"
+                      icon={<History24Regular />}
+                      onClick={onToggleSidebar}
+                      disabled={disabled}
+                      aria-label="Historique des conversations"
+                    />
+                  </Tooltip>
+                )}
+              </div>
             )}
           </div>
           {onOpenMobileMenu && (

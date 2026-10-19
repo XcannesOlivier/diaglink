@@ -1,176 +1,104 @@
-# Frontend - React + TypeScript + Vite
+# DiagLink frontend
 
-**AI Assistance**: See `.github/skills/writing-typescript-code/SKILL.md` for coding patterns.
+The frontend is a React 19 and TypeScript single-page application built with Vite and Fluent UI.
+It contains the public DiagLink pages, authentication screens and the role-aware authenticated
+application.
 
-## Overview
+## Main areas
 
-React 19 single-page application with:
-- TypeScript for type safety
-- Vite for fast development (HMR) and optimized builds
-- MSAL.js for Microsoft Entra ID authentication (PKCE flow)
-- Server-Sent Events (SSE) for real-time chat streaming
-- CSS Modules for scoped styling
+- public landing, demonstration, contact, legal, privacy and start/request pages;
+- email OTP sign-in, with optional Microsoft Entra/MSAL authentication support;
+- machine-scoped Claude Direct chat over Server-Sent Events;
+- SQL-backed conversation history, source PDF access and technical visual galleries;
+- company user, machine, branding, quota and finance views;
+- platform administration and Stripe test-mode operational views.
 
-## Key Features
+## Authentication and roles
 
-### Chat Experience
-- **SSE Streaming** — Real-time token-by-token response streaming with cancellation support
-- **Stream Retry** — Automatic retry (3×) with exponential backoff; failed messages restore to input
-- **Message Queue** — Type-ahead during streaming; queued messages shown as dismissible chips, auto-sent when stream completes
-- **Smart Auto-Scroll** — Auto-scrolls only when near bottom; "↓ New messages" pill when scrolled up
-- **Tool-Use Indicators** — Inline "Searching files...", "Running code..." during agent tool execution
+`useAppAuthentication` supports two authenticated states:
 
-### Message Actions
-- **Copy** — Copy full assistant response to clipboard
-- **Regenerate** — Resend last message for a new response (↻ button)
-- **Edit** — Edit last user message (removes messages, restores text to input with undo)
-- **Feedback** — 👍👎 per-message rating tracked to Application Insights
+- an MSAL account backed by an Entra access token;
+- a DiagLink session token returned after a six-digit email code is verified.
 
-### Input
-- **File Attachments** — Images and documents via paste (Ctrl+V), drag-and-drop, or file picker
-- **Voice Input** — Web Speech API microphone with feature detection and error feedback
-- **Keyboard Shortcuts** — ⌨️ button shows shortcuts; Ctrl+N new chat, Escape cancel
-- **Toolbar** — Primary actions always visible (attach, cancel, voice, new chat); secondary actions (history, export, shortcuts, settings) in ⋯ overflow menu
+The DiagLink session token and expiry are kept in browser local storage and are validated by the
+backend on reload. Authorization is always enforced by backend policies.
 
-### Conversations
-- **History Sidebar** — Browse and resume past conversations; accessed via ⋯ menu
-- **Search** — Filter conversations by title in sidebar
-- **Export** — Download conversation as Markdown; accessed via ⋯ menu
-- **Delete** — Remove conversations from history
+The frontend uses exactly the three backend role values:
 
-### Foundation
-- **Authentication** — MSAL.js with silent token refresh + popup fallback
-- **Accessibility** — ARIA live regions, keyboard navigation, focus management, screen reader announcements
-- **Performance** — React 19 `useDeferredValue` for responsive input during streaming
-- **Theming** — Light/dark/system theme with Fluent UI design tokens
-- **Citations** — Inline citation markers with footnote navigation and source links
+| Role | Frontend scope |
+|---|---|
+| `technician` | Assigned machines and technical chat. |
+| `company_admin` | Own-company users, machines, branding and financial views. |
+| `diaglink_super_admin` | Cross-company and platform administration. |
 
-## Project Structure
+## Chat
 
-```
-frontend/src/
-├── App.tsx                      # Root with MsalProvider
-├── main.tsx                     # Entry point
-├── components/
-│   ├── AgentChat.tsx         # Container (state → ChatInterface)
-│   ├── ChatInterface.tsx        # Controlled chat UI
-│   └── chat/                    # Chat subcomponents
-│       ├── AssistantMessage.tsx # Streaming message + citations
-│       ├── UserMessage.tsx      # User message + image previews
-│       ├── ChatInput.tsx        # Input + file upload + cancel
-│       └── CitationMarker.tsx   # Inline citation badge
-├── services/
-│   └── chatService.ts           # SSE streaming + API calls
-├── contexts/
-│   └── AppContext.tsx           # Centralized state (useReducer)
-├── hooks/
-│   ├── useAuth.ts               # MSAL token acquisition
-│   └── useAppState.ts           # State access hook
-├── reducers/
-│   └── appReducer.ts            # State transitions
-├── config/
-│   └── authConfig.ts            # MSAL configuration
-├── types/                       # TypeScript interfaces
-└── utils/                       # Helpers (citations, files, etc.)
+`AgentChat` and `ChatInterface` manage conversation loading, SSE streaming, retries, cancellation,
+queued messages, regeneration, editing and feedback telemetry. The stream can carry text, tool
+status, usage, source references, visuals and suggestions.
+
+Chat attachments are PNG or JPEG images. The backend enforces a maximum of five images and 5 MiB
+per image. Machine PDFs are accessed through the documents/source UI; they are not sent as direct
+Claude chat attachments.
+
+Technical source and visual URLs are opaque API routes. The browser does not receive private Blob
+URLs. Access is rechecked by the backend when a PDF or image is requested.
+
+## Configuration
+
+`frontend/.env.local` is ignored and normally generated by `postprovision.ps1`.
+
+```dotenv
+VITE_ENTRA_SPA_CLIENT_ID=...
+VITE_ENTRA_TENANT_ID=...
+VITE_ENTRA_BACKEND_CLIENT_ID=... # optional OBO compatibility
+VITE_APPLICATIONINSIGHTS_CONNECTION_STRING=... # optional local browser telemetry
+VITE_API_URL=... # optional; defaults to /api
 ```
 
-## Running Locally
+Vite variables are replaced at build time. The production Docker build supplies the Entra and
+Application Insights values as build arguments.
 
-### Prerequisites
-- Node.js 18+
-- `.env.local` file generated (run `azd up` first)
+## Telemetry
 
-### Start
+`services/telemetry.ts` initializes Application Insights only when a connection string is present.
+It tracks fetch dependencies, unhandled promise rejections, explicit exceptions and message
+feedback. Browser `console.*` calls are not local log files.
 
-**Option 1: VS Code task (recommended)**
-- Run task `Frontend: React Vite` - dependencies are installed automatically
+## Development
 
-**Option 2: Manual**
 ```powershell
 cd frontend
-npm install   # .npmrc sets legacy-peer-deps automatically
+npm ci
 npm run dev
 ```
 
-Frontend runs at http://localhost:5173 with Hot Module Replacement (HMR).
+The Vite development server listens on `http://localhost:5173` and proxies API use according to
+the current Vite configuration.
 
-### Configuration
-
-`.env.local` file (auto-generated by `azd up`):
-```
-VITE_ENTRA_SPA_CLIENT_ID=...
-VITE_ENTRA_TENANT_ID=...
-```
-
-**CRITICAL**: Environment variables are replaced at build time. Access them at module level only:
-```typescript
-// ✅ Correct - module level
-const clientId = import.meta.env.VITE_ENTRA_SPA_CLIENT_ID;
-
-// ❌ Wrong - inside function (won't work after build)
-function getClientId() {
-  return import.meta.env.VITE_ENTRA_SPA_CLIENT_ID;
-}
-```
-
-## Development Tips
-
-- **Hot reload**: Vite HMR updates browser instantly on save
-- **React 19**: `.npmrc` handles peer-dep conflicts automatically — just run `npm install` from `frontend/`
-- **State debugging**: Console shows `🔄 ACTION_TYPE` for each state change (dev only)
-- **CORS**: Backend allows `http://localhost:5173` in dev mode
-
-## Building
+Validation commands:
 
 ```powershell
-npm run build      # Production build → dist/
-npm run preview    # Preview production build locally
+npm run lint
+npm run test:run
+npm run build
+npm run test:coverage
 ```
 
-Production builds are created in Docker multi-stage builds and served from ASP.NET Core's `wwwroot`.
+`dist/`, `coverage/`, logs and local environment files are generated artefacts and are ignored by
+Git.
 
-## Key Dependencies
+## Source layout
 
-| Package | Purpose |
-|---------|---------|
-| react | UI framework |
-| @azure/msal-react | Entra ID authentication |
-| @azure/msal-browser | MSAL.js browser library |
-| @fluentui/react-components | Fluent UI components |
-| vite | Build tool + dev server |
-
-See `package.json` for current versions.
-
-## Component Architecture
-
-| Component | Role | Pattern |
-|-----------|------|---------|
-| `AgentChat` | Container | Wires state to controlled component |
-| `ChatInterface` | Presentation | Stateless, receives props + callbacks |
-| `ChatInput` | Controlled input | Manages local input state, calls parent handlers |
-| `AssistantMessage` | Memoized | Renders streaming text + citations |
-
-## State Flow
-
+```text
+src/
+├── components/       authenticated shell, chat and administrative views
+├── pages/            public, login, start and checkout-return routes
+├── services/         API, chat stream and telemetry clients
+├── hooks/            authentication, state and UI hooks
+├── contexts/         application, theme and company-accent state
+├── reducers/         chat/application state transitions
+├── config/           authentication, origins and themes
+├── types/            shared frontend models
+└── utils/            roles, SSE, citations, attachments and technical sources
 ```
-User Action
-  → dispatch(action)
-  → appReducer (pure function)
-  → new state
-  → React re-render
-  → UI update
-```
-
-**Action types**: `CHAT_SEND_MESSAGE` → `CHAT_START_STREAM` → `CHAT_STREAM_CHUNK` (×N) → `CHAT_STREAM_COMPLETE`
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Module not found | Run `npm install` from `frontend/` (`.npmrc` handles peer deps) |
-| Auth popup blocked | Allow popups for localhost in browser |
-| Stale cache | Delete `node_modules/.vite` and restart |
-| HMR not working | Check Vite terminal for errors |
-| 401 on API calls | Verify `.env.local` has correct client ID |
-
-For AI-assisted development, see `.github/skills/writing-typescript-code/SKILL.md` and `.github/skills/implementing-chat-streaming/SKILL.md`.

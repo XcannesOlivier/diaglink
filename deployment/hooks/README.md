@@ -1,120 +1,80 @@
-# Azure Developer CLI Hooks
+# Azure Developer CLI hooks
 
-**AI Assistance**: See `.github/skills/deploying-to-azure/SKILL.md` for deployment patterns.
+The scripts in this directory implement the `azd` lifecycle declared in `azure.yaml`.
 
-## Hook Execution Order
+## Execution order
 
-| Phase | Command | Hooks Executed | Duration |
-|-------|---------|----------------|----------|
-| **Deploy** | `azd up` | preprovision → provision → postprovision → predeploy | 10-12 min |
-| **Code Only** | `azd deploy` | predeploy | 3-5 min |
-| **Teardown** | `azd down` | (resources deleted) → postdown | 2-3 min |
-| **Reprovision** | `azd provision` | preprovision → provision → postprovision | 2-3 min |
+| Command | Hooks |
+|---|---|
+| `azd up` | `preprovision` → Bicep provision → `postprovision` → `predeploy` |
+| `azd provision` | `preprovision` → Bicep provision → `postprovision` |
+| `azd deploy` | `predeploy` |
+| `azd down` | Azure removal → `postdown` |
 
-## Logging
+## Hook responsibilities
 
-All hooks start a PowerShell transcript automatically and write logs to `.azure/<env>/logs/` with timestamped filenames (one per hook run). The transcript captures the same console output shown during `azd` execution for post-run troubleshooting.
+### `preprovision.ps1`
 
-## Hook Details
+- validates PowerShell, Azure CLI and `azd` availability;
+- verifies the active Azure account and resolves the tenant/environment;
+- requires `AUTH_OTP_PEPPER` without printing its value;
+- selects an existing Cognitive Services account of kind `AIServices` and records its resource
+  group, name and location;
+- warns when the application and Foundry regions differ.
 
-| Hook | Purpose | Key Actions | Outputs |
-|------|---------|-------------|---------|
-| **preprovision.ps1** | Discover AI Foundry + configure agent | • Discovers AI Foundry resources<br>• Auto-detects tenant ID<br>• Discovers agent in project | AI Foundry env vars |
-| **postprovision.ps1** | Configure Entra app + RBAC + local config | • Sets `identifierUri` on Entra app (can't be done in Bicep — self-references `appId`)<br>• Updates redirect URIs with production URL<br>• Assigns `Cognitive Services OpenAI Contributor` + `Azure AI Developer` roles to AI Foundry<br>• Generates local dev config files (`.env`, `.env.local`) | Configured Entra app + RBAC + local config |
-| **predeploy.ps1** | Build container image | • Detects Docker availability<br>• Passes `APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING` as Docker build arg for frontend browser telemetry<br>• Local Docker build + push OR ACR cloud build<br>• Updates Container App if it exists | Container image in ACR |
-| **postdown.ps1** | Cleanup (optional) | • Removes RBAC assignment<br>• Deletes Entra app (Graph resources aren't tied to RGs)<br>• Optionally removes Docker images | Clean slate |
+It does not discover or select a Foundry Agent. Machine project endpoints, Blob prefixes and Vector
+Store IDs remain server-owned SQL configuration.
 
-## Entra App Registration
+### `postprovision.ps1`
 
-The Entra app is created **declaratively via Bicep** (`infra/entra-app.bicep`) using the Microsoft Graph Bicep extension.
+- reads Bicep outputs;
+- updates Entra identifier/redirect configuration that depends on generated IDs and FQDNs;
+- configures optional OBO compatibility when enabled;
+- assigns the managed identity's Foundry RBAC roles;
+- writes ignored `frontend/.env.local` and `backend/WebApp.Api/.env` files;
+- opens the deployed URL when the environment permits it.
 
-**What Bicep handles**: App creation, display name, sign-in audience, SPA redirect URIs (localhost only), `Chat.ReadWrite` scope, service principal, and `serviceManagementReference`.
+### `predeploy.ps1`
 
-**What postprovision handles**: `identifierUri` (requires auto-generated `appId`), Container App FQDN redirect URI, and local dev config generation.
+- builds with local Docker, or uses an ACR cloud build as fallback;
+- passes only frontend build-time configuration as Docker arguments;
+- pushes the tagged image;
+- updates the existing Container App image.
 
-## Module Scripts
+### `postdown.ps1`
 
-### modules/Get-AIFoundryAgents.ps1
+Removes identity configuration that is not automatically tied to resource-group deletion. Review
+the target `azd` environment before running a destructive teardown.
 
-Discovers agents in a Microsoft Foundry project via REST API (`/agents?api-version=2025-11-15-preview`).
+## Logging and retention
 
-**Usage**:
-```powershell
-# Basic usage
-$agents = & "$PSScriptRoot/modules/Get-AIFoundryAgents.ps1" `
-    -ProjectEndpoint $endpoint
+`modules/HookLogging.ps1` creates one PowerShell transcript per run:
 
-# Quiet mode (suppress console output)
-$agents = & "$PSScriptRoot/modules/Get-AIFoundryAgents.ps1" `
-    -ProjectEndpoint $endpoint -Quiet
-
-# Custom token
-$agents = & "$PSScriptRoot/modules/Get-AIFoundryAgents.ps1" `
-    -ProjectEndpoint $endpoint -AccessToken $token
+```text
+.azure/<environment>/logs/yyyyMMdd-HHmmss-<hook>.log
 ```
 
-**Returns**: Array of agent objects (`name`, `id`, `versions`). Handles pagination automatically.
+At the start of a hook, it deletes files older than 30 days only when their names exactly match one
+of the current module-owned suffixes: `preprovision`, `postprovision`, `predeploy` or `postdown`.
+Other files and directories are untouched. Cleanup is best-effort; an access or deletion failure is
+reported as a warning and does not abort the Azure operation.
 
-## Testing
+Transcripts can contain operational identifiers and command output. They are ignored by Git and
+should not be published.
 
-```powershell
-# Test individual hooks
-.\hooks\preprovision.ps1
-.\hooks\postprovision.ps1  # Requires provisioned infrastructure
-.\hooks\postdown.ps1
+## Modules
 
-# Test full flow
-azd up
-```
+- `HookLogging.ps1`: transcript creation, bounded retention and shutdown.
+- `Get-AIFoundryAgents.ps1`: standalone paginated REST helper for listing agents from a supplied
+  project endpoint. It is not part of the current hook workflow.
 
 ## Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| App registration fails with policy error | Run `azd env set ENTRA_SERVICE_MANAGEMENT_REFERENCE 'guid'` then `azd up` (Bicep passes it to Microsoft Graph extension) |
-| Provision fails | Verify Azure CLI auth: `az account show` |
-| Predeploy Docker build fails | Check Docker running: `docker version` (falls back to ACR cloud build) |
-| AI Foundry not found | Create resource at [ai.azure.com](https://ai.azure.com) or use [foundry-samples Bicep templates](https://github.com/microsoft-foundry/foundry-samples/tree/main/infrastructure/infrastructure-setup-bicep) |
-| Multiple AI Foundry resources | Set `AI_FOUNDRY_RESOURCE_NAME` or select when prompted |
-| RBAC assignment fails | Verify you have User Access Administrator role on AI Foundry resource |
-
-### App Registration Policies
-
-Some organizations require [`serviceManagementReference`](https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.applications/invoke-mginstantiateapplicationtemplate) for app registrations.
-
-**Quick fix**:
-```powershell
-azd env set ENTRA_SERVICE_MANAGEMENT_REFERENCE 'your-guid-here'
-azd up
-```
-
-**Persistent fix** (environment variable):
-```powershell
-[System.Environment]::SetEnvironmentVariable('ENTRA_SERVICE_MANAGEMENT_REFERENCE', 'your-guid-here', 'User')
-# Restart terminal
-```
-
-Contact your Entra ID admin for the required GUID.
-
-### Multiple AI Foundry Resources
-
-If you have multiple AI Foundry resources in your subscription, the preprovision hook will prompt you to select one. 
-
-**To skip the prompt**, pre-configure your preferred resource:
-```powershell
-azd env set AI_FOUNDRY_RESOURCE_NAME "your-ai-foundry-resource-name"
-```
-
-## Customization
-
-### Change Default Behavior
-
-| Change | File | Modification |
-|--------|------|-------------|
-| Always clean Docker images | `postdown.ps1` | Set `$cleanDockerImages = $true` |
-| Change ports | `start-local-dev.ps1` + Entra app URIs | Update port references |
-| Skip auto-opening browser | `postprovision.ps1` | Comment out `Start-Process` line |
-
-## See Also
-
-- `.github/hooks/` — Copilot agent hooks (commit gate, custom workflow policies). These are **different** from the azd deployment hooks in this directory.
+| Problem | Check |
+|---|---|
+| Azure session missing | `az account show` and `azd auth login` |
+| OTP pepper rejected | Configure `AUTH_OTP_PEPPER` in the selected `azd` environment. |
+| Foundry account not found | Set `AI_FOUNDRY_RESOURCE_NAME` or verify access to an `AIServices` account. |
+| Foundry RBAC assignment fails | Verify the deployer can create role assignments on the Foundry resource. |
+| Local Docker build fails | Check `docker version`; the hook otherwise attempts an ACR cloud build. |
+| Entra policy blocks provisioning | Configure `ENTRA_SERVICE_MANAGEMENT_REFERENCE` when required by the tenant. |

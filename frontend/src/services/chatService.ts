@@ -1,7 +1,7 @@
 import type { Dispatch } from 'react';
 import type { AppAction } from '../types/appState';
 import type { ConversationSummary, ConversationMessageInfo } from '../types/appState';
-import type { IChatItem } from '../types/chat';
+import type { IAnnotation, IChatItem } from '../types/chat';
 import type { AppError } from '../types/errors';
 import { isAppError } from '../types/errors';
 import { trackException } from './telemetry';
@@ -690,12 +690,32 @@ export class ChatService {
     return messages.map(message => {
       const visuals = parseTechnicalVisuals(message.visuals);
       const sources = parseTechnicalSources(message.sources);
+      const webCitations = Array.isArray(message.webCitations)
+        ? message.webCitations.flatMap((value): IAnnotation[] => {
+            if (!value || typeof value !== 'object') return [];
+            const citation = value as Record<string, unknown>;
+            if (citation.type !== 'uri_citation' || typeof citation.url !== 'string') return [];
+            try {
+              const url = new URL(citation.url);
+              if (url.protocol !== 'http:' && url.protocol !== 'https:') return [];
+            } catch {
+              return [];
+            }
+            return [{
+              type: 'uri_citation',
+              label: typeof citation.label === 'string' && citation.label ? citation.label : citation.url,
+              url: citation.url,
+              ...(typeof citation.quote === 'string' ? { quote: citation.quote } : {}),
+            }];
+          })
+        : [];
       return {
         role: typeof message.role === 'string' ? message.role : '',
         content: typeof message.content === 'string' ? message.content : '',
         ...(typeof message.createdAtUtc === 'string' ? { createdAtUtc: message.createdAtUtc } : {}),
         ...(visuals.length > 0 ? { visuals } : {}),
         sources,
+        ...(webCitations.length > 0 ? { webCitations } : {}),
         ...(Array.isArray(message.suggestions)
           ? { suggestions: message.suggestions.filter((value): value is string => typeof value === 'string') }
           : {}),

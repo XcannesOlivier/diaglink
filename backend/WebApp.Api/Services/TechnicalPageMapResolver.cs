@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -5,7 +6,8 @@ namespace WebApp.Api.Services;
 
 public sealed record TechnicalPageMapResolution(
     string SourceBlob,
-    IReadOnlyDictionary<string, int> PdfPagesByDisplayPage);
+    IReadOnlyDictionary<string, IReadOnlyList<int>> PdfPagesByDisplayPage,
+    IReadOnlySet<int> PdfPages);
 
 /// <summary>Loads and validates private page maps, with one download per document in a request scope.</summary>
 public sealed partial class TechnicalPageMapResolver(
@@ -37,7 +39,7 @@ public sealed partial class TechnicalPageMapResolver(
             return null;
         }
 
-        var resolvedPages = new Dictionary<string, int>(StringComparer.Ordinal);
+        var resolvedPages = new Dictionary<string, IReadOnlyList<int>>(StringComparer.Ordinal);
         foreach (var displayPage in displayPages.Distinct(StringComparer.Ordinal))
         {
             if (!pageMap.Pages.TryGetValue(displayPage, out var candidates))
@@ -46,13 +48,13 @@ public sealed partial class TechnicalPageMapResolver(
             }
 
             var physicalPages = candidates.Distinct().ToArray();
-            if (physicalPages.Length == 1)
+            if (physicalPages.Length > 0)
             {
-                resolvedPages.Add(displayPage, physicalPages[0]);
+                resolvedPages.Add(displayPage, physicalPages);
             }
         }
 
-        return new(pageMap.SourceBlob, resolvedPages);
+        return new(pageMap.SourceBlob, resolvedPages, pageMap.PdfPages);
     }
 
     private async Task<ValidatedPageMap?> LoadAsync(
@@ -61,9 +63,11 @@ public sealed partial class TechnicalPageMapResolver(
         string expectedDocumentId,
         CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         await using var stream = await blobReader.OpenPageMapAsync(pageMapBlobName, cancellationToken);
         if (stream is null)
         {
+            LogPerformance(stopwatch.ElapsedMilliseconds, "not_found", 0);
             return null;
         }
 
@@ -88,6 +92,7 @@ public sealed partial class TechnicalPageMapResolver(
             }
 
             var pages = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            var pdfPages = new HashSet<int>();
             foreach (var page in pagesElement.EnumerateArray())
             {
                 if (page.ValueKind != JsonValueKind.Object ||
@@ -97,6 +102,8 @@ public sealed partial class TechnicalPageMapResolver(
                 {
                     return null;
                 }
+
+                pdfPages.Add(pdfPage);
 
                 if (!page.TryGetProperty("displayPage", out var displayPageElement) ||
                     !TryReadRequiredString(page, "source", out _))
@@ -129,13 +136,25 @@ public sealed partial class TechnicalPageMapResolver(
                 candidates.Add(pdfPage);
             }
 
-            return new(sourceBlob, pages);
+            LogPerformance(stopwatch.ElapsedMilliseconds, "success", pages.Count);
+            return new(sourceBlob, pages, pdfPages);
         }
         catch (JsonException exception)
         {
+            LogPerformance(stopwatch.ElapsedMilliseconds, "invalid", 0);
             logger.LogDebug(exception, "Technical page map is invalid. DocumentId={DocumentId}", expectedDocumentId);
             return null;
         }
+
+        void LogPerformance(long durationMs, string outcome, int pageCount) =>
+            logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} DurationMs={DurationMs} Outcome={Outcome} PageCount={PageCount}",
+                Activity.Current?.TraceId.ToString() ?? "unavailable",
+                "TechnicalPageMapResolver",
+                "PageMapBlobReadAndParse",
+                durationMs,
+                outcome,
+                pageCount);
     }
 
     internal static bool TryBuildPageMapBlobName(
@@ -190,5 +209,8 @@ public sealed partial class TechnicalPageMapResolver(
     [GeneratedRegex(@"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z", RegexOptions.CultureInvariant)]
     private static partial Regex DocumentIdPattern();
 
-    private sealed record ValidatedPageMap(string SourceBlob, Dictionary<string, List<int>> Pages);
+    private sealed record ValidatedPageMap(
+        string SourceBlob,
+        Dictionary<string, List<int>> Pages,
+        HashSet<int> PdfPages);
 }

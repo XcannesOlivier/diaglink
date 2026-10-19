@@ -26,6 +26,7 @@ describe('CompanyView', () => {
     });
 
     expect(container.textContent).toContain('Acme Corp');
+    expect(container.querySelector('h1')?.textContent).toBe('Crédits et abonnement');
     expect(container.textContent).toContain('Finances client');
     await act(async () => root.unmount());
     container.remove();

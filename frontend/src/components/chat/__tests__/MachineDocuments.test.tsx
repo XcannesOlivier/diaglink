@@ -38,8 +38,8 @@ describe('MachineDocuments', () => {
   });
 
   it.each([
-    ['desktop', false, false, 'Doc Machines'],
-    ['tablet', true, false, 'Doc Machines'],
+    ['desktop', false, false, 'Documents machine'],
+    ['tablet', true, false, 'Documents machine'],
     ['mobile', true, true, 'Docs'],
   ] as const)('uses the responsive documents label on %s', async (_viewport, compact, mobile, label) => {
     media.compact = compact;
@@ -72,6 +72,16 @@ describe('MachineDocuments', () => {
     await act(async () => button.click());
     expect(document.body.querySelector('[class*="fui-PopoverSurface"]')).not.toBeNull();
     expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+  });
+
+  it('explains the unavailable documents action without loading data', async () => {
+    await act(async () => root.render(<MachineDocuments />));
+    const button = container.querySelector<HTMLButtonElement>('button[aria-label="Documents de la machine"]')!;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe('Sélectionnez une machine pour consulter ses documents');
+    await act(async () => button.click());
+    expect(api.get).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[class*="fui-PopoverSurface"]')).toBeNull();
   });
 
   it('keeps the desktop mouse tooltip and hides it immediately when documents open', async () => {

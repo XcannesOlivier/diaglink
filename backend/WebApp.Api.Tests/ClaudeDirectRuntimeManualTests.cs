@@ -31,18 +31,13 @@ namespace WebApp.Api.Tests;
 [TestClass]
 public sealed class ClaudeDirectRuntimeManualTests
 {
-    private static readonly Guid Dx10zMachineId =
+    private static readonly Guid DefaultRuntimeMachineId =
         Guid.Parse("8f92a818-86bb-48b5-883a-f26999510075");
     private const string Dx10zBlobPrefix = "develon/excavatrice-doosan-dx10z";
     private const string Dx10zProjectEndpoint =
         "https://diaglink-foundry-prod.services.ai.azure.com/api/projects/develon";
     private const string OfflineProjectEndpoint =
         "https://resource.test/api/projects/company";
-    private const string Question =
-        "Recherche dans le manuel comment remplacer le filtre hydraulique du DX10z. " +
-        "Puis examine visuellement la page PDF 75 et distingue ce que dit le manuel " +
-        "de ce que tu confirmes visuellement.";
-
     [TestMethod]
     public void ClaudeDirectManualHost_CanResolveAllServices()
     {
@@ -153,6 +148,17 @@ public sealed class ClaudeDirectRuntimeManualTests
             "company/machine/.foundry/toolbox.json",
             factory.OfflineToolboxMarkerReader.RequestedBlobNames.Single());
         StringAssert.Contains(body, "\"type\":\"done\"");
+
+        var events = ReadEvents(body);
+        var conversationId = events.First(item => item.GetProperty("type").GetString() == "conversationId")
+            .GetProperty("conversationId")
+            .GetString();
+        Assert.IsNotNull(conversationId);
+        var visibleText = string.Concat(events
+            .Where(item => item.GetProperty("type").GetString() == "chunk")
+            .Select(item => item.GetProperty("content").GetString()));
+        var persisted = await LoadPersistenceAsync(factory.Services, conversationId);
+        Assert.AreEqual(visibleText, persisted.Messages.Single(item => item.Role == "assistant").Content);
     }
 
     [TestMethod]
@@ -471,6 +477,10 @@ public sealed class ClaudeDirectRuntimeManualTests
 
         await using var discoveryFactory = new RuntimeApplicationFactory(null);
         var machine = await LoadDx10zAsync(discoveryFactory.Services);
+        var question =
+            $"Recherche dans le manuel comment remplacer le filtre hydraulique du {machine.Name}. " +
+            "Puis examine visuellement la page PDF 75 et distingue ce que dit le manuel " +
+            "de ce que tu confirmes visuellement.";
         var before = await FinancialSnapshot.LoadAsync(discoveryFactory.Services, machine);
 
         await using var factory = new RuntimeApplicationFactory(machine.Id);
@@ -483,7 +493,7 @@ public sealed class ClaudeDirectRuntimeManualTests
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/chat/stream")
         {
-            Content = JsonContent.Create(new ChatRequest { Message = Question, MachineId = machine.Id })
+            Content = JsonContent.Create(new ChatRequest { Message = question, MachineId = machine.Id })
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -542,7 +552,7 @@ public sealed class ClaudeDirectRuntimeManualTests
         Assert.AreEqual(machine.Id, persisted.Conversation.MachineId);
         Assert.AreEqual(2, persisted.Messages.Count);
         Assert.AreEqual("user", persisted.Messages[0].Role);
-        Assert.AreEqual(Question, persisted.Messages[0].Content);
+        Assert.AreEqual(question, persisted.Messages[0].Content);
         Assert.AreEqual("assistant", persisted.Messages[1].Role);
         Assert.AreEqual(finalText, persisted.Messages[1].Content);
         Assert.AreEqual(1, persisted.Messages[1].Visuals.Count);
@@ -593,12 +603,16 @@ public sealed class ClaudeDirectRuntimeManualTests
 
     private static async Task<Machine> LoadDx10zAsync(IServiceProvider services)
     {
+        var configuredMachineId = Environment.GetEnvironmentVariable("CLAUDE_DIRECT_RUNTIME_MACHINE_ID");
+        var machineId = Guid.TryParse(configuredMachineId, out var parsedMachineId)
+            ? parsedMachineId
+            : DefaultRuntimeMachineId;
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<DiagLinkDbContext>();
         var machines = await db.Machines.AsNoTracking()
-            .Where(item => item.Id == Dx10zMachineId)
+            .Where(item => item.Id == machineId)
             .ToListAsync();
-        Assert.HasCount(1, machines, "Expected the exact server-side DX10z Machine.Id.");
+        Assert.HasCount(1, machines, "Expected the configured server-side Machine.Id.");
         return machines[0];
     }
 

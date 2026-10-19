@@ -58,6 +58,7 @@ public class ConversationHistoryRepository
             Array.Empty<TechnicalVisualReference>(),
             Array.Empty<TechnicalSourceReference>(),
             Array.Empty<string>(),
+            Array.Empty<AnnotationInfo>(),
             cancellationToken);
         return result?.MessageId;
     }
@@ -77,6 +78,7 @@ public class ConversationHistoryRepository
             visuals,
             Array.Empty<TechnicalSourceReference>(),
             Array.Empty<string>(),
+            Array.Empty<AnnotationInfo>(),
             cancellationToken);
 
     public async Task<ConversationMessagePersistenceResult?> AddMessageAsync(
@@ -95,6 +97,7 @@ public class ConversationHistoryRepository
             visuals,
             sources,
             Array.Empty<string>(),
+            Array.Empty<AnnotationInfo>(),
             cancellationToken);
 
     public async Task<ConversationMessagePersistenceResult?> AddMessageAsync(
@@ -105,6 +108,27 @@ public class ConversationHistoryRepository
         IReadOnlyList<TechnicalVisualReference> visuals,
         IReadOnlyList<TechnicalSourceReference> sources,
         IReadOnlyList<string> suggestions,
+        CancellationToken cancellationToken) =>
+        await AddMessageAsync(
+            conversationPublicId,
+            userObjectId,
+            role,
+            content,
+            visuals,
+            sources,
+            suggestions,
+            Array.Empty<AnnotationInfo>(),
+            cancellationToken);
+
+    public async Task<ConversationMessagePersistenceResult?> AddMessageAsync(
+        string conversationPublicId,
+        string userObjectId,
+        string role,
+        string content,
+        IReadOnlyList<TechnicalVisualReference> visuals,
+        IReadOnlyList<TechnicalSourceReference> sources,
+        IReadOnlyList<string> suggestions,
+        IReadOnlyList<AnnotationInfo> webCitations,
         CancellationToken cancellationToken)
     {
         // Ownership check and lookup in the same query â€” never write to another user's conversation.
@@ -158,11 +182,31 @@ public class ConversationHistoryRepository
             {
                 DocumentId = source.DocumentId,
                 PdfPage = source.PdfPage,
-                DisplayPage = source.DisplayPage,
+                DisplayPage = TechnicalSourcePageStorage.Store(source),
                 Label = source.Label,
                 StartIndex = source.StartIndex,
                 EndIndex = source.EndIndex,
                 DisplayOrder = message.Sources.Count
+            });
+        }
+
+        var citationUrls = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var citation in webCitations)
+        {
+            if (!string.Equals(citation.Type, "uri_citation", StringComparison.Ordinal) ||
+                !TryWebUri(citation.Url, out var citationUri) ||
+                citationUri.AbsoluteUri.Length > 2048 ||
+                !citationUrls.Add(citationUri.AbsoluteUri))
+            {
+                continue;
+            }
+
+            message.WebCitations.Add(new ConversationMessageWebCitation
+            {
+                Url = citationUri.AbsoluteUri,
+                Label = Truncate(string.IsNullOrWhiteSpace(citation.Label) ? citationUri.AbsoluteUri : citation.Label, 512),
+                Quote = string.IsNullOrWhiteSpace(citation.Quote) ? null : Truncate(citation.Quote, 2000),
+                DisplayOrder = message.WebCitations.Count
             });
         }
 
@@ -179,6 +223,10 @@ public class ConversationHistoryRepository
             message.Sources
                 .OrderBy(source => source.DisplayOrder)
                 .Select(ToSourceInfo)
+                .ToList(),
+            message.WebCitations
+                .OrderBy(citation => citation.DisplayOrder)
+                .Select(ToWebCitationInfo)
                 .ToList(),
             suggestions.ToArray());
     }
@@ -374,6 +422,8 @@ public class ConversationHistoryRepository
             .ThenInclude(m => m.Visuals.OrderBy(v => v.DisplayOrder))
             .Include(c => c.Messages.OrderBy(m => m.CreatedAtUtc))
             .ThenInclude(m => m.Sources.OrderBy(source => source.DisplayOrder))
+            .Include(c => c.Messages.OrderBy(m => m.CreatedAtUtc))
+            .ThenInclude(m => m.WebCitations.OrderBy(citation => citation.DisplayOrder))
             .FirstOrDefaultAsync(
                 c => c.ConversationPublicId == conversationPublicId && c.UserObjectId == userObjectId,
                 cancellationToken);
@@ -397,6 +447,10 @@ public class ConversationHistoryRepository
                 Sources = m.Sources
                     .OrderBy(source => source.DisplayOrder)
                     .Select(ToSourceInfo)
+                    .ToList(),
+                WebCitations = m.WebCitations
+                    .OrderBy(citation => citation.DisplayOrder)
+                    .Select(ToWebCitationInfo)
                     .ToList()
             })
             .ToList();
@@ -435,12 +489,29 @@ public class ConversationHistoryRepository
     {
         Id = source.Id,
         PdfPage = source.PdfPage,
-        DisplayPage = source.DisplayPage,
+        DisplayPage = TechnicalSourcePageStorage.PublicDisplayPage(source.DisplayPage),
         Label = source.Label,
         StartIndex = source.StartIndex,
         EndIndex = source.EndIndex,
         DisplayOrder = source.DisplayOrder
     };
+
+    private static ConversationMessageWebCitationInfo ToWebCitationInfo(
+        ConversationMessageWebCitation citation) => new()
+    {
+        Type = "uri_citation",
+        Label = citation.Label,
+        Url = citation.Url,
+        Quote = citation.Quote,
+        DisplayOrder = citation.DisplayOrder
+    };
+
+    private static bool TryWebUri(string? value, out Uri uri) =>
+        Uri.TryCreate(value, UriKind.Absolute, out uri!) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength];
 
     /// <summary>
     /// Returns the most recent non-summarized messages for a conversation, scoped to its owning user

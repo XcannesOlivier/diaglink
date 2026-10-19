@@ -20,6 +20,7 @@ public class DiagLinkDbContext : DbContext
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
     public DbSet<ConversationMessageVisual> ConversationMessageVisuals => Set<ConversationMessageVisual>();
     public DbSet<ConversationMessageSourceReference> ConversationMessageSourceReferences => Set<ConversationMessageSourceReference>();
+    public DbSet<ConversationMessageWebCitation> ConversationMessageWebCitations => Set<ConversationMessageWebCitation>();
     public DbSet<User> Users => Set<User>();
     public DbSet<LoginCode> LoginCodes => Set<LoginCode>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
@@ -393,6 +394,11 @@ public class DiagLinkDbContext : DbContext
                 .WithOne(source => source.ConversationMessage!)
                 .HasForeignKey(source => source.ConversationMessageId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(m => m.WebCitations)
+                .WithOne(citation => citation.ConversationMessage!)
+                .HasForeignKey(citation => citation.ConversationMessageId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ConversationMessageVisual>(entity =>
@@ -441,6 +447,28 @@ public class DiagLinkDbContext : DbContext
 
             entity.HasIndex(source => source.ConversationMessageId);
             entity.HasIndex(source => new { source.ConversationMessageId, source.DisplayOrder }).IsUnique();
+        });
+
+        modelBuilder.Entity<ConversationMessageWebCitation>(entity =>
+        {
+            entity.ToTable("ConversationMessageWebCitations", Schema, table =>
+            {
+                table.HasCheckConstraint("CK_ConversationMessageWebCitations_DisplayOrder", "[DisplayOrder] >= 0");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint(
+                        "CK_ConversationMessageWebCitations_RequiredStrings",
+                        "LEN([Url]) > 0 AND LEN([Label]) > 0");
+                }
+            });
+            entity.HasKey(citation => citation.Id);
+            entity.Property(citation => citation.Url).IsRequired().HasMaxLength(2048).IsUnicode(false);
+            entity.Property(citation => citation.Label).IsRequired().HasMaxLength(512);
+            entity.Property(citation => citation.Quote).HasMaxLength(2000);
+
+            entity.HasIndex(citation => citation.ConversationMessageId);
+            entity.HasIndex(citation => new { citation.ConversationMessageId, citation.DisplayOrder }).IsUnique();
+            entity.HasIndex(citation => new { citation.ConversationMessageId, citation.Url }).IsUnique();
         });
 
         modelBuilder.Entity<LoginCode>(entity =>

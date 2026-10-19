@@ -1,5 +1,7 @@
 using System.Net.Http.Headers;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -14,7 +16,7 @@ namespace WebApp.Api.Services;
 /// Claude Messages orchestration used by the server-selected Claude Direct runtime.
 /// Provider text deltas are streamed while every response is also reconstructed for tool round-trips.
 /// </summary>
-public sealed class ClaudeDirectChatService : IClaudeDirectChatService
+public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
 {
     public const string HttpClientName = "ClaudeDirectChat";
     private const string FoundryScope = "https://ai.azure.com/.default";
@@ -36,6 +38,9 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
     ];
     private static readonly Regex DocumentIdMarkerPattern = new(
         @"\bDocument\s+ID\s*:\s*(?<id>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?=\s|$)",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex PhysicalPageMarkerPattern = new(
+        @"(?im)^\s*(?:PDF\s+)?Page(?:\s+number)?\s*:\s*(?<page>[0-9]{1,5})\s*$",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private readonly IHttpClientFactory _httpClientFactory;
@@ -64,7 +69,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
     public Task<ClaudeDirectChatResult> CompleteAsync(
         ClaudeDirectChatRequest request,
         CancellationToken cancellationToken = default) =>
-        CompleteCoreAsync(request, null, aggregateAllStreamedText: false, cancellationToken);
+        CompleteCoreAsync(request, null, cancellationToken);
 
     public async IAsyncEnumerable<ClaudeDirectChatStreamUpdate> StreamAsync(
         ClaudeDirectChatRequest request,
@@ -91,7 +96,6 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                 var result = await CompleteCoreAsync(
                     request,
                     (text, ct) => channel.Writer.WriteAsync(ClaudeDirectChatStreamUpdate.Text(text), ct),
-                    aggregateAllStreamedText: true,
                     cancellationToken);
                 await channel.Writer.WriteAsync(ClaudeDirectChatStreamUpdate.Completed(result), cancellationToken);
                 channel.Writer.TryComplete();
@@ -106,10 +110,12 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
     private async Task<ClaudeDirectChatResult> CompleteCoreAsync(
         ClaudeDirectChatRequest request,
         Func<string, CancellationToken, ValueTask>? onVisibleText,
-        bool aggregateAllStreamedText,
         CancellationToken cancellationToken)
     {
-        var usageTraceId = Guid.NewGuid().ToString("N")[..8];
+        var turnStopwatch = Stopwatch.StartNew();
+        var usageTraceId = Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+        var attemptedMessageCalls = 0;
+        var pauseTurnCount = 0;
         var toolUses = new List<ClaudeDirectToolUse>();
         var mcpCalls = new List<ClaudeDirectMcpCall>();
         var visuals = new List<TechnicalVisualReference>();
@@ -118,25 +124,32 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         var calls = new List<ClaudeDirectCallUsage>();
         var allowedDocumentIds = new HashSet<string>(StringComparer.Ordinal);
         var fileSearchDocumentIds = new HashSet<string>(StringComparer.Ordinal);
+        var fileSearchPageEvidence = new HashSet<TechnicalDocumentPageEvidence>();
         var webCitations = new Dictionary<string, ClaudeDirectWebCitation>(StringComparer.Ordinal);
+        var webSearchCandidates = new Dictionary<string, ClaudeDirectWebSearchCandidate>(StringComparer.Ordinal);
         var errors = ValidateRequest(request);
         if (errors.Count > 0)
         {
-            return BuildResult(null, toolUses, mcpCalls, visuals, sources, webCitations.Values, documentResolutions, calls, null, null, errors);
+            LogPerformance("Turn", turnStopwatch.ElapsedMilliseconds, "invalid_request", usageTraceId);
+            return BuildResult(null, toolUses, mcpCalls, visuals, sources, webCitations.Values, webSearchCandidates.Values, documentResolutions, calls, null, null, errors);
         }
 
         AccessToken accessToken;
+        var authenticationStopwatch = Stopwatch.StartNew();
         try
         {
             accessToken = await _credential.GetTokenAsync(
                 new TokenRequestContext([FoundryScope]),
                 cancellationToken);
+            LogPerformance("FoundryToken", authenticationStopwatch.ElapsedMilliseconds, "success", usageTraceId);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            LogPerformance("FoundryToken", authenticationStopwatch.ElapsedMilliseconds, "failure", usageTraceId);
             _logger.LogWarning("Claude direct authentication failed. ErrorType={ErrorType}", exception.GetType().Name);
             errors.Add(new("authentication_failed", "Unable to acquire the Foundry access token."));
-            return BuildResult(null, toolUses, mcpCalls, visuals, sources, webCitations.Values, documentResolutions, calls, null, null, errors);
+            LogPerformance("Turn", turnStopwatch.ElapsedMilliseconds, "authentication_failed", usageTraceId);
+            return BuildResult(null, toolUses, mcpCalls, visuals, sources, webCitations.Values, webSearchCandidates.Values, documentResolutions, calls, null, null, errors);
         }
 
         var history = request.Messages
@@ -151,11 +164,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         string? finalText = null;
         string? finalModel = null;
         string? finalStopReason = null;
-        // This is currently the absolute per-request Web Search budget. A request profile may select
-        // one of the configured limits in the future without changing the cumulative enforcement below.
-        var webSearchBudget = Math.Max(
-            _options.WebSearch.DiagnosticMaxUses,
-            _options.WebSearch.PartsMaxUses);
+        var webSearchBudget = SelectWebSearchBudget(request, _options.WebSearch);
         long webSearchUsed = 0;
         var suggestionParser = new DiagLinkSuggestionStreamParser();
         var visibleText = new StringBuilder();
@@ -186,22 +195,43 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
 
         for (var callNumber = 1; callNumber <= _options.MaxMessageCalls; callNumber++)
         {
+            attemptedMessageCalls = callNumber;
+            // Provider text must remain provisional until this Messages call is known to be
+            // terminal. Claude may emit a user-facing preamble before tool_use or pause_turn;
+            // those blocks belong in the continuation history, not in the visible answer.
+            var callTextDeltas = new List<string>();
             var webSearchRemaining = webSearchBudget - (int)webSearchUsed;
             using var httpRequest = BuildHttpRequest(
                 request,
                 history,
                 accessToken.Token,
                 webSearchRemaining);
+            var requestBytes = httpRequest.Content?.Headers.ContentLength ?? 0;
             HttpResponseMessage httpResponse;
+            var messagesCallStopwatch = Stopwatch.StartNew();
+            long responseHeadersMs;
             try
             {
                 httpResponse = await client.SendAsync(
                     httpRequest,
                     HttpCompletionOption.ResponseHeadersRead,
                     cancellationToken);
+                responseHeadersMs = messagesCallStopwatch.ElapsedMilliseconds;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                LogMessagesPerformance(
+                    usageTraceId,
+                    callNumber,
+                    messagesCallStopwatch.ElapsedMilliseconds,
+                    null,
+                    "request_failed",
+                    null,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0);
                 _logger.LogWarning(
                     "Claude direct Messages request failed. CallNumber={CallNumber}, ErrorType={ErrorType}",
                     callNumber,
@@ -215,6 +245,18 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                 var requestId = ReadRequestId(httpResponse);
                 if (!httpResponse.IsSuccessStatusCode)
                 {
+                    LogMessagesPerformance(
+                        usageTraceId,
+                        callNumber,
+                        messagesCallStopwatch.ElapsedMilliseconds,
+                        responseHeadersMs,
+                        "http_error",
+                        null,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0);
                     _logger.LogWarning(
                         "Claude direct Messages API returned an error. CallNumber={CallNumber}, StatusCode={StatusCode}, RequestId={RequestId}",
                         callNumber,
@@ -228,6 +270,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                 }
 
                 JsonDocument responseDocument;
+                var streamObservations = new List<ClaudeDirectStreamObservation>();
                 var streamedResponse = string.Equals(
                     httpResponse.Content.Headers.ContentType?.MediaType,
                     "text/event-stream",
@@ -238,12 +281,44 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                     responseDocument = streamedResponse
                         ? await ReadStreamingResponseAsync(
                             responseStream,
-                            aggregateAllStreamedText ? AcceptTextDeltaAsync : static _ => ValueTask.CompletedTask,
+                            delta =>
+                            {
+                                callTextDeltas.Add(delta);
+                                return ValueTask.CompletedTask;
+                            },
+                            observation => streamObservations.Add(observation with
+                            {
+                                ObservedAtMs = messagesCallStopwatch.ElapsedMilliseconds
+                            }),
                             cancellationToken)
                         : await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken);
                 }
                 catch (Exception exception) when (exception is JsonException or InvalidDataException)
                 {
+                    LogMessagesPerformance(
+                        usageTraceId,
+                        callNumber,
+                        messagesCallStopwatch.ElapsedMilliseconds,
+                        responseHeadersMs,
+                        "invalid_stream",
+                        null,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0);
+                    // Preserve the established interrupted-stream behavior: partial text is useful
+                    // to the live caller, but it never becomes a successful FinalText or SQL message.
+                    if (onVisibleText is not null)
+                    {
+                        foreach (var delta in callTextDeltas)
+                        {
+                            await AcceptTextDeltaAsync(delta);
+                        }
+
+                        await CompleteVisibleTextAsync();
+                    }
+
                     _logger.LogWarning(
                         "Claude direct Messages stream was invalid. CallNumber={CallNumber}, ErrorType={ErrorType}",
                         callNumber,
@@ -255,6 +330,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                 using (responseDocument)
                 {
                     var root = responseDocument.RootElement;
+                    var messagesCallDurationMs = messagesCallStopwatch.ElapsedMilliseconds;
                     if (!TryReadUsage(root, callNumber, requestId, out var usage, out var usageError))
                     {
                         errors.Add(usageError!);
@@ -286,12 +362,22 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                     }
 
                     var callToolNames = ReadRequestedToolNames(content);
+                    var contentMetrics = CollectContentMetrics(content);
                     callUsage = callUsage with { Tools = callToolNames };
                     calls[^1] = callUsage;
+                    var isPauseTurn = string.Equals(callUsage.StopReason, "pause_turn", StringComparison.Ordinal);
+                    if (isPauseTurn)
+                    {
+                        pauseTurnCount++;
+                    }
                     _logger.LogInformation(
-                        "ClaudeDirectUsage Trace={TraceId} Call={CallNumber} Input={InputTokens} Output={OutputTokens} CacheRead={CacheReadInputTokens} CacheCreate={CacheCreationInputTokens} CacheCreate5m={CacheCreation5mInputTokens} CacheCreate1h={CacheCreation1hInputTokens} WebSearchRequests={WebSearchRequests} Total={TotalTokens} Model={Model} StopReason={StopReason} Tools={Tools}",
+                        "ClaudeDirectUsage Trace={TraceId} Call={CallNumber} DurationMs={DurationMs} ResponseHeadersMs={ResponseHeadersMs} RequestBytes={RequestBytes} ResponseJsonChars={ResponseJsonChars} Input={InputTokens} Output={OutputTokens} CacheRead={CacheReadInputTokens} CacheCreate={CacheCreationInputTokens} CacheCreate5m={CacheCreation5mInputTokens} CacheCreate1h={CacheCreation1hInputTokens} WebSearchRequests={WebSearchRequests} FileSearchUses={FileSearchUses} FileSearchResults={FileSearchResults} FileSearchResultChars={FileSearchResultChars} LocalToolUses={LocalToolUses} Total={TotalTokens} Model={Model} StopReason={StopReason} Tools={Tools}",
                         usageTraceId,
                         callUsage.CallNumber,
+                        messagesCallDurationMs,
+                        responseHeadersMs,
+                        requestBytes,
+                        root.GetRawText().Length,
                         callUsage.InputTokens,
                         callUsage.OutputTokens,
                         callUsage.CacheReadInputTokens,
@@ -299,20 +385,40 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                         callUsage.CacheCreation5mInputTokens,
                         callUsage.CacheCreation1hInputTokens,
                         callUsage.WebSearchRequests,
+                        contentMetrics.FileSearchUses,
+                        contentMetrics.FileSearchResults,
+                        contentMetrics.FileSearchResultChars,
+                        contentMetrics.LocalToolUses,
                         callUsage.InputTokens + callUsage.OutputTokens,
                         callUsage.Model,
                         callUsage.StopReason,
                         callToolNames.Length == 0 ? "none" : string.Join(',', callToolNames));
 
+                    foreach (var observation in streamObservations)
+                    {
+                        _logger.LogInformation(
+                            "ClaudeDirectToolObservation Trace={TraceId} Call={CallNumber} BlockType={BlockType} ToolType={ToolType} ObservedAtMs={ObservedAtMs} TimingKind={TimingKind}",
+                            usageTraceId,
+                            callNumber,
+                            observation.BlockType,
+                            observation.ToolType,
+                            observation.ObservedAtMs,
+                            "stream_event_offset_not_tool_duration");
+                    }
+
                     ExtractAllowedDocumentIds(content, allowedDocumentIds);
-                    ExtractFileSearchDocumentIds(content, fileSearchDocumentIds);
+                    ExtractFileSearchDocumentEvidence(content, fileSearchDocumentIds, fileSearchPageEvidence);
+                    if (_options.FileSearchDiagnostics.Enabled)
+                    {
+                        LogFileSearchDiagnostics(content, usageTraceId, callNumber);
+                    }
                     ObserveBlocks(content, toolUses, mcpCalls);
                     var webSearchObservations = ObserveWebSearchBlocks(content);
-                    var callWebCitations = ExtractWebCitations(content);
-                    foreach (var citation in callWebCitations)
+                    foreach (var candidate in ExtractWebSearchCandidates(content))
                     {
-                        webCitations.TryAdd(citation.Url, citation);
+                        webSearchCandidates.TryAdd(candidate.Url, candidate);
                     }
+                    var callWebCitations = ExtractWebCitations(content);
 
                     if (webSearchObservations.Count > 0)
                     {
@@ -323,7 +429,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                             webSearchObservations.Count(observation => observation.Type == "server_tool_use"),
                             webSearchObservations.Count(observation => observation.Type == "web_search_tool_result"),
                             callWebCitations.Count,
-                            webCitations.Count);
+                            callWebCitations.Count);
                     }
 
                     var localCalls = ReadLocalToolCalls(content).ToArray();
@@ -333,7 +439,9 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                         {
                             errors.Add(new(
                                 "tool_loop_limit",
-                                $"The tool loop reached the configured limit of {_options.MaxMessageCalls} Messages calls.",
+                                webSearchObservations.Count > 0 || webSearchUsed > 0
+                                    ? "La recherche Web a été interrompue avant sa synthèse finale par la limite de continuations configurée."
+                                    : $"The tool loop reached the configured limit of {_options.MaxMessageCalls} Messages calls.",
                                 callNumber));
                             break;
                         }
@@ -346,9 +454,34 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                         continue;
                     }
 
+                    var stopReasonError = ValidateStopReason(
+                        callUsage.StopReason,
+                        localCalls.Length > 0,
+                        callNumber);
+                    if (stopReasonError is not null)
+                    {
+                        errors.Add(stopReasonError);
+                        break;
+                    }
+
                     if (localCalls.Length == 0)
                     {
-                        if (!streamedResponse || !aggregateAllStreamedText)
+                        foreach (var citation in callWebCitations)
+                        {
+                            webCitations.TryAdd(citation.Url, citation);
+                        }
+
+                        if (streamedResponse)
+                        {
+                            // Replay the provider's original delta boundaries only after the call
+                            // is confirmed terminal. This keeps SSE incremental without leaking
+                            // text from tool and pause turns.
+                            foreach (var delta in callTextDeltas)
+                            {
+                                await AcceptTextDeltaAsync(delta);
+                            }
+                        }
+                        else
                         {
                             await AcceptTextDeltaAsync(ReadText(content));
                         }
@@ -362,7 +495,9 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                     {
                         errors.Add(new(
                             "tool_loop_limit",
-                            $"The tool loop reached the configured limit of {_options.MaxMessageCalls} Messages calls.",
+                            webSearchUsed > 0
+                                ? "La recherche Web a été interrompue avant sa synthèse finale par la limite de continuations configurée."
+                                : $"The tool loop reached the configured limit of {_options.MaxMessageCalls} Messages calls.",
                             callNumber));
                         break;
                     }
@@ -384,6 +519,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                             documentResolutions,
                             errors,
                             callNumber,
+                            usageTraceId,
                             cancellationToken));
                     }
 
@@ -399,29 +535,54 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         var inputTokens = calls.Sum(call => call.InputTokens);
         var outputTokens = calls.Sum(call => call.OutputTokens);
         _logger.LogInformation(
-            "ClaudeDirectUsage Trace={TraceId} FINAL Calls={CallCount} Input={InputTokens} Output={OutputTokens} Total={TotalTokens}",
+            "ClaudeDirectUsage Trace={TraceId} FINAL Calls={CallCount} AttemptedCalls={AttemptedCalls} PauseTurns={PauseTurns} DurationMs={DurationMs} Input={InputTokens} Output={OutputTokens} Total={TotalTokens}",
             usageTraceId,
             calls.Count,
+            attemptedMessageCalls,
+            pauseTurnCount,
+            turnStopwatch.ElapsedMilliseconds,
             inputTokens,
             outputTokens,
             inputTokens + outputTokens);
 
+        var sourceResolutionStopwatch = Stopwatch.StartNew();
         try
         {
             sources.AddRange(await _sourceReferenceResolver.ResolveAsync(
                 finalText,
                 request.Machine.BlobPrefix,
                 fileSearchDocumentIds,
+                fileSearchPageEvidence,
+                visuals,
                 cancellationToken));
+            LogPerformance(
+                "TechnicalSourceResolution",
+                sourceResolutionStopwatch.ElapsedMilliseconds,
+                "success",
+                usageTraceId,
+                sources.Count,
+                fileSearchDocumentIds.Count);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            LogPerformance(
+                "TechnicalSourceResolution",
+                sourceResolutionStopwatch.ElapsedMilliseconds,
+                "failure",
+                usageTraceId,
+                0,
+                fileSearchDocumentIds.Count);
             _logger.LogWarning(
                 exception,
                 "Technical source references could not be resolved. Trace={TraceId}",
                 usageTraceId);
         }
 
+        Activity.Current?.SetTag("diaglink.claude.message_calls", calls.Count);
+        Activity.Current?.SetTag("diaglink.claude.pause_turns", pauseTurnCount);
+        Activity.Current?.SetTag("diaglink.claude.duration_ms", turnStopwatch.ElapsedMilliseconds);
+
+        LogPerformance("Turn", turnStopwatch.ElapsedMilliseconds, errors.Count == 0 ? "success" : "failure", usageTraceId);
         return BuildResult(
             finalText,
             toolUses,
@@ -429,6 +590,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
             visuals,
             sources,
             webCitations.Values,
+            webSearchCandidates.Values,
             documentResolutions,
             calls,
             finalModel,
@@ -438,6 +600,95 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
             Suggestions = suggestionParser.Suggestions.ToArray()
         };
     }
+
+    private void LogPerformance(
+        string stage,
+        long durationMs,
+        string outcome,
+        string traceId,
+        int itemCount = 0,
+        int documentCount = 0) =>
+        _logger.LogInformation(
+            "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} DurationMs={DurationMs} Outcome={Outcome} ItemCount={ItemCount} DocumentCount={DocumentCount}",
+            traceId,
+            "ClaudeDirectChatService",
+            stage,
+            durationMs,
+            outcome,
+            itemCount,
+            documentCount);
+
+    private void LogMessagesPerformance(
+        string traceId,
+        int callNumber,
+        long durationMs,
+        long? responseHeadersMs,
+        string outcome,
+        string? stopReason,
+        int fileSearchUses,
+        int mcpResults,
+        int mcpResultChars,
+        int localToolUses,
+        int responseJsonChars) =>
+        _logger.LogInformation(
+            "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} ResponseHeadersMs={ResponseHeadersMs} Outcome={Outcome} StopReason={StopReason} FileSearchUses={FileSearchUses} McpResults={McpResults} McpResultChars={McpResultChars} LocalToolUses={LocalToolUses} ResponseJsonChars={ResponseJsonChars}",
+            traceId,
+            "ClaudeDirectChatService",
+            "AnthropicMessages",
+            callNumber,
+            durationMs,
+            responseHeadersMs,
+            outcome,
+            stopReason ?? "unavailable",
+            fileSearchUses,
+            mcpResults,
+            mcpResultChars,
+            localToolUses,
+            responseJsonChars);
+
+    private static ClaudeDirectContentMetrics CollectContentMetrics(JsonElement content)
+    {
+        var fileSearchToolUseIds = content.EnumerateArray()
+            .Where(block =>
+                GetString(block, "type") == "mcp_tool_use" &&
+                string.Equals(GetString(block, "name"), "file_search", StringComparison.OrdinalIgnoreCase))
+            .Select(block => GetString(block, "id"))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.Ordinal);
+        var fileSearchUses = 0;
+        var fileSearchResults = 0;
+        var fileSearchResultChars = 0;
+        var localToolUses = 0;
+        foreach (var block in content.EnumerateArray())
+        {
+            var blockType = GetString(block, "type");
+            if (blockType == "mcp_tool_use" &&
+                string.Equals(GetString(block, "name"), "file_search", StringComparison.OrdinalIgnoreCase))
+            {
+                fileSearchUses++;
+            }
+            else if (blockType == "mcp_tool_result" &&
+                     fileSearchToolUseIds.Contains(GetString(block, "tool_use_id")))
+            {
+                fileSearchResults++;
+                fileSearchResultChars += block.GetRawText().Length;
+            }
+            else if (blockType == "tool_use")
+            {
+                localToolUses++;
+            }
+        }
+
+        return new(fileSearchUses, fileSearchResults, fileSearchResultChars, localToolUses);
+    }
+
+    private static string SafeToolType(string? toolName) => toolName switch
+    {
+        "file_search" => "file_search",
+        "get_page_image" => "get_page_image",
+        "web_search" => "web_search",
+        _ => "other"
+    };
 
     private HttpRequestMessage BuildHttpRequest(
         ClaudeDirectChatRequest request,
@@ -511,7 +762,13 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
             {
                 ["type"] = "web_search_20250305",
                 ["name"] = "web_search",
-                ["max_uses"] = webSearchRemaining
+                ["max_uses"] = webSearchRemaining,
+                ["user_location"] = new Dictionary<string, object?>
+                {
+                    ["type"] = "approximate",
+                    ["country"] = "FR",
+                    ["timezone"] = "Europe/Paris"
+                }
             });
         }
 
@@ -604,6 +861,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         List<ClaudeDirectDocumentResolution> documentResolutions,
         List<ClaudeDirectError> errors,
         int callNumber,
+        string traceId,
         CancellationToken cancellationToken)
     {
         if (!string.Equals(call.Name, "get_page_image", StringComparison.Ordinal))
@@ -623,25 +881,47 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                 call.Id,
                 AddToolError(errors, "invalid_image_request", validationMessage!, callNumber, call.Id));
         }
+        var validatedImageRequest = imageRequest!;
 
         ImageResolution resolution;
+        var imageResolutionStopwatch = Stopwatch.StartNew();
         try
         {
             resolution = await ResolveImageAsync(
                 machine.BlobPrefix,
-                imageRequest!,
+                validatedImageRequest,
                 allowedDocumentIds,
+                traceId,
                 cancellationToken);
+            _logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} ResolutionMode={ResolutionMode}",
+                traceId,
+                "ClaudeDirectChatService",
+                "ImageResolution",
+                callNumber,
+                imageResolutionStopwatch.ElapsedMilliseconds,
+                resolution.Stream is null ? "not_found" : "success",
+                validatedImageRequest.AssetType,
+                resolution.Mode);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            _logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType}",
+                traceId,
+                "ClaudeDirectChatService",
+                "ImageResolution",
+                callNumber,
+                imageResolutionStopwatch.ElapsedMilliseconds,
+                "failure",
+                validatedImageRequest.AssetType);
             _logger.LogWarning(
                 "Claude direct image read failed. CallNumber={CallNumber}, ToolUseId={ToolUseId}, ErrorType={ErrorType}",
                 callNumber,
                 call.Id,
                 exception.GetType().Name);
             documentResolutions.Add(new(
-                imageRequest!.RequestedDocumentId,
+                validatedImageRequest.RequestedDocumentId,
                 null,
                 ClaudeDirectDocumentResolutionMode.NotFound));
             return ErrorToolResult(
@@ -650,7 +930,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         }
 
         documentResolutions.Add(new(
-            imageRequest!.RequestedDocumentId,
+            validatedImageRequest.RequestedDocumentId,
             resolution.Visual?.DocumentId,
             resolution.Mode));
 
@@ -668,15 +948,37 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         }
 
         byte[] bytes;
+        var imageDownloadStopwatch = Stopwatch.StartNew();
         try
         {
             await using (resolution.Stream)
             {
                 bytes = await ReadBoundedAsync(resolution.Stream, _options.MaxImageBytes, cancellationToken);
             }
+
+            _logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} Bytes={Bytes}",
+                traceId,
+                "ClaudeDirectChatService",
+                "ImageBlobRead",
+                callNumber,
+                imageDownloadStopwatch.ElapsedMilliseconds,
+                "success",
+                validatedImageRequest.AssetType,
+                bytes.Length);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            _logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} Bytes={Bytes}",
+                traceId,
+                "ClaudeDirectChatService",
+                "ImageBlobRead",
+                callNumber,
+                imageDownloadStopwatch.ElapsedMilliseconds,
+                "failure",
+                validatedImageRequest.AssetType,
+                0);
             _logger.LogWarning(
                 "Claude direct image payload was rejected. CallNumber={CallNumber}, ToolUseId={ToolUseId}, ErrorType={ErrorType}",
                 callNumber,
@@ -698,6 +1000,18 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         var visual = resolution.Visual;
         visuals.Add(visual);
         MarkRecoveredImageErrors(errors);
+        var imageEncodingStopwatch = Stopwatch.StartNew();
+        var base64Data = Convert.ToBase64String(bytes);
+        _logger.LogInformation(
+            "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} InputBytes={InputBytes} OutputChars={OutputChars}",
+            traceId,
+            "ClaudeDirectChatService",
+            "ImageBase64Encoding",
+            callNumber,
+            imageEncodingStopwatch.ElapsedMilliseconds,
+            "success",
+            bytes.Length,
+            base64Data.Length);
         return new Dictionary<string, object?>
         {
             ["type"] = "tool_result",
@@ -716,7 +1030,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                     {
                         ["type"] = "base64",
                         ["media_type"] = "image/png",
-                        ["data"] = Convert.ToBase64String(bytes)
+                        ["data"] = base64Data
                     }
                 }
             }
@@ -727,13 +1041,14 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         string blobPrefix,
         ImageRequest request,
         IReadOnlySet<string> allowedDocumentIds,
+        string traceId,
         CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(request.RequestedDocumentId) &&
             allowedDocumentIds.Contains(request.RequestedDocumentId))
         {
             var exactVisual = BuildVisual(request.RequestedDocumentId, request);
-            var exactStream = await OpenVisualAsync(blobPrefix, exactVisual, cancellationToken);
+            var exactStream = await OpenVisualAsync(blobPrefix, exactVisual, traceId, cancellationToken);
             if (exactStream is not null)
             {
                 return new(exactVisual, exactStream, ClaudeDirectDocumentResolutionMode.Exact);
@@ -749,7 +1064,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         {
             var documentId = allowedDocumentIds.Single();
             var visual = BuildVisual(documentId, request);
-            var stream = await OpenVisualAsync(blobPrefix, visual, cancellationToken);
+            var stream = await OpenVisualAsync(blobPrefix, visual, traceId, cancellationToken);
             return stream is null
                 ? new(null, null, ClaudeDirectDocumentResolutionMode.NotFound)
                 : new(visual, stream, ClaudeDirectDocumentResolutionMode.UniqueMcpDocument);
@@ -759,7 +1074,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         foreach (var documentId in allowedDocumentIds.Order(StringComparer.Ordinal))
         {
             var visual = BuildVisual(documentId, request);
-            var stream = await OpenVisualAsync(blobPrefix, visual, cancellationToken);
+            var stream = await OpenVisualAsync(blobPrefix, visual, traceId, cancellationToken);
             if (stream is not null)
             {
                 matches.Add((visual, stream));
@@ -790,6 +1105,7 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
     private async Task<Stream?> OpenVisualAsync(
         string blobPrefix,
         TechnicalVisualReference visual,
+        string traceId,
         CancellationToken cancellationToken)
     {
         if (!TechnicalVisualAccessService.TryBuildBlobName(blobPrefix, visual.AssetKey, out var blobName))
@@ -797,7 +1113,17 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
             return null;
         }
 
-        return await _blobReader.OpenReadAsync(blobName, cancellationToken);
+        var stopwatch = Stopwatch.StartNew();
+        var stream = await _blobReader.OpenReadAsync(blobName, cancellationToken);
+        _logger.LogInformation(
+            "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType}",
+            traceId,
+            "ClaudeDirectChatService",
+            "ImageBlobOpen",
+            stopwatch.ElapsedMilliseconds,
+            stream is null ? "not_found" : "success",
+            visual.AssetType);
+        return stream;
     }
 
     private List<ClaudeDirectError> ValidateRequest(ClaudeDirectChatRequest? request)
@@ -952,9 +1278,10 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         }
     }
 
-    private static void ExtractFileSearchDocumentIds(
+    internal static void ExtractFileSearchDocumentEvidence(
         JsonElement content,
-        ISet<string> documentIds)
+        ISet<string> documentIds,
+        ISet<TechnicalDocumentPageEvidence> pageEvidence)
     {
         var fileSearchToolUseIds = content.EnumerateArray()
             .Where(block =>
@@ -973,9 +1300,192 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
                 continue;
             }
 
-            ExtractDocumentIds(block, documentIds);
+            VisitStrings(block, text =>
+            {
+                var ids = DocumentIdMarkerPattern.Matches(text)
+                    .Select(match => match.Groups["id"].Value)
+                    .Where(id => DocumentIdPattern.IsMatch(id))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                foreach (var documentId in ids)
+                {
+                    documentIds.Add(documentId);
+                }
+
+                // A page is trusted only when this individual result string names one document.
+                // Aggregated text naming several documents retains authorization but no page pairing.
+                if (ids.Length != 1)
+                {
+                    return;
+                }
+
+                foreach (Match pageMatch in PhysicalPageMarkerPattern.Matches(text))
+                {
+                    if (int.TryParse(pageMatch.Groups["page"].Value, out var page) && page > 0)
+                    {
+                        pageEvidence.Add(new(ids[0], page, text));
+                    }
+                }
+
+            });
         }
     }
+
+    private void LogFileSearchDiagnostics(JsonElement content, string traceId, int callNumber)
+    {
+        var diagnostics = CollectFileSearchDiagnostics(content);
+        _logger.LogInformation(
+            "ClaudeDirectFileSearchDiagnostics Trace={TraceId} Call={CallNumber} Results={ResultCount} DocumentIds={DocumentIdCount} PageMarkers={PageMarkerCount} PhysicalPages={PhysicalPages} ManufacturerIds={ManufacturerIds} Pairs={Pairs}",
+            traceId,
+            callNumber,
+            diagnostics.Count,
+            diagnostics.SelectMany(item => item.DocumentIds).Distinct(StringComparer.Ordinal).Count(),
+            diagnostics.Sum(item => item.PageMarkerCount),
+            FormatValues(diagnostics.SelectMany(item => item.PhysicalPages)),
+            FormatValues(diagnostics.SelectMany(item => item.ManufacturerIds).Distinct(StringComparer.Ordinal)),
+            FormatPairs(diagnostics.SelectMany(item => item.Pairs)));
+
+        foreach (var diagnostic in diagnostics)
+        {
+            _logger.LogInformation(
+                "ClaudeDirectFileSearchDiagnosticResult Trace={TraceId} Call={CallNumber} Result={ResultNumber} IsError={IsError} DocumentKeys={DocumentKeys} PageMarkers={PageMarkerCount} PhysicalPages={PhysicalPages} ManufacturerIds={ManufacturerIds} Pairs={Pairs} Reason={Reason}",
+                traceId,
+                callNumber,
+                diagnostic.ResultNumber,
+                diagnostic.IsError,
+                FormatDocumentKeys(diagnostic.DocumentIds),
+                diagnostic.PageMarkerCount,
+                FormatValues(diagnostic.PhysicalPages),
+                FormatValues(diagnostic.ManufacturerIds),
+                FormatPairs(diagnostic.Pairs),
+                diagnostic.Reason);
+        }
+    }
+
+    internal static IReadOnlyList<FileSearchDiagnosticResult> CollectFileSearchDiagnostics(JsonElement content)
+    {
+        var fileSearchToolUseIds = content.EnumerateArray()
+            .Where(block =>
+                GetString(block, "type") == "mcp_tool_use" &&
+                string.Equals(GetString(block, "name"), "file_search", StringComparison.OrdinalIgnoreCase))
+            .Select(block => GetString(block, "id"))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var results = new List<FileSearchDiagnosticResult>();
+        var resultNumber = 0;
+        foreach (var block in content.EnumerateArray())
+        {
+            if (GetString(block, "type") != "mcp_tool_result" ||
+                !fileSearchToolUseIds.Contains(GetString(block, "tool_use_id")))
+            {
+                continue;
+            }
+
+            resultNumber++;
+            var isError = GetBoolean(block, "is_error") == true;
+            var documentIds = new HashSet<string>(StringComparer.Ordinal);
+            var physicalPages = new HashSet<int>();
+            var manufacturerIds = new HashSet<string>(StringComparer.Ordinal);
+            var pageMarkerCount = 0;
+            var pairs = new HashSet<FileSearchDiagnosticPair>();
+            var stringCount = 0;
+
+            if (!isError)
+            {
+                VisitStrings(block, text =>
+                {
+                    stringCount++;
+                    var ids = DocumentIdMarkerPattern.Matches(text)
+                        .Select(match => match.Groups["id"].Value)
+                        .Where(id => DocumentIdPattern.IsMatch(id))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray();
+                    foreach (var documentId in ids)
+                    {
+                        documentIds.Add(documentId);
+                    }
+
+                    foreach (Match match in ManufacturerIdPattern().Matches(text))
+                    {
+                        manufacturerIds.Add(match.Value.ToUpperInvariant());
+                    }
+
+                    var pages = PhysicalPageMarkerPattern.Matches(text)
+                        .Select(match => int.TryParse(match.Groups["page"].Value, out var page) && page > 0
+                            ? page
+                            : 0)
+                        .Where(page => page > 0)
+                        .ToArray();
+                    pageMarkerCount += pages.Length;
+                    foreach (var page in pages)
+                    {
+                        physicalPages.Add(page);
+                    }
+
+                    if (ids.Length == 1)
+                    {
+                        foreach (var page in pages)
+                        {
+                            pairs.Add(new(ids[0], page));
+                        }
+                    }
+                });
+            }
+
+            var reason = pairs.Count > 0
+                ? "none"
+                : isError
+                    ? "error_result"
+                    : stringCount == 0
+                        ? "no_string_content"
+                        : documentIds.Count == 0
+                            ? "no_document_id"
+                            : pageMarkerCount == 0
+                                ? "no_recognized_page_marker"
+                                : documentIds.Count > 1
+                                    ? "multiple_document_ids_in_result"
+                                    : "no_document_page_pair";
+
+            results.Add(new(
+                resultNumber,
+                isError,
+                documentIds.ToArray(),
+                pageMarkerCount,
+                physicalPages.Order().ToArray(),
+                manufacturerIds.Order(StringComparer.Ordinal).ToArray(),
+                pairs.ToArray(),
+                reason));
+        }
+
+        return results;
+    }
+
+    private static string FormatValues(IEnumerable<string> values) =>
+        string.Join(',', values.Order(StringComparer.Ordinal).Select(value => value));
+
+    private static string FormatValues(IEnumerable<int> values) =>
+        string.Join(',', values.Order().Select(value => value));
+
+    private static string FormatDocumentKeys(IEnumerable<string> values) =>
+        string.Join(',', values.Order(StringComparer.Ordinal).Select(HashDocumentId));
+
+    private static string FormatPairs(IEnumerable<FileSearchDiagnosticPair> pairs) =>
+        string.Join(',', pairs
+            .OrderBy(pair => pair.DocumentId, StringComparer.Ordinal)
+            .ThenBy(pair => pair.PdfPage)
+            .Select(pair => $"{HashDocumentId(pair.DocumentId)}:{pair.PdfPage}"));
+
+    private static string HashDocumentId(string documentId) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(documentId)))[..16];
+
+    [GeneratedRegex(@"\b(?:SP000913|SP001024)\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex ManufacturerIdPattern();
+
+    [GeneratedRegex(
+        @"(?:\b(?:fournisseur|vendeur|prix|tarif|devis|disponibilit\w*|stock|acheter|achat|commander|commande|marketplace|supplier|vendor|price|quote|availability|purchase|buy)\b|lien\s+d['’]?achat|pi[eè]ce\s+d[ée]tach[ée]e|(?:recherch\w*|trouv\w*)[^\r\n]{0,80}\b(?:pi[eè]ce|r[ée]f[ée]rence|relais|filtre|roulement|capteur|moteur)\b)",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex PartsSearchIntentPattern();
 
     private static void ExtractDocumentIds(JsonElement element, ISet<string> documentIds) =>
         VisitStrings(element, text =>
@@ -1077,6 +1587,55 @@ public sealed class ClaudeDirectChatService : IClaudeDirectChatService
         }
 
         return observations;
+    }
+
+    internal static IReadOnlyList<ClaudeDirectWebSearchCandidate> ExtractWebSearchCandidates(JsonElement content)
+    {
+        var candidates = new List<ClaudeDirectWebSearchCandidate>();
+        var observedUrls = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var block in content.EnumerateArray())
+        {
+            if (GetString(block, "type") != "web_search_tool_result" ||
+                !block.TryGetProperty("content", out var results) ||
+                results.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var result in results.EnumerateArray())
+            {
+                if (GetString(result, "type") != "web_search_result" ||
+                    !TryWebUri(GetString(result, "url"), out var uri) ||
+                    !observedUrls.Add(uri.AbsoluteUri))
+                {
+                    continue;
+                }
+
+                candidates.Add(new(
+                    uri.AbsoluteUri,
+                    EmptyToNull(GetString(result, "title")),
+                    EmptyToNull(GetString(result, "page_age"))));
+            }
+        }
+
+        return candidates;
+    }
+
+    internal static int SelectWebSearchBudget(
+        ClaudeDirectChatRequest request,
+        ClaudeDirectWebSearchOptions options)
+    {
+        var currentQuestion = request.Messages.LastOrDefault()?.Text ?? string.Empty;
+        const string questionMarker = "[NOUVELLE QUESTION]";
+        var markerIndex = currentQuestion.LastIndexOf(questionMarker, StringComparison.Ordinal);
+        if (markerIndex >= 0)
+        {
+            currentQuestion = currentQuestion[(markerIndex + questionMarker.Length)..];
+        }
+
+        return PartsSearchIntentPattern().IsMatch(currentQuestion)
+            ? options.PartsMaxUses
+            : options.DiagnosticMaxUses;
     }
 
     internal static IReadOnlyList<ClaudeDirectWebCitation> ExtractWebCitations(JsonElement content)
@@ -1286,6 +1845,7 @@ else
         IReadOnlyList<TechnicalVisualReference> visuals,
         IReadOnlyList<TechnicalSourceReference> sources,
         IEnumerable<ClaudeDirectWebCitation> webCitations,
+        IEnumerable<ClaudeDirectWebSearchCandidate> webSearchCandidates,
         IReadOnlyList<ClaudeDirectDocumentResolution> documentResolutions,
         IReadOnlyList<ClaudeDirectCallUsage> calls,
         string? model,
@@ -1319,9 +1879,43 @@ else
             stopReason,
             errors.ToArray())
         {
-            WebCitations = webCitations.ToArray()
+            WebCitations = webCitations.ToArray(),
+            WebSearchCandidates = webSearchCandidates.ToArray()
         };
     }
+
+    private static ClaudeDirectError? ValidateStopReason(
+        string stopReason,
+        bool hasLocalToolCalls,
+        int callNumber) => stopReason switch
+        {
+            "end_turn" or "stop_sequence" when !hasLocalToolCalls => null,
+            "tool_use" when hasLocalToolCalls => null,
+            "refusal" => new(
+                "model_refusal",
+                "Claude a refusé de répondre à cette demande.",
+                callNumber),
+            "max_tokens" => new(
+                "output_truncated",
+                "La réponse de Claude a atteint la limite de sortie avant d'être terminée.",
+                callNumber),
+            "model_context_window_exceeded" => new(
+                "context_window_exceeded",
+                "La conversation dépasse la fenêtre de contexte du modèle.",
+                callNumber),
+            "tool_use" => new(
+                "invalid_tool_stop",
+                "Claude a demandé une continuation d'outil sans fournir d'appel d'outil local.",
+                callNumber),
+            "end_turn" or "stop_sequence" => new(
+                "invalid_tool_stop",
+                "Claude a fourni un appel d'outil local avec un motif d'arrêt terminal.",
+                callNumber),
+            _ => new(
+                "unsupported_stop_reason",
+                $"Claude a retourné un motif d'arrêt non pris en charge : {stopReason}.",
+                callNumber)
+        };
 
     private static object ErrorToolResult(string toolUseId, ClaudeDirectError error) =>
         new Dictionary<string, object?>
@@ -1395,6 +1989,7 @@ else
     private static async Task<JsonDocument> ReadStreamingResponseAsync(
         Stream responseStream,
         Func<string, ValueTask> onTextDelta,
+        Action<ClaudeDirectStreamObservation>? onObservation,
         CancellationToken cancellationToken)
     {
         var accumulator = new AnthropicMessageStreamAccumulator();
@@ -1448,6 +2043,22 @@ else
 
             using var document = JsonDocument.Parse(data.ToString());
             data.Clear();
+            if (GetString(document.RootElement, "type") == "content_block_start" &&
+                document.RootElement.TryGetProperty("content_block", out var contentBlock) &&
+                contentBlock.ValueKind == JsonValueKind.Object)
+            {
+                var blockType = GetString(contentBlock, "type") ?? "unknown";
+                var toolType = blockType is "tool_use" or "mcp_tool_use" or "server_tool_use"
+                    ? SafeToolType(GetString(contentBlock, "name"))
+                    : blockType is "mcp_tool_result" or "web_search_tool_result"
+                        ? blockType
+                        : "none";
+                if (toolType != "none")
+                {
+                    onObservation?.Invoke(new(blockType, toolType, 0));
+                }
+            }
+
             var textDelta = accumulator.Apply(document.RootElement);
             if (!string.IsNullOrEmpty(textDelta))
             {
@@ -1501,6 +2112,29 @@ else
         TechnicalVisualReference? Visual,
         Stream? Stream,
         ClaudeDirectDocumentResolutionMode Mode);
+
+    private sealed record ClaudeDirectStreamObservation(
+        string BlockType,
+        string ToolType,
+        long ObservedAtMs);
+
+    private sealed record ClaudeDirectContentMetrics(
+        int FileSearchUses,
+        int FileSearchResults,
+        int FileSearchResultChars,
+        int LocalToolUses);
 }
+
+internal sealed record FileSearchDiagnosticResult(
+    int ResultNumber,
+    bool IsError,
+    IReadOnlyList<string> DocumentIds,
+    int PageMarkerCount,
+    IReadOnlyList<int> PhysicalPages,
+    IReadOnlyList<string> ManufacturerIds,
+    IReadOnlyList<FileSearchDiagnosticPair> Pairs,
+    string Reason);
+
+internal sealed record FileSearchDiagnosticPair(string DocumentId, int PdfPage);
 
 internal sealed record ClaudeDirectWebSearchObservation(string Type, string ToolUseId);

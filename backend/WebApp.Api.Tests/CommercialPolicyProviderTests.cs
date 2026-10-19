@@ -22,13 +22,21 @@ public sealed class CommercialPolicyProviderTests
 
         Assert.IsNotNull(options);
         Assert.IsTrue(options.Enabled);
-        Assert.IsGreaterThanOrEqualTo(15, options.Instructions.Length);
+        Assert.HasCount(10, options.Instructions);
         Assert.IsTrue(options.Instructions.Any(instruction =>
             instruction.Contains("compatibilité technique", StringComparison.Ordinal)));
         Assert.IsTrue(options.Instructions.Any(instruction =>
             instruction.Contains("France", StringComparison.Ordinal)));
         Assert.IsTrue(options.Instructions.Any(instruction =>
-            instruction.Contains("trois options", StringComparison.Ordinal)));
+            instruction.Contains("trois offres", StringComparison.Ordinal)));
+        Assert.IsTrue(options.Instructions.Any(instruction =>
+            instruction.Contains("Prix : non communiqué", StringComparison.Ordinal)));
+        Assert.IsTrue(options.Instructions.Any(instruction =>
+            instruction.Contains("L’absence de prix", StringComparison.Ordinal)));
+        Assert.IsTrue(options.Instructions.Any(instruction =>
+            instruction.Contains("marketplace", StringComparison.Ordinal)));
+        Assert.IsTrue(options.Instructions.Any(instruction =>
+            instruction.Contains("limite technique", StringComparison.Ordinal)));
     }
 
     [TestMethod]

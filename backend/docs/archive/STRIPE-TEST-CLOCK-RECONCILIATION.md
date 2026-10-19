@@ -1,4 +1,13 @@
-# Subscription payments with Stripe Test Clocks
+# Historical record — Stripe Test Clock reconciliation
+
+> **Archived on 2026-10-11.** This document records a one-off reconciliation designed for test
+> data that has since been removed. It is not a current runbook and its identifiers, dates and
+> expected company state must not be reused. The general validation behavior remains historical
+> implementation context only.
+
+## Original record
+
+### Subscription payments with Stripe Test Clocks
 
 Only the existing test-only Stripe subscription gateway supports this override.
 Both subscription and invoice must be non-live, reference the same nonempty

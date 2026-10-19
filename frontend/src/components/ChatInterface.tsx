@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useDeferredValue, useCallback, type ReactNode } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useDeferredValue, useCallback, type ReactNode } from "react";
 import { AssistantMessage } from "./chat/AssistantMessage";
 import { UserMessage } from "./chat/UserMessage";
 import { StarterMessages } from "./chat/StarterMessages";
@@ -8,10 +8,16 @@ import { Waves } from "./animations/Waves";
 import { ErrorMessage } from "./core/ErrorMessage";
 import { BuiltWithBadge } from "./core/BuiltWithBadge";
 import { DiagLinkLogo } from './core/DiagLinkLogo';
+import { Button } from '@fluentui/react-components';
+import { Wrench20Regular } from '@fluentui/react-icons';
+import type { SelectedMachine } from '../types/machine';
 import type { IChatItem } from "../types/chat";
 import type { AppState } from "../types/appState";
 import type { AppError } from "../types/errors";
 import styles from './ChatInterface.module.css';
+
+const ANCHOR_MARGIN_PX = 16;
+const FOLLOW_THRESHOLD_PX = 48;
 
 interface ChatInterfaceProps {
   messages: IChatItem[];
@@ -43,51 +49,138 @@ interface ChatInterfaceProps {
   starterAccessory?: ReactNode;
   onChangeMachine?: () => void;
   machineId?: string;
+  selectedMachine?: SelectedMachine | null;
+  showMachineSelectionPrompt?: boolean;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
   const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onLoadTechnicalVisual, onLoadTechnicalSource, hasMessages, disabled, agentName, agentDescription, starterAccessory, onChangeMachine } = props;
   const deferredMessages = useDeferredValue(messages);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const messagesWrapperRef = useRef<HTMLDivElement>(null);
+  const anchorSpacerRef = useRef<HTMLDivElement>(null);
+  const anchoredMessageIdRef = useRef<string | null>(null);
+  const autoFollowRef = useRef(true);
+  const renderedMessageIdsRef = useRef<Set<string>>(new Set());
   const [liveRegionMessage, setLiveRegionMessage] = useState<string>('');
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState<File[] | undefined>();
   const dragCounterRef = useRef(0);
-  const observerRef = useRef<IntersectionObserver | null>(null);
   
   const isStreaming = status === 'streaming';
   const isBusy = disabled || status === 'sending';
+  const isAwaitingResponse = status === 'sending' || isStreaming;
+
+  const findAnchoredMessage = useCallback((): HTMLElement | null => {
+    const id = anchoredMessageIdRef.current;
+    const container = messagesContainerRef.current;
+    if (!id || !container) return null;
+    return Array.from(container.querySelectorAll<HTMLElement>('[data-message-id]'))
+      .find(el => el.dataset.messageId === id) ?? null;
+  }, []);
+
+  // Reserves just enough room below the anchored question so it can sit at the top
+  // of the chat area; shrinks to zero as the answer grows, so the scroll height stays stable.
+  const updateAnchorSpacer = useCallback(() => {
+    const container = messagesContainerRef.current;
+    const wrapper = messagesWrapperRef.current;
+    const spacer = anchorSpacerRef.current;
+    if (!container || !wrapper || !spacer) return;
+    const anchor = findAnchoredMessage();
+    let height = 0;
+    if (anchor) {
+      const paddingBottom = parseFloat(getComputedStyle(container).paddingBottom) || 0;
+      const contentBelowAnchor = wrapper.getBoundingClientRect().bottom - anchor.getBoundingClientRect().top;
+      height = Math.max(0, Math.ceil(container.clientHeight - contentBelowAnchor - ANCHOR_MARGIN_PX - paddingBottom));
+    }
+    const next = `${height}px`;
+    if (spacer.style.height !== next) spacer.style.height = next;
+  }, [findAnchoredMessage]);
+
+  const scrollToAnchor = useCallback(() => {
+    const container = messagesContainerRef.current;
+    const anchor = findAnchoredMessage();
+    if (!container || !anchor) return;
+    const offset = anchor.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    container.scrollTop = Math.max(0, container.scrollTop + offset - ANCHOR_MARGIN_PX);
+  }, [findAnchoredMessage]);
+
+  const followContent = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container || !autoFollowRef.current) return;
+    const maxScrollTop = container.scrollHeight - container.clientHeight;
+    if (maxScrollTop - container.scrollTop > 1) container.scrollTop = maxScrollTop;
+  }, []);
 
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    autoFollowRef.current = true;
+    container.scrollTo?.({ top: container.scrollHeight, behavior: 'smooth' });
+  }, []);
+
+  const handleMessagesScroll = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const nearBottom = distanceFromBottom <= FOLLOW_THRESHOLD_PX;
+    autoFollowRef.current = nearBottom;
+    setIsNearBottom(nearBottom);
+    if (nearBottom) setHasNewMessages(false);
   }, []);
 
   const handleDroppedFilesConsumed = useCallback(() => setDroppedFiles(undefined), []);
 
-  // Track whether user is near the bottom via IntersectionObserver
+  // Runs after the deferred messages are committed to the DOM.
+  useLayoutEffect(() => {
+    const previousIds = renderedMessageIdsRef.current;
+    renderedMessageIdsRef.current = new Set(deferredMessages.map(m => m.id));
+    const conversationReplaced = deferredMessages.length === 0
+      || (previousIds.size > 0 && !deferredMessages.some(m => previousIds.has(m.id)));
+    if (conversationReplaced) {
+      anchoredMessageIdRef.current = null;
+      autoFollowRef.current = true;
+    }
+
+    const lastUserMessage = [...deferredMessages].reverse().find(m => m.role === 'user');
+    if (isAwaitingResponse && lastUserMessage && !previousIds.has(lastUserMessage.id)) {
+      anchoredMessageIdRef.current = lastUserMessage.id;
+      autoFollowRef.current = true;
+      updateAnchorSpacer();
+      scrollToAnchor();
+      setIsNearBottom(true);
+      setHasNewMessages(false);
+      return;
+    }
+
+    updateAnchorSpacer();
+    followContent();
+  }, [deferredMessages, isAwaitingResponse, updateAnchorSpacer, scrollToAnchor, followContent]);
+
+  // Content can grow without a message change (search steps, images, markdown) and the
+  // viewport can resize (mobile keyboard, window resize).
   useEffect(() => {
-    const el = messagesEndRef.current;
-    if (!el) return;
-
-    observerRef.current = new IntersectionObserver(
-      ([entry]) => setIsNearBottom(entry.isIntersecting),
-      { threshold: 0.1 }
-    );
-    observerRef.current.observe(el);
-
-    return () => observerRef.current?.disconnect();
-  }, []);
+    const container = messagesContainerRef.current;
+    const wrapper = messagesWrapperRef.current;
+    if (!container || !wrapper || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      updateAnchorSpacer();
+      followContent();
+    });
+    observer.observe(container);
+    observer.observe(wrapper);
+    return () => observer.disconnect();
+  }, [updateAnchorSpacer, followContent]);
 
   useEffect(() => {
-    if (isNearBottom) {
-      scrollToBottom();
+    if (autoFollowRef.current) {
       setHasNewMessages(false);
     } else if (messages.length > 0) {
       setHasNewMessages(true);
     }
-  }, [messages, isNearBottom, scrollToBottom]);
+  }, [messages]);
 
   useEffect(() => {
     if (isStreaming) {
@@ -172,6 +265,20 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
       onDrop={handleDrop}
     >
       <DropZone visible={isDragging} />
+      {props.selectedMachine && (
+        <section className={styles.machineContext} aria-label="Machine active">
+          <div className={styles.machineContextInner}>
+            <Wrench20Regular className={styles.machineContextIcon} aria-hidden="true" />
+            <div className={styles.machineContextDetails}>
+              <span className={styles.machineContextLabel}>Machine active</span>
+              <span className={styles.machineContextName}>{props.selectedMachine.name}</span>
+              {props.selectedMachine.reference && (
+                <span className={styles.machineContextReference}>Réf. {props.selectedMachine.reference}</span>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
       {/* Live region for announcing streaming status to screen readers */}
       <div 
         role="status" 
@@ -183,19 +290,29 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
       </div>
 
       <div 
+        ref={messagesContainerRef}
         className={styles.messagesContainer} 
         role="log" 
         aria-live="polite" 
         aria-label="Messages du chat"
         aria-busy={isStreaming}
+        onScroll={handleMessagesScroll}
       >
-        <div className={styles.messagesWrapper}>
+        <div ref={messagesWrapperRef} className={styles.messagesWrapper}>
           {messages.length > 0 && starterAccessory}
           {messages.length === 0 ? (
             <StarterMessages 
-              agentName={agentName}
+              agentName={props.selectedMachine || props.showMachineSelectionPrompt ? 'Assistant Technique' : agentName}
               agentDescription={agentDescription}
-              accessory={starterAccessory}
+              accessory={props.showMachineSelectionPrompt && !props.selectedMachine ? (
+                <section className={styles.machineSelectionPrompt} aria-label="Sélection d’une machine">
+                  <strong>Choisissez une machine pour commencer</strong>
+                  <p>Sélectionnez la machine concernée pour poser vos questions et consulter ses documents.</p>
+                  {onChangeMachine && (
+                    <Button appearance="primary" onClick={onChangeMachine}>Choisir une machine</Button>
+                  )}
+                </section>
+              ) : starterAccessory}
             />
           ) : (
             <>
@@ -227,10 +344,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
                 );
               })
               })()}
-              <div ref={messagesEndRef} style={{ height: '1px' }} />
             </>
           )}
         </div>
+        <div ref={anchorSpacerRef} aria-hidden="true" data-scroll-anchor-spacer style={{ flexShrink: 0, height: 0 }} />
         {hasNewMessages && !isNearBottom && (
           <button
             className={styles.newMessagesPill}

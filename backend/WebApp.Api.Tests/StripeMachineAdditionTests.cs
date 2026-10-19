@@ -255,6 +255,12 @@ public partial class StripeMachineAdditionTests
         await using (var db = f.Db())
         {
             if (reason == "inactive") (await db.Machines.SingleAsync(m => m.Id == machine)).Status = "inactive";
+            if (reason == "existing-period")
+            {
+                var period = await db.MachineBillingPeriods.SingleAsync(p => p.MachineId == f.MachineId);
+                period.PeriodStartUtc = Activation.AddDays(-1);
+                period.PeriodEndUtc = Activation.AddDays(1);
+            }
             if (reason == "stale-cycle") (await db.BillingAccounts.SingleAsync()).CurrentPeriodEndUtc = End.AddDays(1);
             await db.SaveChangesAsync();
         }

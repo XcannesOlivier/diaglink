@@ -78,14 +78,17 @@ public sealed class ClaudeDirectChatServiceTests
         var fixture = Fixture.Create(
             EventStreamResponse(
                 """{"type":"message_start","message":{"id":"msg-tool","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"stop_reason":null,"usage":{"input_tokens":4,"output_tokens":1}}}""",
-                """{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}""",
-                """{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private reasoning"}}""",
-                """{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed"}}""",
+                """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""",
+                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Je vérifie la page..."}}""",
                 """{"type":"content_block_stop","index":0}""",
-                """{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool-1","name":"get_page_image","input":{}}}""",
-                """{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"page\":75,"}}""",
-                """{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"asset_type\":\"full\"}"}}""",
+                """{"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":"","signature":""}}""",
+                """{"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"private reasoning"}}""",
+                """{"type":"content_block_delta","index":1,"delta":{"type":"signature_delta","signature":"signed"}}""",
                 """{"type":"content_block_stop","index":1}""",
+                """{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"tool-1","name":"get_page_image","input":{}}}""",
+                """{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"page\":75,"}}""",
+                """{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\"asset_type\":\"full\"}"}}""",
+                """{"type":"content_block_stop","index":2}""",
                 """{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":8}}""",
                 """{"type":"message_stop"}"""),
             EventStreamResponse(
@@ -103,14 +106,58 @@ public sealed class ClaudeDirectChatServiceTests
         }
 
         var result = updates.Single(update => update.CompletedResult is not null).CompletedResult!;
+        var visible = string.Concat(updates.Where(update => update.TextDelta is not null).Select(update => update.TextDelta));
         Assert.AreEqual("Réponse finale", result.FinalText);
-        Assert.IsFalse(string.Concat(updates.Select(update => update.TextDelta)).Contains("private reasoning", StringComparison.Ordinal));
+        Assert.AreEqual(result.FinalText, visible);
+        Assert.IsFalse(visible.Contains("Je vérifie la page", StringComparison.Ordinal));
+        Assert.IsFalse(visible.Contains("private reasoning", StringComparison.Ordinal));
         Assert.HasCount(2, fixture.Handler.Requests);
         using var secondRequest = JsonDocument.Parse(fixture.Handler.Requests[1].Body);
         var assistantBlocks = secondRequest.RootElement.GetProperty("messages")[1].GetProperty("content");
-        Assert.AreEqual("private reasoning", assistantBlocks[0].GetProperty("thinking").GetString());
-        Assert.AreEqual("signed", assistantBlocks[0].GetProperty("signature").GetString());
-        Assert.AreEqual(75, assistantBlocks[1].GetProperty("input").GetProperty("page").GetInt32());
+        Assert.AreEqual("Je vérifie la page...", assistantBlocks[0].GetProperty("text").GetString());
+        Assert.AreEqual("private reasoning", assistantBlocks[1].GetProperty("thinking").GetString());
+        Assert.AreEqual("signed", assistantBlocks[1].GetProperty("signature").GetString());
+        Assert.AreEqual(75, assistantBlocks[2].GetProperty("input").GetProperty("page").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task StreamAsync_HidesSuccessivePauseTextAndPublishesOnlyFinalCitations()
+    {
+        var fixture = Fixture.Create(
+            PausedTextAndCitationResponse(
+                "msg-paused-1",
+                "Je cherche des fournisseurs...",
+                "https://example.test/intermediate",
+                "Intermediate"),
+            PausedTextAndCitationResponse(
+                "msg-paused-2",
+                "Je vérifie les offres...",
+                "https://example.test/also-intermediate",
+                "Also intermediate"),
+            TextAndCitationResponse(
+                "Réponse finale compacte.",
+                "https://example.test/final",
+                "Final supplier"));
+
+        var updates = new List<ClaudeDirectChatStreamUpdate>();
+        await foreach (var update in fixture.Service.StreamAsync(Request()))
+        {
+            updates.Add(update);
+        }
+
+        var visible = string.Concat(updates.Where(update => update.TextDelta is not null).Select(update => update.TextDelta));
+        var result = updates.Single(update => update.CompletedResult is not null).CompletedResult!;
+        Assert.AreEqual("Réponse finale compacte.", visible);
+        Assert.AreEqual(visible, result.FinalText);
+        Assert.HasCount(1, result.WebCitations);
+        Assert.AreEqual("https://example.test/final", result.WebCitations[0].Url);
+        Assert.IsFalse(result.WebCitations.Any(citation => citation.Url.Contains("intermediate", StringComparison.Ordinal)));
+        Assert.HasCount(3, fixture.Handler.Requests);
+
+        using var thirdRequest = JsonDocument.Parse(fixture.Handler.Requests[2].Body);
+        var messages = thirdRequest.RootElement.GetProperty("messages");
+        Assert.AreEqual("Je cherche des fournisseurs...", messages[1].GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.AreEqual("Je vérifie les offres...", messages[2].GetProperty("content")[0].GetProperty("text").GetString());
     }
 
     [TestMethod]
@@ -190,6 +237,60 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
+    public async Task CompleteAsync_LogsPerformanceCountersWithoutSensitivePayloads()
+    {
+        var fixture = Fixture.Create(
+            ToolResponse(),
+            DirectResponse("done"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual("done", result.FinalText);
+        var logs = string.Join('\n', fixture.Logger.Messages);
+        Assert.IsTrue(logs.Contains("DurationMs=", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("ResponseHeadersMs=", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("RequestBytes=", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("FileSearchUses=1", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("LocalToolUses=1", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("Stage=ImageBlobRead", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("Stage=ImageBase64Encoding", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("Calls=2", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("PauseTurns=0", StringComparison.Ordinal));
+        Assert.IsFalse(logs.Contains(Token, StringComparison.Ordinal));
+        Assert.IsFalse(logs.Contains(DocumentId, StringComparison.Ordinal));
+        Assert.IsFalse(logs.Contains("company/machine", StringComparison.Ordinal));
+        Assert.IsFalse(logs.Contains("How do I replace the hydraulic filter?", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task StreamAsync_LogsPauseTurnsAndObservedToolOffsetsAsNonDurations()
+    {
+        var fixture = Fixture.Create(
+            EventStreamResponse(
+                """{"type":"message_start","message":{"id":"msg-observed","type":"message","role":"assistant","model":"claude-sonnet-5","content":[],"stop_reason":null,"usage":{"input_tokens":4,"output_tokens":1}}}""",
+                """{"type":"content_block_start","index":0,"content_block":{"type":"mcp_tool_use","id":"mcp-1","name":"file_search","input":{}}}""",
+                """{"type":"content_block_stop","index":0}""",
+                """{"type":"content_block_start","index":1,"content_block":{"type":"mcp_tool_result","tool_use_id":"mcp-1","is_error":false,"content":[]}}""",
+                """{"type":"content_block_stop","index":1}""",
+                """{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}""",
+                """{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"partial"}}""",
+                """{"type":"content_block_stop","index":2}""",
+                """{"type":"message_delta","delta":{"stop_reason":"pause_turn","stop_sequence":null},"usage":{"output_tokens":3}}""",
+                """{"type":"message_stop"}"""),
+            DirectResponse("done"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual("done", result.FinalText);
+        var logs = string.Join('\n', fixture.Logger.Messages);
+        Assert.IsTrue(logs.Contains("PauseTurns=1", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("BlockType=mcp_tool_use", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("ToolType=file_search", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("BlockType=mcp_tool_result", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("TimingKind=stream_event_offset_not_tool_duration", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task StreamAsync_CancellationTokenInterruptsProviderRequest()
     {
         var fixture = Fixture.Create(EventStreamResponse());
@@ -219,6 +320,38 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.AreEqual("final", result.FinalText);
         Assert.AreEqual("end_turn", result.StopReason);
         Assert.HasCount(1, fixture.Handler.Requests);
+    }
+
+    [TestMethod]
+    [DataRow("refusal", "model_refusal")]
+    [DataRow("max_tokens", "output_truncated")]
+    [DataRow("model_context_window_exceeded", "context_window_exceeded")]
+    [DataRow("future_stop_reason", "unsupported_stop_reason")]
+    public async Task CompleteAsync_TerminalFailureStopReasonsDoNotContinueOrPublishPartialText(
+        string stopReason,
+        string expectedErrorCode)
+    {
+        var fixture = Fixture.Create(ResponseWithStopReason("partial", stopReason), DirectResponse("must not be used"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.IsNull(result.FinalText);
+        Assert.AreEqual(stopReason, result.StopReason);
+        Assert.HasCount(1, result.Calls);
+        Assert.HasCount(1, fixture.Handler.Requests);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == expectedErrorCode && error.CallNumber == 1));
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_ToolUseWithoutLocalToolCallFailsWithoutContinuation()
+    {
+        var fixture = Fixture.Create(ResponseWithStopReason(string.Empty, "tool_use"), DirectResponse("must not be used"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.IsNull(result.FinalText);
+        Assert.HasCount(1, fixture.Handler.Requests);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "invalid_tool_stop"));
     }
 
     [TestMethod]
@@ -364,6 +497,58 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.HasCount(1, citations);
         Assert.AreEqual("https://example.test/source", citations[0].Url);
         Assert.AreEqual("First", citations[0].Title);
+    }
+
+    [TestMethod]
+    public void ExtractWebSearchCandidates_KeepsExactReturnedUrlsWithoutPromotingThemToCitations()
+    {
+        using var document = JsonDocument.Parse("""
+        [
+          {
+            "type":"web_search_tool_result",
+            "tool_use_id":"web-1",
+            "content":[
+              {"type":"web_search_result","url":"https://supplier.example/2544-9024","title":"Doosan 2544-9024","page_age":"October 2026"},
+              {"type":"web_search_result","url":"https://supplier.example/2544-9024","title":"Duplicate"},
+              {"type":"web_search_result","url":"ftp://invalid.example/part","title":"Invalid"}
+            ]
+          }
+        ]
+        """);
+
+        var candidates = ClaudeDirectChatService.ExtractWebSearchCandidates(document.RootElement);
+
+        Assert.HasCount(1, candidates);
+        Assert.AreEqual("https://supplier.example/2544-9024", candidates[0].Url);
+        Assert.AreEqual("Doosan 2544-9024", candidates[0].Title);
+        Assert.AreEqual("October 2026", candidates[0].PageAge);
+        Assert.IsEmpty(ClaudeDirectChatService.ExtractWebCitations(document.RootElement));
+    }
+
+    [TestMethod]
+    public void SelectWebSearchBudget_UsesOnlyCurrentQuestionFromConversationEnvelope()
+    {
+        var request = Request() with
+        {
+            Messages = [new("user", """
+                [DERNIERS ECHANGES]
+                Utilisateur: Trouve un fournisseur pour cette pièce.
+                [/DERNIERS ECHANGES]
+
+                [NOUVELLE QUESTION]
+                Comment contrôler la pression hydraulique ?
+                [/NOUVELLE QUESTION]
+                """)]
+        };
+        var options = new ClaudeDirectWebSearchOptions { DiagnosticMaxUses = 2, PartsMaxUses = 6 };
+
+        Assert.AreEqual(2, ClaudeDirectChatService.SelectWebSearchBudget(request, options));
+
+        request = request with
+        {
+            Messages = [new("user", "Trouve un fournisseur pour la référence 2544-9024")]
+        };
+        Assert.AreEqual(6, ClaudeDirectChatService.SelectWebSearchBudget(request, options));
     }
 
     [TestMethod]
@@ -615,7 +800,8 @@ public sealed class ClaudeDirectChatServiceTests
 
         Assert.IsFalse(options.WebSearch.Enabled);
         Assert.AreEqual(2, options.WebSearch.DiagnosticMaxUses);
-        Assert.AreEqual(3, options.WebSearch.PartsMaxUses);
+        Assert.AreEqual(6, options.WebSearch.PartsMaxUses);
+        Assert.AreEqual(8, options.MaxMessageCalls);
     }
 
     [TestMethod]
@@ -673,12 +859,10 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    [DataRow(2, 3, 3)]
-    [DataRow(7, 3, 7)]
-    [DataRow(1, 9, 9)]
-    public async Task CompleteAsync_EnabledWebSearchUsesHighestConfiguredLimitWithoutChangingExistingTools(
-        int diagnosticMaxUses,
-        int partsMaxUses,
+    [DataRow(false, 2)]
+    [DataRow(true, 6)]
+    public async Task CompleteAsync_EnabledWebSearchSelectsRequestProfileWithoutChangingExistingTools(
+        bool partsRequest,
         int expectedMaxUses)
     {
         var disabledFixture = Fixture.Create(DirectResponse("disabled"));
@@ -691,13 +875,16 @@ public sealed class ClaudeDirectChatServiceTests
             WebSearch = new ClaudeDirectWebSearchOptions
             {
                 Enabled = true,
-                DiagnosticMaxUses = diagnosticMaxUses,
-                PartsMaxUses = partsMaxUses
+                DiagnosticMaxUses = 2,
+                PartsMaxUses = 6
             }
         }, DirectResponse("enabled"));
 
         await disabledFixture.Service.CompleteAsync(Request());
-        await enabledFixture.Service.CompleteAsync(Request());
+        var request = partsRequest
+            ? Request() with { Messages = [new("user", "Trouve un fournisseur et un lien d'achat pour la référence 2544-9024.")] }
+            : Request();
+        await enabledFixture.Service.CompleteAsync(request);
 
         using var disabledBody = JsonDocument.Parse(disabledFixture.Handler.Requests.Single().Body);
         using var enabledBody = JsonDocument.Parse(enabledFixture.Handler.Requests.Single().Body);
@@ -711,11 +898,15 @@ public sealed class ClaudeDirectChatServiceTests
 
         var webSearch = enabledTools[2];
         CollectionAssert.AreEquivalent(
-            new[] { "type", "name", "max_uses" },
+            new[] { "type", "name", "max_uses", "user_location" },
             webSearch.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.AreEqual("web_search_20250305", webSearch.GetProperty("type").GetString());
         Assert.AreEqual("web_search", webSearch.GetProperty("name").GetString());
         Assert.AreEqual(expectedMaxUses, webSearch.GetProperty("max_uses").GetInt32());
+        var location = webSearch.GetProperty("user_location");
+        Assert.AreEqual("approximate", location.GetProperty("type").GetString());
+        Assert.AreEqual("FR", location.GetProperty("country").GetString());
+        Assert.AreEqual("Europe/Paris", location.GetProperty("timezone").GetString());
     }
 
     [TestMethod]
@@ -864,6 +1055,134 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
+    public void ExtractFileSearchDocumentEvidence_KeepsDocumentPhysicalPagePairsPerResultString()
+    {
+        using var document = JsonDocument.Parse("""
+        [
+          {"type":"mcp_tool_use","id":"search-1","name":"file_search","input":{}},
+          {"type":"mcp_tool_result","tool_use_id":"search-1","is_error":false,"content":[
+            {"type":"text","text":"Result 1\nDocument ID: manual-a\nPage number: 20"},
+            {"type":"text","text":"Result 2\nDocument ID: manual-b\nPage: 21"}
+          ]}
+        ]
+        """);
+        var documentIds = new HashSet<string>(StringComparer.Ordinal);
+        var evidence = new HashSet<TechnicalDocumentPageEvidence>();
+
+        ClaudeDirectChatService.ExtractFileSearchDocumentEvidence(
+            document.RootElement, documentIds, evidence);
+
+        CollectionAssert.AreEquivalent(new[] { "manual-a", "manual-b" }, documentIds.ToArray());
+        Assert.HasCount(2, evidence);
+        Assert.IsTrue(evidence.Any(item =>
+            item.DocumentId == "manual-a" && item.PdfPage == 20 &&
+            item.ResultText!.Contains("Result 1", StringComparison.Ordinal)));
+        Assert.IsTrue(evidence.Any(item =>
+            item.DocumentId == "manual-b" && item.PdfPage == 21 &&
+            item.ResultText!.Contains("Result 2", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void ExtractFileSearchDocumentEvidence_DoesNotPairPageFromAggregatedMultiDocumentText()
+    {
+        using var document = JsonDocument.Parse("""
+        [
+          {"type":"mcp_tool_use","id":"search-1","name":"file_search","input":{}},
+          {"type":"mcp_tool_result","tool_use_id":"search-1","is_error":false,"content":[
+            {"type":"text","text":"Document ID: manual-a\nPage: 20\nDocument ID: manual-b\nPage: 20"}
+          ]}
+        ]
+        """);
+        var documentIds = new HashSet<string>(StringComparer.Ordinal);
+        var evidence = new HashSet<TechnicalDocumentPageEvidence>();
+
+        ClaudeDirectChatService.ExtractFileSearchDocumentEvidence(
+            document.RootElement, documentIds, evidence);
+
+        CollectionAssert.AreEquivalent(new[] { "manual-a", "manual-b" }, documentIds.ToArray());
+        Assert.IsEmpty(evidence);
+    }
+
+    [TestMethod]
+    public void FileSearchDiagnostics_CollectsOnlyRequiredMetadata()
+    {
+        using var document = JsonDocument.Parse("""
+        [
+          {"type":"mcp_tool_use","id":"search-1","name":"file_search","input":{}},
+          {"type":"mcp_tool_result","tool_use_id":"search-1","is_error":false,"content":[
+            {"type":"text","text":"Document ID: dx225-workshop\nPage number: 285\nSP000913"}
+          ]}
+        ]
+        """);
+
+        var diagnostic = ClaudeDirectChatService.CollectFileSearchDiagnostics(document.RootElement).Single();
+
+        Assert.AreEqual(1, diagnostic.ResultNumber);
+        CollectionAssert.AreEqual(new[] { "dx225-workshop" }, diagnostic.DocumentIds.ToArray());
+        CollectionAssert.AreEqual(new[] { 285 }, diagnostic.PhysicalPages.ToArray());
+        CollectionAssert.AreEqual(new[] { "SP000913" }, diagnostic.ManufacturerIds.ToArray());
+        Assert.AreEqual(1, diagnostic.PageMarkerCount);
+        Assert.AreEqual("none", diagnostic.Reason);
+        Assert.AreEqual(1, diagnostic.Pairs.Count);
+        Assert.AreEqual(285, diagnostic.Pairs.Single().PdfPage);
+    }
+
+    [TestMethod]
+    public void FileSearchDiagnostics_ReportsWhyAggregatedResultHasNoPair()
+    {
+        using var document = JsonDocument.Parse("""
+        [
+          {"type":"mcp_tool_use","id":"search-1","name":"file_search","input":{}},
+          {"type":"mcp_tool_result","tool_use_id":"search-1","is_error":false,"content":[
+            {"type":"text","text":"Document ID: manual-a\nPage: 285\nDocument ID: manual-b\nPage: 491"}
+          ]}
+        ]
+        """);
+
+        var diagnostic = ClaudeDirectChatService.CollectFileSearchDiagnostics(document.RootElement).Single();
+
+        Assert.AreEqual("multiple_document_ids_in_result", diagnostic.Reason);
+        Assert.IsEmpty(diagnostic.Pairs);
+        CollectionAssert.AreEquivalent(new[] { 285, 491 }, diagnostic.PhysicalPages.ToArray());
+    }
+
+    [TestMethod]
+    public async Task FileSearchDiagnostics_IsDisabledByDefault()
+    {
+        var fixture = Fixture.Create(
+            ToolResponse(fileSearchTexts: ["Document ID: manual-a\nPage: 285\nSP000913"]),
+            DirectResponse("done"));
+
+        await fixture.Service.CompleteAsync(Request());
+
+        Assert.IsFalse(fixture.Logger.Messages.Any(message =>
+            message.Contains("ClaudeDirectFileSearchDiagnostics", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task FileSearchDiagnostics_LogsMetadataWithoutDocumentId()
+    {
+        var fixture = Fixture.CreateWithOptions(
+            new ClaudeDirectChatOptions
+            {
+                FoundryAnthropicEndpoint = "https://resource.test/anthropic",
+                Deployment = "claude-sonnet-5",
+                FileSearchDiagnostics = new() { Enabled = true }
+            },
+            ToolResponse(fileSearchTexts: ["Document ID: manual-a\nPage number: 285\nSP000913"]),
+            DirectResponse("done"));
+
+        await fixture.Service.CompleteAsync(Request());
+
+        var message = fixture.Logger.Messages.Single(item =>
+            item.Contains("ClaudeDirectFileSearchDiagnosticResult", StringComparison.Ordinal));
+        Assert.IsTrue(message.Contains("PhysicalPages=285", StringComparison.Ordinal));
+        Assert.IsTrue(message.Contains("ManufacturerIds=SP000913", StringComparison.Ordinal));
+        Assert.IsTrue(message.Contains("Pairs=", StringComparison.Ordinal));
+        Assert.IsFalse(message.Contains("manual-a", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task CompleteAsync_MapsDisplayedPageUsingFileSearchDocumentId()
     {
         const string documentId = "develon-dx10z-manuel-utilisation-maintenance-en";
@@ -905,6 +1224,50 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.AreEqual(73, source.PdfPage);
         Assert.AreEqual("p. 71", source.Label);
         Assert.HasCount(1, fixture.BlobReader.RequestedPageMaps);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_Dx225LcaLinksPhysicalPagesToConfirmedFileSearchDocumentAmongThreePdfs()
+    {
+        const string partsDocument = "dx225-parts";
+        const string finalText = "Page PDF : p. 20 (schéma) et p. 21 (tableau des pièces)";
+        var fixture = Fixture.Create(
+            ToolResponse(
+                documentId: partsDocument,
+                allowedDocumentIds: ["dx225-operator", "dx225-workshop", partsDocument],
+                page: 20,
+                fileSearchTexts:
+                [
+                    "Document ID: dx225-operator",
+                    "Document ID: dx225-workshop",
+                    "Document ID: dx225-parts\nPage: 20\nPage: 21"
+                ]),
+            DirectResponse(finalText));
+        fixture.BlobReader.PageMapFactory = blobName =>
+        {
+            var documentId = new[] { "dx225-operator", "dx225-workshop", partsDocument }
+                .Single(id => blobName.Contains($"/{id}/", StringComparison.Ordinal));
+            return new MemoryStream(Encoding.UTF8.GetBytes($$"""
+            {
+              "schemaVersion":1,
+              "documentId":"{{documentId}}",
+              "sourceBlob":"company/machine/{{documentId}}.pdf",
+              "pages":[
+                {"pdfPage":20,"displayPage":null,"source":"ExtractedText"},
+                {"pdfPage":21,"displayPage":null,"source":"ExtractedText"}
+              ]
+            }
+            """));
+        };
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual(finalText, result.FinalText);
+        Assert.HasCount(1, result.Visuals);
+        Assert.HasCount(2, result.Sources);
+        Assert.IsTrue(result.Sources.All(source => source.DocumentId == partsDocument));
+        CollectionAssert.AreEqual(new[] { 20, 21 }, result.Sources.Select(source => source.PdfPage).ToArray());
+        Assert.IsTrue(result.Sources.All(source => source.PageKind == TechnicalSourcePageKind.Pdf));
     }
 
     [TestMethod]
@@ -1482,6 +1845,16 @@ public sealed class ClaudeDirectChatServiceTests
             usage = new { input_tokens = inputTokens, output_tokens = outputTokens }
         }));
 
+    private static HttpResponseMessage ResponseWithStopReason(string text, string stopReason) =>
+        JsonResponse(JsonSerializer.Serialize(new
+        {
+            id = "msg-stop-reason",
+            model = "claude-sonnet-5-5",
+            stop_reason = stopReason,
+            content = new object[] { new { type = "text", text } },
+            usage = new { input_tokens = 2, output_tokens = 1 }
+        }));
+
     private static HttpResponseMessage EventStreamResponse(params string[] events) => new(HttpStatusCode.OK)
     {
         Content = new StringContent(
@@ -1500,6 +1873,55 @@ public sealed class ClaudeDirectChatServiceTests
             "usage":{"input_tokens":4,"output_tokens":2}
         }
         """);
+
+    private static HttpResponseMessage PausedTextAndCitationResponse(
+        string id,
+        string text,
+        string url,
+        string title) =>
+        JsonResponse(JsonSerializer.Serialize(new
+        {
+            id,
+            model = "claude-sonnet-5",
+            stop_reason = "pause_turn",
+            content = new object[]
+            {
+                new
+                {
+                    type = "text",
+                    text,
+                    citations = new object[]
+                    {
+                        new { type = "web_search_result_location", url, title, cited_text = "Candidate passage" }
+                    }
+                }
+            },
+            usage = new { input_tokens = 4, output_tokens = 2 }
+        }));
+
+    private static HttpResponseMessage TextAndCitationResponse(
+        string text,
+        string url,
+        string title) =>
+        JsonResponse(JsonSerializer.Serialize(new
+        {
+            id = "msg-final-citation",
+            model = "claude-sonnet-5",
+            stop_reason = "end_turn",
+            content = new object[]
+            {
+                new
+                {
+                    type = "text",
+                    text,
+                    citations = new object[]
+                    {
+                        new { type = "web_search_result_location", url, title, cited_text = "Final passage" }
+                    }
+                }
+            },
+            usage = new { input_tokens = 4, output_tokens = 2 }
+        }));
 
     private static HttpResponseMessage WebSearchAndExistingToolsResponse() =>
         JsonResponse($$$"""
@@ -1703,7 +2125,7 @@ public sealed class ClaudeDirectChatServiceTests
         WebSearch = new ClaudeDirectWebSearchOptions
         {
             Enabled = true,
-            DiagnosticMaxUses = 2,
+            DiagnosticMaxUses = 3,
             PartsMaxUses = 3
         }
     };
@@ -1729,11 +2151,13 @@ public sealed class ClaudeDirectChatServiceTests
         long inputTokens = 10,
         long outputTokens = 2,
         string[]? allowedDocumentIds = null,
-        bool includeTile = true)
+        bool includeTile = true,
+        int page = 75,
+        string[]? fileSearchTexts = null)
     {
         var input = new Dictionary<string, object?>
         {
-            ["page"] = 75,
+            ["page"] = page,
             ["asset_type"] = assetType
         };
         if (includeTile)
@@ -1746,9 +2170,10 @@ public sealed class ClaudeDirectChatServiceTests
         }
 
         allowedDocumentIds ??= [DocumentId];
-        var fileSearchText = string.Join(
-            "\n",
-            allowedDocumentIds.Select(id => $"Document ID: {id}"));
+        fileSearchTexts ??=
+        [
+            string.Join("\n", allowedDocumentIds.Select(id => $"Document ID: {id}"))
+        ];
         return JsonResponse(JsonSerializer.Serialize(new
         {
             id = "msg-tool",
@@ -1763,7 +2188,7 @@ public sealed class ClaudeDirectChatServiceTests
                     type = "mcp_tool_result",
                     tool_use_id = "mcp-1",
                     is_error = false,
-                    content = new object[] { new { type = "text", text = fileSearchText } }
+                    content = fileSearchTexts.Select(text => new { type = "text", text }).ToArray()
                 },
                 new { type = "tool_use", id = "tool-1", name = "get_page_image", input }
             },

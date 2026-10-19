@@ -64,8 +64,9 @@ export function MachineDocuments({ machineId }: { machineId?: string }) {
     });
   };
 
-  const documentsButton = <Button size="small" appearance="subtle" icon={<DocumentPdfRegular />} disabled={!machineId} aria-label="Documents de la machine">
-    <span className={styles.documentsLabel}>{isMobile ? 'Docs' : 'Doc Machines'}</span>
+  const documentsTooltip = machineId ? 'Documents de la machine' : 'Sélectionnez une machine pour consulter ses documents';
+  const documentsButton = <Button className={styles.documentsButton} appearance="subtle" icon={<DocumentPdfRegular />} disabled={!machineId} aria-label="Documents de la machine" title={!machineId ? documentsTooltip : undefined}>
+    <span className={styles.documentsLabel}>{isMobile ? 'Docs' : 'Documents machine'}</span>
   </Button>;
 
   return (
@@ -77,7 +78,7 @@ export function MachineDocuments({ machineId }: { machineId?: string }) {
       setOpen(data.open);
     }}>
       <PopoverTrigger disableButtonEnhancement>
-        {suppressTooltip ? documentsButton : <Tooltip content="Documents de la machine" relationship="label" withArrow visible={!open&&tooltipVisible} onVisibleChange={(_,data)=>setTooltipVisible(!open&&data.visible)}>{documentsButton}</Tooltip>}
+        {suppressTooltip ? documentsButton : <Tooltip content={documentsTooltip} relationship="label" withArrow visible={!open&&tooltipVisible} onVisibleChange={(_,data)=>setTooltipVisible(!open&&data.visible)}>{documentsButton}</Tooltip>}
       </PopoverTrigger>
       <PopoverSurface aria-label="Documents de la machine" className={popupStyles.surface}>
         <Text weight="semibold">Documents</Text>

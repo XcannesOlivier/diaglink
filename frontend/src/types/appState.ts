@@ -24,6 +24,7 @@ export interface ConversationMessageInfo {
   visuals?: TechnicalVisual[];
   sources?: TechnicalSourceReference[];
   suggestions?: string[];
+  webCitations?: IAnnotation[];
 }
 
 /**

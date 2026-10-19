@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   makeStyles,
-  mergeClasses,
   tokens,
   Drawer,
   DrawerHeader,
@@ -43,7 +42,8 @@ const useStyles = makeStyles({
     flexDirection: 'column',
   },
   header: {
-    display: 'flex',
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: tokens.spacingHorizontalL,
@@ -51,13 +51,12 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
+    '@media (min-width: 1001px) and (max-width: 1200px)': {
+      gridTemplateColumns: 'minmax(0, 1fr)',
+      rowGap: tokens.spacingVerticalXS,
+    },
     '@media (max-width: 1000px)': {
       display: 'none',
-    },
-  },
-  companyHeader: {
-    '@media (max-width: 1400px)': {
-      gap: tokens.spacingHorizontalS,
     },
   },
   brand: {
@@ -82,8 +81,12 @@ const useStyles = makeStyles({
       display: 'none',
     },
   },
-  companyNav: {
-    minWidth: 'max-content',
+  headerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+    minWidth: 0,
   },
   userBadge: {
     minWidth: 0,
@@ -92,14 +95,11 @@ const useStyles = makeStyles({
     },
   },
   settingsButton: {
+    minWidth: '40px',
+    minHeight: '40px',
+    flexShrink: 0,
     '@media (max-width: 1000px)': {
       display: 'none',
-    },
-  },
-  companyHeaderAction: {
-    flexShrink: 0,
-    '@media (max-width: 1400px)': {
-      minWidth: '32px',
     },
   },
   desktopActionLabel: {
@@ -160,8 +160,8 @@ const useStyles = makeStyles({
     flex: 1,
   },
   mobileCompanyLogo: {
-    maxHeight: '32px',
-    maxWidth: '80px',
+    maxHeight: '40px',
+    maxWidth: '104px',
   },
   mobileUserEmail: {
     overflowWrap: 'break-word',
@@ -224,7 +224,6 @@ export const AppShell: React.FC<AppShellProps> = ({
       ? branding.logoObjectUrl
       : null;
   const currentView = ui.currentView;
-  const compactCompanyHeader = !!companyLogoUrl || currentUser?.role === 'company_admin';
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSupportContactOpen, setIsSupportContactOpen] = useState(false);
@@ -332,37 +331,36 @@ export const AppShell: React.FC<AppShellProps> = ({
   return (
     <CompanyAccentProvider className={styles.shell} style={shellStyle}
       accentColor={currentUser?.companyBranding?.accentColor ?? null}>
-      <header className={mergeClasses(styles.header, compactCompanyHeader && styles.companyHeader)}>
-        <div className={styles.brand}>
-          {/* Header brand logo removed per request (keep page logo intact) */}
-        </div>
-        <div className={mergeClasses(styles.nav, compactCompanyHeader && styles.companyNav)}>
+      <header className={styles.header}>
+        <div className={styles.nav}>
           <Navigation role={currentUser?.role} currentView={currentView} onSelectView={handleSelectDesktopView} pendingMachineRequestCount={pendingMachineRequestCount} />
         </div>
-        {canContactSupport && (
+        <div className={styles.headerActions}>
+          {canContactSupport && (
+            <Button
+              className={styles.settingsButton}
+              appearance="subtle"
+              icon={<Mail24Regular />}
+              aria-label="Contacter DiagLink"
+              title="Contacter DiagLink"
+              onClick={handleOpenSupportContact}
+            >
+              <span className={styles.desktopActionLabel}>Contacter DiagLink</span>
+            </Button>
+          )}
           <Button
-            className={mergeClasses(styles.settingsButton, compactCompanyHeader && styles.companyHeaderAction)}
+            className={styles.settingsButton}
             appearance="subtle"
-            icon={<Mail24Regular />}
-            aria-label="Contacter DiagLink"
-            title="Contacter DiagLink"
-            onClick={handleOpenSupportContact}
+            icon={<Settings24Regular />}
+            aria-label="Paramètres"
+            title="Paramètres"
+            onClick={handleOpenSettings}
           >
-            <span className={compactCompanyHeader ? styles.desktopActionLabel : undefined}>Contacter DiagLink</span>
+            <span className={styles.desktopActionLabel}>Paramètres</span>
           </Button>
-        )}
-        <Button
-          className={mergeClasses(styles.settingsButton, compactCompanyHeader && styles.companyHeaderAction)}
-          appearance="subtle"
-          icon={<Settings24Regular />}
-          aria-label="Paramètres"
-          title="Paramètres"
-          onClick={handleOpenSettings}
-        >
-          <span className={compactCompanyHeader ? styles.desktopActionLabel : undefined}>Paramètres</span>
-        </Button>
-        <div className={styles.userBadge}>
-          <UserBadge currentUser={currentUser} companyLogoUrl={companyLogoUrl} />
+          <div className={styles.userBadge}>
+            <UserBadge currentUser={currentUser} companyLogoUrl={companyLogoUrl} />
+          </div>
         </div>
       </header>
 

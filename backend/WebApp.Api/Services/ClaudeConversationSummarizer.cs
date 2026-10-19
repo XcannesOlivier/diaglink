@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Azure.Core;
@@ -41,6 +42,8 @@ public sealed class ClaudeConversationSummarizer : IConversationSummarizer
         CancellationToken cancellationToken = default,
         Action<AiResponseUsage>? onUsage = null)
     {
+        var turnTraceId = Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+        var totalStopwatch = Stopwatch.StartNew();
         if (!Uri.TryCreate(_options.FoundryAnthropicEndpoint, UriKind.Absolute, out var configuredEndpoint) ||
             configuredEndpoint.Scheme != Uri.UriSchemeHttps ||
             string.IsNullOrWhiteSpace(_options.Deployment))
@@ -48,9 +51,11 @@ public sealed class ClaudeConversationSummarizer : IConversationSummarizer
             throw new InvalidOperationException("ClaudeDirectChat configuration is invalid for conversation summarization.");
         }
 
+        var tokenStopwatch = Stopwatch.StartNew();
         var accessToken = await _credential.GetTokenAsync(
             new TokenRequestContext([FoundryScope]),
             cancellationToken);
+        LogPerformance(turnTraceId, "FoundryToken", tokenStopwatch.ElapsedMilliseconds, null, "success", 0, 0, 0);
 
         onUsage?.Invoke(CreateUsage(
             responseId: null,
@@ -84,12 +89,15 @@ public sealed class ClaudeConversationSummarizer : IConversationSummarizer
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
         request.Headers.Add("anthropic-version", AnthropicVersion);
 
+        var messagesStopwatch = Stopwatch.StartNew();
         using var response = await _httpClientFactory.CreateClient(HttpClientName).SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
+        var responseHeadersMs = messagesStopwatch.ElapsedMilliseconds;
         if (!response.IsSuccessStatusCode)
         {
+            LogPerformance(turnTraceId, "AnthropicMessages", messagesStopwatch.ElapsedMilliseconds, responseHeadersMs, "http_error", 0, 0, request.Content.Headers.ContentLength ?? 0);
             _logger.LogWarning(
                 "Claude conversation summary request failed. StatusCode={StatusCode}",
                 (int)response.StatusCode);
@@ -107,6 +115,7 @@ public sealed class ClaudeConversationSummarizer : IConversationSummarizer
         }
         catch (JsonException exception)
         {
+            LogPerformance(turnTraceId, "AnthropicMessages", messagesStopwatch.ElapsedMilliseconds, responseHeadersMs, "invalid_response", 0, 0, request.Content.Headers.ContentLength ?? 0);
             throw new InvalidOperationException("The Claude summary response contains invalid JSON.", exception);
         }
 
@@ -115,7 +124,9 @@ public sealed class ClaudeConversationSummarizer : IConversationSummarizer
             var root = document.RootElement;
             var responseId = GetString(root, "id");
             var responseModel = GetString(root, "model");
+            var stopReason = GetString(root, "stop_reason");
             if (string.IsNullOrWhiteSpace(responseId) ||
+                string.IsNullOrWhiteSpace(stopReason) ||
                 !root.TryGetProperty("usage", out var usageElement) ||
                 !TryReadNonNegativeInt(usageElement, "input_tokens", out var inputTokens) ||
                 !TryReadNonNegativeInt(usageElement, "output_tokens", out var outputTokens) ||
@@ -123,6 +134,17 @@ public sealed class ClaudeConversationSummarizer : IConversationSummarizer
                 content.ValueKind != JsonValueKind.Array)
             {
                 throw new InvalidOperationException("The Claude summary response is missing required metadata, usage, or content.");
+            }
+
+            if (!string.Equals(stopReason, "end_turn", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(stopReason switch
+                {
+                    "refusal" => "Claude refused to produce the conversation summary.",
+                    "max_tokens" => "The Claude conversation summary was truncated by the output-token limit.",
+                    "model_context_window_exceeded" => "The conversation exceeds the Claude context window.",
+                    _ => $"Claude returned an unsupported summary stop reason: {stopReason}."
+                });
             }
 
             if (!TryReadOptionalNonNegativeInt(usageElement, "cache_read_input_tokens", out var cacheReadTokens) ||
@@ -197,10 +219,41 @@ else
                 CacheCreation5mInputTokens = cacheCreation5mTokens,
                 CacheCreation1hInputTokens = cacheCreation1hTokens
             };
+            LogPerformance(
+                turnTraceId,
+                "AnthropicMessages",
+                messagesStopwatch.ElapsedMilliseconds,
+                responseHeadersMs,
+                "success",
+                inputTokens,
+                outputTokens,
+                request.Content.Headers.ContentLength ?? 0);
+            LogPerformance(turnTraceId, "SummaryTotal", totalStopwatch.ElapsedMilliseconds, null, "success", inputTokens, outputTokens, 0);
             onUsage?.Invoke(usage);
             return new AiSummaryResult(text, usage);
         }
     }
+
+    private void LogPerformance(
+        string traceId,
+        string stage,
+        long durationMs,
+        long? responseHeadersMs,
+        string outcome,
+        int inputTokens,
+        int outputTokens,
+        long requestBytes) =>
+        _logger.LogInformation(
+            "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} DurationMs={DurationMs} ResponseHeadersMs={ResponseHeadersMs} Outcome={Outcome} InputTokens={InputTokens} OutputTokens={OutputTokens} RequestBytes={RequestBytes}",
+            traceId,
+            "ClaudeConversationSummarizer",
+            stage,
+            durationMs,
+            responseHeadersMs,
+            outcome,
+            inputTokens,
+            outputTokens,
+            requestBytes);
 
     internal static string BuildSummarizationPrompt(
         string? existingSummary,

@@ -29,7 +29,7 @@ export const CompanyView: React.FC<CompanyViewProps> = ({ machine, getAccessToke
   const state = useApiResource(fetchCompany, onDiagLinkSessionExpired);
 
   return (
-    <ViewRoot title="Crédits et abonnement" subtitle={state.kind === 'success' ? state.data.name : undefined}
+    <ViewRoot title="Crédits et abonnement" titleAs="h1" subtitle={state.kind === 'success' ? state.data.name : undefined}
       headerAction={onReturnToChat && <Button className={styles.closeButton} appearance="subtle"
         icon={<Dismiss24Regular />} aria-label="Fermer et revenir au chat" title="Revenir au chat"
         onClick={onReturnToChat} />}>

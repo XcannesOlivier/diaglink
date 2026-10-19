@@ -11,7 +11,7 @@ The service reloads the persisted usage, verifies its machine/company ownership 
 one period using the usage timestamp and [start,end). Status must be `Active` or `Closed`;
 overlapping periods are rejected even if one is inactive. No period is created or renewed.
 Late usage within a Closed period can debit its historical budget without reopening it.
-The normal 10 EUR budget is set by the future period creation service, not hardcoded here.
+The normal 10 EUR budget is set by `MachineBillingPeriodService`, not hardcoded here.
 
 Available budget = budget - used. Debit = min(available, cost). Both the increase in used
 and the AiUsage/MachineIncluded ledger entry commit in one transaction. BalanceAfter is

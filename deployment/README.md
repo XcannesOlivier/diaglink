@@ -1,71 +1,79 @@
-# Deployment Directory
+# Deployment
 
-**AI Assistance**: See `.github/skills/deploying-to-azure/SKILL.md` for deployment patterns.
+The deployment directory contains the production Docker build, Azure Developer CLI lifecycle hooks
+and operator-invoked helper scripts.
 
-## Structure
+## Layout
 
-```
+```text
 deployment/
-├── docker/              # Docker build files
-│   └── frontend.Dockerfile  # Single-container build (React + ASP.NET Core)
-├── hooks/               # Azure Developer CLI lifecycle hooks
-│   ├── preprovision.ps1     # Create Entra app + discover AI Foundry + generate config
-│   ├── postprovision.ps1    # Update Entra redirect URIs + assign RBAC
-│   ├── predeploy.ps1        # Build container (local Docker or ACR cloud build)
-│   ├── postdown.ps1         # Cleanup (optional)
-│   └── modules/             # Reusable PowerShell modules
+├── docker/
+│   └── frontend.Dockerfile       React build + .NET 10 publish + ASP.NET runtime
+├── hooks/
+│   ├── preprovision.ps1          Validate environment and select Foundry resource
+│   ├── postprovision.ps1         Entra updates, RBAC and local environment files
+│   ├── predeploy.ps1             Build/push image and update Container App
+│   ├── postdown.ps1              Post-removal identity cleanup
+│   └── modules/
 │       ├── Get-AIFoundryAgents.ps1
-│       └── New-EntraAppRegistration.ps1
-└── scripts/             # User-invoked scripts
-    └── start-local-dev.ps1  # Start native local development
+│       └── HookLogging.ps1
+└── scripts/
+    ├── deploy.ps1
+    ├── smoke-test.js
+    ├── start-local-dev.ps1
+    └── validate-config.ps1
 ```
 
-## Build Strategy
+`Get-AIFoundryAgents.ps1` remains available as a standalone helper but is not called by the current
+hooks. The current Claude Direct deployment does not select a Foundry Agent.
 
-Container builds use **local Docker when available** with **ACR cloud build as fallback**:
+## Hook workflow
 
-| Docker Installed | Build Method | Speed |
-|------------------|--------------|-------|
-| ✅ Yes, running | Local Docker build + push to ACR | ~2 min |
-| ❌ No | ACR cloud build | ~4-5 min |
-
-This is handled automatically by `predeploy.ps1`.
-
-## Key Commands
-
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| `azd up` | Full provision + deploy | Initial setup, infrastructure changes |
-| `azd deploy` | Code-only deployment | Fast iteration on code changes |
-| `azd down` | Tear down resources | Cleanup |
-
-## Hook Workflow
-
-```
+```text
 azd up
-  ├─ preprovision.ps1 (Entra + AI Foundry discovery + .env generation)
-  ├─ provision (Bicep deployment with placeholder image)
-  ├─ postprovision.ps1 (updates Entra redirect URIs + RBAC)
-  └─ predeploy.ps1 (builds container - local Docker or ACR cloud)
+  ├─ preprovision: validate CLI/session, OTP pepper and existing Foundry account
+  ├─ provision: deploy Bicep resources and Entra registrations
+  ├─ postprovision: update Entra redirect URIs, assign RBAC, generate local env files
+  └─ predeploy: build/push the image and update the Container App
 
 azd deploy
-  └─ predeploy.ps1 (builds + pushes + updates Container App)
+  └─ predeploy
+
+azd down
+  └─ postdown after managed resource removal
 ```
 
-## Quick Reference
+The Entra applications are declared in `infra/entra-app.bicep`; no
+`New-EntraAppRegistration.ps1` module exists.
 
-**Common tasks**:
-- First deployment: `azd up`
-- Deploy code changes: `azd deploy`
-- Local development: `.\deployment\scripts\start-local-dev.ps1`
-- Clean up: `azd down --force --purge`
+## Build strategy
 
-## Docker Details
+`predeploy.ps1` uses local Docker when it is available. Otherwise it submits the same build context
+to Azure Container Registry. The multi-stage Dockerfile:
 
-**Build strategy**: Multi-stage (React build → .NET build → Runtime)
+1. runs `npm ci` and builds the Vite frontend;
+2. restores and publishes the .NET 10 API;
+3. copies both into the ASP.NET runtime image and runs as the built-in non-root `app` user.
 
-**Build args**: Client ID and Tenant ID are automatically passed to the Dockerfile from azd environment variables.
+Frontend Entra and Application Insights values are build arguments because Vite replaces them at
+build time. Backend secrets are Container App secrets/environment values and are not baked into the
+image.
 
-**Custom npm registries**: Add `.npmrc` to `frontend/` directory - automatically copied during build
+## Commands
 
-For AI-assisted development, see `.github/skills/deploying-to-azure/SKILL.md`.
+| Command | Purpose |
+|---|---|
+| `azd up` | Initial provision and deployment. |
+| `azd provision` | Reapply infrastructure and post-provision setup. |
+| `azd deploy` | Build and deploy code. |
+| `.\deployment\scripts\start-local-dev.ps1` | Start local frontend/backend processes. |
+| `.\deployment\scripts\validate-config.ps1` | Check generated local auth configuration. |
+| `node deployment/scripts/smoke-test.js` | Run the scripted smoke test when its target is configured. |
+| `azd down --force --purge` | Remove resources managed by the environment. |
+
+## Local hook logs
+
+Every hook writes a timestamped PowerShell transcript below `.azure/<environment>/logs/`. The
+directory is ignored by Git. `HookLogging.ps1` performs a best-effort deletion of transcripts older
+than 30 days, restricted to the four hook filename patterns it creates. Cleanup failures emit a
+warning and do not stop provisioning or deployment.

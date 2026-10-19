@@ -175,11 +175,11 @@ namespace WebApp.Api.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 
-                    b.Property<int>("WebSearchRequests")
-                        .HasColumnType("int");
-
                     b.Property<Guid?>("UserId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("WebSearchRequests")
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
@@ -554,6 +554,53 @@ namespace WebApp.Api.Migrations
                             t.HasCheckConstraint("CK_ConversationMessageVisuals_Page", "[Page] > 0");
 
                             t.HasCheckConstraint("CK_ConversationMessageVisuals_RequiredStrings", "LEN([DocumentId]) > 0 AND LEN([Name]) > 0 AND LEN([AssetKey]) > 0");
+                        });
+                });
+
+            modelBuilder.Entity("WebApp.Api.Models.Entities.ConversationMessageWebCitation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ConversationMessageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<string>("Quote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(2048)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationMessageId");
+
+                    b.HasIndex("ConversationMessageId", "DisplayOrder")
+                        .IsUnique();
+
+                    b.HasIndex("ConversationMessageId", "Url")
+                        .IsUnique();
+
+                    b.ToTable("ConversationMessageWebCitations", "chat", t =>
+                        {
+                            t.HasCheckConstraint("CK_ConversationMessageWebCitations_DisplayOrder", "[DisplayOrder] >= 0");
+
+                            t.HasCheckConstraint("CK_ConversationMessageWebCitations_RequiredStrings", "LEN([Url]) > 0 AND LEN([Label]) > 0");
                         });
                 });
 
@@ -1602,6 +1649,17 @@ namespace WebApp.Api.Migrations
                     b.Navigation("ConversationMessage");
                 });
 
+            modelBuilder.Entity("WebApp.Api.Models.Entities.ConversationMessageWebCitation", b =>
+                {
+                    b.HasOne("WebApp.Api.Models.Entities.ConversationMessage", "ConversationMessage")
+                        .WithMany("WebCitations")
+                        .HasForeignKey("ConversationMessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ConversationMessage");
+                });
+
             modelBuilder.Entity("WebApp.Api.Models.Entities.CreditLedgerEntry", b =>
                 {
                     b.HasOne("WebApp.Api.Models.Entities.AiUsageRecord", null)
@@ -1743,6 +1801,8 @@ namespace WebApp.Api.Migrations
                     b.Navigation("Sources");
 
                     b.Navigation("Visuals");
+
+                    b.Navigation("WebCitations");
                 });
 #pragma warning restore 612, 618
         }

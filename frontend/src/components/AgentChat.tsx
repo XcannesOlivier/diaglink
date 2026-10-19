@@ -287,6 +287,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           content: msg.content,
           visuals: msg.role === 'assistant' ? msg.visuals : undefined,
           sources: msg.role === 'assistant' ? msg.sources : undefined,
+          annotations: msg.role === 'assistant' ? msg.webCitations : undefined,
           suggestions: msg.role === 'assistant' ? msg.suggestions : undefined,
           more: msg.createdAtUtc ? { time: msg.createdAtUtc } : undefined,
         }));
@@ -396,6 +397,8 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           starterPrompts={starterPrompts}
           onChangeMachine={handleChangeMachine}
           machineId={state.machine.selected?.id}
+          selectedMachine={state.machine.selected}
+          showMachineSelectionPrompt={!state.machine.selected && !chat.currentConversationId}
         />
       </div>
 

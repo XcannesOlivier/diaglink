@@ -338,7 +338,9 @@ describe('AgentChat machine-scoped conversation history', () => {
       { id: 12, documentId: 'manual', page: 71, assetType: 'tile', tile: 'r02-c01', name: 'tile.png', displayOrder: 0 },
     ], sources: [
       { id: 21, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: 0, endIndex: 5, displayOrder: 0 },
-    ], suggestions: ['Où est le relais ?'] }]);
+    ], suggestions: ['Où est le relais ?'], webCitations: [
+      { type: 'uri_citation', label: 'Fiche fournisseur', url: 'https://supplier.example/2544-9024' },
+    ] }]);
     await render();
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="conversation-conversation"]')?.click());
 
@@ -347,6 +349,7 @@ describe('AgentChat machine-scoped conversation history', () => {
       messages: [expect.objectContaining({
         visuals: [expect.objectContaining({ id: 12 })],
         sources: [expect.objectContaining({ id: 21, pdfPage: 74 })],
+        annotations: [expect.objectContaining({ url: 'https://supplier.example/2544-9024' })],
         suggestions: ['Où est le relais ?'],
         more: { time: createdAtUtc },
       })],

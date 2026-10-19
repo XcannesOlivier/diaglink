@@ -10,6 +10,72 @@
   position: relative;
 }
 
+.machineContext {
+  flex-shrink: 0;
+  padding: 10px 1.5rem;
+  background: var(--colorNeutralBackground2);
+  border-bottom: 1px solid var(--colorNeutralStroke2);
+}
+
+.machineContextInner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 900px;
+  margin: 0 auto;
+  min-width: 0;
+}
+
+.machineContextIcon {
+  flex-shrink: 0;
+  color: var(--colorBrandForeground1);
+}
+
+.machineContextDetails {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.machineContextLabel,
+.machineContextReference {
+  font-size: var(--fontSizeBase200);
+  color: var(--colorNeutralForeground3);
+  overflow-wrap: anywhere;
+}
+
+.machineContextName {
+  font-size: var(--fontSizeBase300);
+  font-weight: var(--fontWeightSemibold);
+  color: var(--colorNeutralForeground1);
+  overflow-wrap: anywhere;
+}
+
+.machineSelectionPrompt {
+  width: 100%;
+  max-width: 480px;
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid var(--colorNeutralStroke2);
+  border-radius: var(--borderRadiusLarge);
+  background: var(--colorNeutralBackground2);
+  color: var(--colorNeutralForeground1);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.machineSelectionPrompt p {
+  margin: 8px 0 12px;
+  color: var(--colorNeutralForeground2);
+}
+
+.machineSelectionPrompt button {
+  min-height: 40px;
+  max-width: 100%;
+}
+
 /* Messages container - scrolling area */
 .messagesContainer {
   flex: 1;
@@ -29,9 +95,11 @@
 /* Messages wrapper - constrain max width for readability */
 .messagesWrapper {
   width: 100%;
+  min-width: 0;
   max-width: 900px;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 /* Upload spinner container */
@@ -186,6 +254,18 @@
 
 /* Mobile: full-width chat, reduced side padding so it stays readable at 320px */
 @media (max-width: 768px) {
+  .machineContext {
+    padding: 8px 0.75rem;
+  }
+
+  .machineContextDetails {
+    gap: 2px 8px;
+  }
+
+  .machineContextLabel {
+    flex-basis: 100%;
+  }
+
   .messagesContainer {
     padding: 1rem 0.75rem;
   }

@@ -17,7 +17,17 @@ obj
 
 # Testing
 coverage
+**/coverage
+TestResults
+**/TestResults
+*.trx
+*.coverage
 .vs
+
+# Local logs and transcripts
+*.log
+logs
+**/logs
 
 # Misc
 .DS_Store

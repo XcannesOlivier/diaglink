@@ -2,6 +2,7 @@ import {CompanyMachineQuota} from './CompanyMachineQuota';
 import type {MachineDto} from '../../types/machine';
 import {useEffect,useId,useRef,useState} from 'react';
 import {Button,Field,Input} from '@fluentui/react-components';
+import {CheckmarkRegular} from '@fluentui/react-icons';
 import {companyConsumptionRequest,financeRequest,type FinanceSummary,type ClientTopUp,type CompanyConsumptionMachine,type CompanyConsumptionReport} from '../../services/companyFinanceService';
 import styles from './CompanyFinancePanel.module.css';
 import {getMachines} from '../../services/machineService';
@@ -85,33 +86,13 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
   const consumptionByMachine=new Map(consumption?.machines.map(machine=>[machine.id,machine])??[]);
   const toggleMachine=(machineId:string)=>setOpenMachines(current=>{const next=new Set(current);if(next.has(machineId))next.delete(machineId);else next.add(machineId);return next;});
   return <section aria-label="Finances de l’entreprise" className={styles.panel}>
-    <div className={styles.heading}><p className={styles.intro}>Gardez un œil sur vos crédits et votre abonnement.</p><Button disabled={busy} onClick={()=>setRevision(v=>v+1)}>Actualiser</Button></div>
+    <div className={styles.heading}><p className={styles.intro}>Suivez vos quotas et gérez votre crédit supplémentaire.</p><Button disabled={busy} onClick={()=>setRevision(v=>v+1)}>Actualiser</Button></div>
     {!data&&!message&&<p>Chargement…</p>}
     {data&&<>
       {data.creditStatus==='AiCreditExhausted'&&<div role="alert" className={styles.alert}>Crédit IA épuisé. Ajoutez du crédit supplémentaire pour continuer. Votre historique reste accessible.</div>}
       <div className={`${styles.cards} ${styles.companyCards}`}>
-        <article className={styles.card} aria-label="Machines et quotas"><h3>Machines et quotas</h3>
-          <div className={styles.companyMachineControls}><label>Période <select aria-label="Période de consommation des machines" value={period} onChange={event=>{const value=event.target.value as UsagePeriod;setPeriod(value);setFilter(usageWindow(value));}}>{Object.entries(usagePeriods).map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label><input className={styles.machineSearch} type="search" aria-label="Rechercher une machine" placeholder="Rechercher une machine..." value={machineSearch} onChange={event=>setMachineSearch(event.target.value)}/></div>
-          {consumptionError&&<p role="alert">Consommation indisponible. Actualisez pour réessayer.</p>}
-          {machinesError?<p role="alert">Machines indisponibles. Actualisez pour réessayer.</p>:machines===null?<p>Chargement des machines…</p>:machines.length===0?<p>Aucune machine dans votre entreprise.</p>:filteredMachines.length===0?<p className={styles.note}>Aucune machine trouvée.</p>:<ul id={machinesListId} className={`${styles.quotaList} ${styles.machineCards}`}>{visibleMachines.map((machine,index)=>{const usersId=`company-machine-users-${machine.id}`,usersOpen=openMachines.has(machine.id),machineConsumption=consumptionByMachine.get(machine.id);return <CompanyMachineQuota key={machine.id} machine={machine} consumption={machineConsumption} alternate={index%2===0} usersOpen={usersOpen} usersId={usersId} onToggleUsers={()=>toggleMachine(machine.id)} onManage={machineConsumption?()=>setManagedMachine(machineConsumption):undefined} token={getAccessToken} revision={revision} onSessionExpired={onDiagLinkSessionExpired}/>;})}</ul>}
-          {!normalizedMachineSearch&&filteredMachines.length>5&&<Button appearance="secondary" style={{marginTop:16,width:'100%'}} aria-expanded={expandedMachines} aria-controls={machinesListId} onClick={()=>setExpandedMachines(value=>!value)}>{expandedMachines?'Voir moins de machines':'Voir plus de machines'}</Button>}
-          <MachineSubscriptionDialog open={managedMachine!==null} machine={managedMachine} companyId={companyId} token={getAccessToken} actionEnabled companyScoped onOpenChange={open=>{if(!open)setManagedMachine(null);}} onSuccess={()=>setRevision(value=>value+1)} onDiagLinkSessionExpired={onDiagLinkSessionExpired}/>
-        </article>
-        <div className={styles.companyFinanceRightColumn}>
-        <article className={styles.card} aria-label="Crédit supplémentaire"><h3>Crédit supplémentaire</h3><p className={styles.muted}>Partagé entre toutes vos machines.</p>
-          <div className={styles.metric}><strong>{euro(data.walletBalance)}</strong><span> disponibles</span></div>
-          <div className={styles.walletBar} aria-hidden="true"><span style={{width:data.walletBalance>0?'100%':'0%'}}/></div>
-          <p className={styles.note}>Utilisé automatiquement quand le quota inclus de la machine est épuisé.</p>
-          <div className={styles.recharge}>
-            <h4>Ajouter du crédit</h4>
-            <div className={styles.buttons}>{[10,20,50,100,200].map(n=><Button key={n} appearance={Number((pending?String(pending.amount):amount).replace(',','.'))===n?'primary':'secondary'} aria-pressed={Number((pending?String(pending.amount):amount).replace(',','.'))===n} disabled={busy||!!pending||!data.rechargeEnabled} onClick={()=>setAmount(String(n))}>{n} €</Button>)}</div>
-            <Field className={styles.amountField} label="Montant libre en euros" hint="Minimum 10 €"><Input value={pending?String(pending.amount):amount} disabled={busy||!!pending||!data.rechargeEnabled} onChange={(_,d)=>setAmount(d.value)} inputMode="decimal"/></Field>
-            <Button appearance="primary" disabled={busy||!data.rechargeEnabled} onClick={()=>void recharge()}>{pending?'Réessayer la recharge':'Ajouter du crédit supplémentaire'}</Button>
-            {!data.rechargeEnabled&&<p>La recharge est temporairement indisponible.</p>}
-          </div>
-        </article>
-        <details className={`${styles.card} ${styles.subscription}`} aria-label="Abonnement">
-        <summary className={`${styles.cardHeading} ${styles.subscriptionSummary}`}><h3>Abonnement</h3><span className={data.subscriptionStatus==='past_due'||data.subscriptionStatus==='unpaid'?styles.warning:`${styles.badge}${data.subscriptionStatus==='trialing'?` ${styles.activationBadge}`:''}`}>{data.subscriptionStatus?(labels[data.subscriptionStatus]??'À vérifier'):'Aucun abonnement'}</span></summary>
+        <details className={`${styles.card} ${styles.subscription} ${styles.companySubscription}`} aria-label="Abonnement">
+        <summary className={`${styles.cardHeading} ${styles.subscriptionSummary}`}><div className={styles.companySectionHeading}><h2>Abonnement</h2><span className={styles.note}>Statut et facturation de vos machines actives.</span></div><span className={data.subscriptionStatus==='past_due'||data.subscriptionStatus==='unpaid'?styles.warning:`${styles.badge}${data.subscriptionStatus==='trialing'?` ${styles.activationBadge}`:''}`}>{data.subscriptionStatus?(labels[data.subscriptionStatus]??'À vérifier'):'Aucun abonnement'}</span></summary>
         <dl className={styles.details}>
         <dt>Prochaine échéance</dt><dd>{data.nextDueUtc&&!data.cancelAtPeriodEnd&&data.subscriptionStatus!=='canceled'?new Date(data.nextDueUtc).toLocaleString('fr-FR'):'—'}</dd>
         <dt>Nombre total de machines</dt><dd>{machines?.length??'Indisponible'}</dd>
@@ -122,7 +103,28 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
         <p className={styles.note}>Estimation pour les machines actives à 29,90 € HT par mois, hors recharges et ajustements.</p>
         {data.unpaidInvoiceAmount!==null&&<div className={styles.alert}><strong>Facture impayée · {euro(data.unpaidInvoiceAmount)}</strong><p>Montant à régler. Une recharge de crédit ne règle pas cette facture.</p><Button appearance="primary" disabled={busy} onClick={()=>void payInvoice()}>Régler la facture</Button></div>}
         </details>
-        </div>
+        <article className={`${styles.card} ${styles.companyMachines}`} aria-label="Machines et quotas"><h2>Machines et quotas</h2><p className={styles.muted}>Le quota inclus est propre à chaque machine. Consultez ici le disponible et la consommation.</p>
+          <div className={styles.companyMachineControls}><label>Période <select aria-label="Période de consommation des machines" value={period} onChange={event=>{const value=event.target.value as UsagePeriod;setPeriod(value);setFilter(usageWindow(value));}}>{Object.entries(usagePeriods).map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label><input className={styles.machineSearch} type="search" aria-label="Rechercher une machine" placeholder="Rechercher une machine..." value={machineSearch} onChange={event=>setMachineSearch(event.target.value)}/></div>
+          {consumptionError&&<p role="alert">Consommation indisponible. Actualisez pour réessayer.</p>}
+          {machinesError?<p role="alert">Machines indisponibles. Actualisez pour réessayer.</p>:machines===null?<p>Chargement des machines…</p>:machines.length===0?<p>Aucune machine dans votre entreprise.</p>:filteredMachines.length===0?<p className={styles.note}>Aucune machine trouvée.</p>:<ul id={machinesListId} className={`${styles.quotaList} ${styles.machineCards}`}>{visibleMachines.map((machine,index)=>{const usersId=`company-machine-users-${machine.id}`,usersOpen=openMachines.has(machine.id),machineConsumption=consumptionByMachine.get(machine.id);return <CompanyMachineQuota key={machine.id} machine={machine} consumption={machineConsumption} alternate={index%2===0} usersOpen={usersOpen} usersId={usersId} onToggleUsers={()=>toggleMachine(machine.id)} onManage={machineConsumption?()=>setManagedMachine(machineConsumption):undefined} token={getAccessToken} revision={revision} onSessionExpired={onDiagLinkSessionExpired}/>;})}</ul>}
+          {!normalizedMachineSearch&&filteredMachines.length>5&&<Button appearance="secondary" style={{marginTop:16,width:'100%'}} aria-expanded={expandedMachines} aria-controls={machinesListId} onClick={()=>setExpandedMachines(value=>!value)}>{expandedMachines?'Voir moins de machines':'Voir plus de machines'}</Button>}
+          <MachineSubscriptionDialog open={managedMachine!==null} machine={managedMachine} companyId={companyId} token={getAccessToken} actionEnabled companyScoped onOpenChange={open=>{if(!open)setManagedMachine(null);}} onSuccess={()=>setRevision(value=>value+1)} onDiagLinkSessionExpired={onDiagLinkSessionExpired}/>
+        </article>
+        <article className={`${styles.card} ${styles.companyWallet}`} aria-label="Crédit supplémentaire"><h2>Crédit supplémentaire</h2><p className={styles.muted}>Un solde partagé entre toutes vos machines, en complément de leurs quotas inclus.</p>
+          <div className={styles.metric}><strong>{euro(data.walletBalance)}</strong><span> disponibles</span></div>
+          <div className={styles.walletBar} aria-hidden="true"><span style={{width:data.walletBalance>0?'100%':'0%'}}/></div>
+          <p className={styles.note}>Utilisé automatiquement quand le quota inclus de la machine est épuisé.</p>
+          <div className={styles.recharge}>
+            <h4>Ajouter du crédit</h4>
+            <div className={`${styles.buttons} ${styles.companyAmountButtons}`}>{[10,20,50,100,200].map(n=>{
+              const selected=Number((pending?String(pending.amount):amount).replace(',','.'))===n;
+              return <Button key={n} appearance={selected?'primary':'secondary'} icon={selected?<CheckmarkRegular/>:undefined} aria-pressed={selected} disabled={busy||!!pending||!data.rechargeEnabled} onClick={()=>setAmount(String(n))}>{n} €</Button>;
+            })}</div>
+            <Field className={styles.amountField} label="Montant libre en euros" hint="Minimum 10 €"><Input className={styles.companyAmountInput} size="large" value={pending?String(pending.amount):amount} disabled={busy||!!pending||!data.rechargeEnabled} onChange={(_,d)=>setAmount(d.value)} inputMode="decimal"/></Field>
+            <Button appearance="primary" disabled={busy||!data.rechargeEnabled} onClick={()=>void recharge()}>{pending?'Réessayer la recharge':'Ajouter du crédit supplémentaire'}</Button>
+            {!data.rechargeEnabled&&<p>La recharge est temporairement indisponible.</p>}
+          </div>
+        </article>
       </div>
     </>}
     <p role="status">{message}</p>

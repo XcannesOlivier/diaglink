@@ -37,9 +37,21 @@ public sealed class TechnicalSourceAccessTests
     private const string SourceBlob = BlobPrefix + "/DEVELON-DX10z-Manuel-Utilisation-Maintenance-EN.pdf";
 
     [TestMethod]
-    public async Task ResolveAsync_ValidOwnedSourceReturnsPageMapSourceBlob()
+    public async Task ResolveAsync_LegacyDisplayedPageKeepsItsPersistedDocumentMapping()
     {
         await using var fixture = await Fixture.CreateAsync();
+
+        var result = await fixture.Access.ResolveAsync(fixture.SourceId, Owner, fixture.Principal, default);
+
+        Assert.AreEqual(TechnicalSourceAccessKind.Success, result.Kind);
+        Assert.AreEqual(SourceBlob, result.SourceBlob);
+        Assert.AreEqual($"{BlobPrefix}/{DocumentId}/page-map.json", fixture.Reader.RequestedPageMapBlobName);
+    }
+
+    [TestMethod]
+    public async Task ResolveAsync_ValidPhysicalPageSourceReturnsPageMapSourceBlob()
+    {
+        await using var fixture = await Fixture.CreateAsync(physicalCitation: true);
 
         var result = await fixture.Access.ResolveAsync(fixture.SourceId, Owner, fixture.Principal, default);
 
@@ -245,10 +257,12 @@ public sealed class TechnicalSourceAccessTests
     {
         public byte[]? PdfContent { get; set; }
         public int PageMapPdfPage { get; set; } = 72;
+        public string? RequestedPageMapBlobName { get; private set; }
         public string? RequestedPdfBlobName { get; private set; }
 
         public Task<Stream?> OpenPageMapAsync(string blobName, CancellationToken cancellationToken)
         {
+            RequestedPageMapBlobName = blobName;
             var json = $$"""
             {
               "schemaVersion": 1,
@@ -497,7 +511,9 @@ public sealed class TechnicalSourceAccessTests
         public ClaimsPrincipal Principal { get; }
         public long SourceId { get; }
 
-        public static async Task<Fixture> CreateAsync(bool grantMachineAccess = true)
+        public static async Task<Fixture> CreateAsync(
+            bool grantMachineAccess = true,
+            bool physicalCitation = false)
         {
             var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -555,7 +571,7 @@ public sealed class TechnicalSourceAccessTests
                 },
                 DocumentId = DocumentId,
                 PdfPage = 72,
-                DisplayPage = "70",
+                DisplayPage = physicalCitation ? "pdf:72" : "70",
                 Label = "p. 70",
                 StartIndex = 9,
                 EndIndex = 14,

@@ -202,7 +202,10 @@ describe('ChatService', () => {
           ], sources: [
             { id: 22, pdfPage: 75, displayPage: '73', label: 'p. 73', startIndex: 20, endIndex: 25, displayOrder: 1 },
             { id: 21, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: 8, endIndex: 13, displayOrder: 0, documentId: 'private' },
-          ], suggestions: ['Où est le relais ?'] },
+          ], suggestions: ['Où est le relais ?'], webCitations: [
+            { type: 'uri_citation', label: 'Fiche fournisseur', url: 'https://supplier.example/2544-9024', quote: 'Référence exacte' },
+            { type: 'uri_citation', label: 'URL invalide', url: 'ftp://supplier.example/part' },
+          ] },
           { role: 'assistant', content: 'Ancien message' },
         ]),
       }));
@@ -214,9 +217,16 @@ describe('ChatService', () => {
       expect(result[0].sources?.map(source => source.id)).toEqual([21, 22]);
       expect(result[0].sources?.[0]).not.toHaveProperty('documentId');
       expect(result[0].suggestions).toEqual(['Où est le relais ?']);
+      expect(result[0].webCitations).toEqual([{
+        type: 'uri_citation',
+        label: 'Fiche fournisseur',
+        url: 'https://supplier.example/2544-9024',
+        quote: 'Référence exacte',
+      }]);
       expect(result[1].visuals).toBeUndefined();
       expect(result[1].sources).toEqual([]);
       expect(result[1].suggestions).toBeUndefined();
+      expect(result[1].webCitations).toBeUndefined();
     });
   });
 

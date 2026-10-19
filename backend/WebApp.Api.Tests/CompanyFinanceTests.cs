@@ -117,6 +117,9 @@ public class CompanyFinanceTests
     public async Task MachineStatusUsesClaimTenantAndExistingIdempotentService()
     {
         await using var f=new Fixture();await f.Seed();await using var db=f.Db();
+        var now=DateTime.UtcNow;
+        var period=await db.MachineBillingPeriods.SingleAsync();
+        period.PeriodStartUtc=now.AddDays(-1);period.PeriodEndUtc=now.AddDays(1);
         db.BillingAccounts.Add(new(){Id=Guid.NewGuid(),CompanyId=f.CompanyId,StripeCustomerId="cus_test",StripeSubscriptionId="sub_test",SubscriptionStatus="active"});
         await db.SaveChangesAsync();
         var gateway=new MachineStatusGateway();var service=new StripeMachineStatusService(f.Options,gateway,null!);
@@ -128,7 +131,7 @@ public class CompanyFinanceTests
         await using(var afterDeactivate=f.Db())
         {
             Assert.AreEqual("inactive",(await afterDeactivate.Machines.SingleAsync()).Status);
-            Assert.IsTrue(await MachineEntitlements.Eligible(afterDeactivate,DateTime.UtcNow).AnyAsync());
+            Assert.IsTrue(await MachineEntitlements.Eligible(afterDeactivate,now).AnyAsync());
             Assert.AreEqual(1,await afterDeactivate.MachineBillingPeriods.CountAsync());
             Assert.AreEqual(0,await afterDeactivate.CreditLedger.CountAsync());
         }

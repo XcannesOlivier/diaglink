@@ -2,14 +2,18 @@
   font-size: 16px;
   line-height: 1.55;
   color: var(--colorNeutralForeground1);
-  word-wrap: break-word;
-  overflow-wrap: break-word;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
 }
 
 .paragraph {
   display: block;
   margin: 0 0 8px 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .paragraph:last-child {
@@ -28,6 +32,7 @@
   border-radius: 6px;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   color: var(--colorNeutralForeground1);
+  overflow-wrap: anywhere;
 }
 
 .codeBlock {
@@ -35,8 +40,10 @@
   border-radius: 6px;
   overflow-x: auto;
   border: 1px solid var(--colorNeutralStroke2);
+  min-width: 0;
   max-width: 100%;
   width: 100%;
+  box-sizing: border-box;
 }
 
 .codeBlock pre {
@@ -81,6 +88,7 @@
   text-decoration: none;
   border-bottom: 1px solid transparent;
   transition: border-bottom-color 0.2s ease;
+  overflow-wrap: anywhere;
 }
 
 .link:hover {
@@ -134,10 +142,15 @@
 .list {
   padding-left: 2em;
   margin-bottom: 16px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .listItem {
   margin-bottom: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .markdown ul,
@@ -205,17 +218,27 @@
   margin: 0 0 16px;
 }
 
-/* Table styling */
+/* Keep wide technical tables self-contained. References and values retain
+   their full text; only the table gets horizontal scrolling when required. */
 .markdown table {
+  display: block;
   border-collapse: collapse;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
+  max-width: 100%;
   margin-bottom: 16px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
 }
 
 .markdown th,
 .markdown td {
   padding: 8px 12px;
   border: 1px solid var(--colorNeutralStroke2);
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .markdown th {

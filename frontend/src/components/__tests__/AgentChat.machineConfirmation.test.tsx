@@ -5,14 +5,15 @@ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {AgentChat} from '../AgentChat';
 import {StarterMessages} from '../chat/StarterMessages';
 import {clearDiagLinkSession,markMachineEntryChoiceHandled} from '../../utils/apiAuth';
+import type { SelectedMachine } from '../../types/machine';
 
 const mocks=vi.hoisted(()=>({dispatch:vi.fn(),dispatchToast:vi.fn(),state:null as unknown as ReturnType<typeof makeState>}));
-const makeState=(role:'technician'|'company_admin'|'diaglink_super_admin')=>({
+const makeState=(role:'technician'|'company_admin'|'diaglink_super_admin', selected: SelectedMachine | null = {id:'machine-1',name:'Compresseur Test Alpha',reference:null}, currentConversationId: string | null = null)=>({
  auth:{status:'authenticated',user:null,error:null,currentUser:{userId:'u1',companyId:'c1',role}},
- chat:{status:'idle',messages:[],currentConversationId:null,error:null,pendingMessages:[]},
+ chat:{status:'idle',messages:[],currentConversationId,error:null,pendingMessages:[]},
  conversations:{list:[],isLoading:false,sidebarOpen:false,hasMore:false},
  ui:{chatInputEnabled:true,currentView:'chat'},
- machine:{selected:{id:'machine-1',name:'Compresseur Test Alpha',reference:null}},
+ machine:{selected},
 });
 
 vi.mock('@fluentui/react-components',()=>({
@@ -28,7 +29,7 @@ vi.mock('../../services/chatService',()=>({ChatService:class{clearError(){}cance
 vi.mock('../../services/machineService',()=>({getMachines:vi.fn()}));
 vi.mock('../../services/telemetry',()=>({trackFeedback:vi.fn()}));
 vi.mock('../ConversationSidebar',()=>({ConversationSidebar:()=>null}));
-vi.mock('../ChatInterface',()=>({ChatInterface:({starterAccessory,agentName,machineId}:{starterAccessory?:ReactNode;agentName?:string;machineId?:string})=><section aria-label="Assistant Technique" data-machine-id={machineId}><span>{agentName}</span>{starterAccessory}</section>}));
+vi.mock('../ChatInterface',()=>({ChatInterface:({starterAccessory,agentName,machineId,selectedMachine,showMachineSelectionPrompt}:{starterAccessory?:ReactNode;agentName?:string;machineId?:string;selectedMachine?:SelectedMachine|null;showMachineSelectionPrompt?:boolean})=><section aria-label="Assistant Technique" data-machine-id={machineId} data-machine-name={selectedMachine?.name} data-machine-reference={selectedMachine?.reference} data-show-machine-prompt={showMachineSelectionPrompt}><span>{agentName}</span>{starterAccessory}</section>}));
 
 describe('AgentChat machine confirmation panel',()=>{
  let host:HTMLDivElement,root:Root;
@@ -36,6 +37,20 @@ describe('AgentChat machine confirmation panel',()=>{
  afterEach(async()=>{await act(async()=>root.unmount());host.remove();sessionStorage.clear();});
  const render=async()=>act(async()=>root.render(<AgentChat agentId="agent" agentName="Assistant Technique — Compresseur Test Alpha"/>));
  const remount=async()=>{await act(async()=>root.unmount());root=createRoot(host);await render();};
+
+ it('passes the selected machine metadata without changing its confirmation lifecycle',async()=>{
+  mocks.state=makeState('technician',{id:'m1',name:'Presse',reference:'PRS-01'});markMachineEntryChoiceHandled();await render();
+  const chat=host.querySelector<HTMLElement>('[aria-label="Assistant Technique"]')!;
+  expect(chat.dataset.machineName).toBe('Presse');expect(chat.dataset.machineReference).toBe('PRS-01');expect(chat.dataset.showMachinePrompt).toBe('false');
+  expect(host.querySelector('[aria-label="Confirmation de la machine sélectionnée"]')).toBeNull();
+ });
+
+ it('requests selection guidance only for a new chat without a machine',async()=>{
+  mocks.state=makeState('technician',null);await render();
+  expect(host.querySelector<HTMLElement>('[aria-label="Assistant Technique"]')?.dataset.showMachinePrompt).toBe('true');
+  mocks.state=makeState('technician',null,'legacy-conversation');await render();
+  expect(host.querySelector<HTMLElement>('[aria-label="Assistant Technique"]')?.dataset.showMachinePrompt).toBe('false');
+ });
 
  it('keeps only the allowed actions, preserves the machine title elsewhere and confirms through sessionStorage',async()=>{
   await render();

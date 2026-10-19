@@ -20,7 +20,7 @@ function formatFileSize(bytes: number): string {
 
 function UserMessageComponent({ message }: UserMessageProps) {
   return (
-    <div className={styles.userMessageWrapper}>
+    <div className={styles.userMessageWrapper} data-message-id={message.id}>
       <CopilotUserMessage
         className={styles.userMessage}
       >

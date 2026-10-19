@@ -15,9 +15,9 @@ vi.mock('../FilePreview', () => ({
   ),
 }));
 vi.mock('../MachineDocuments', () => ({
-  MachineDocuments: () => <button>Doc Machines</button>,
+  MachineDocuments: () => <button>Documents machine</button>,
 }));
-vi.mock('../VoiceInput', () => ({ VoiceInput: () => <button aria-label="Saisie vocale" /> }));
+vi.mock('../VoiceInput', () => ({ VoiceInput: ({ disabled }: { disabled?: boolean }) => <button aria-label="Saisie vocale" disabled={disabled} /> }));
 vi.mock('../MessageQueue', () => ({ MessageQueue: () => null }));
 
 describe('ChatInput machine actions', () => {
@@ -50,7 +50,7 @@ describe('ChatInput machine actions', () => {
     await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
   };
 
-  it('keeps Doc Machines without rendering the change-machine button', async () => {
+  it('keeps machine documents without rendering the change-machine button', async () => {
     await act(async () => root.render(
       <ChatInput
         onSubmit={vi.fn()}
@@ -59,11 +59,11 @@ describe('ChatInput machine actions', () => {
       />,
     ));
 
-    expect(container.textContent).toContain('Doc Machines');
+    expect(container.textContent).toContain('Documents machine');
     expect(container.textContent).not.toContain('Changer de machine');
     const buttons = [...container.querySelectorAll('button')];
     expect(buttons.some(button => button.textContent === 'Machines')).toBe(false);
-    expect(buttons.findIndex(button => button.textContent === 'Doc Machines'))
+    expect(buttons.findIndex(button => button.textContent === 'Documents machine'))
       .toBeLessThan(buttons.findIndex(button => button.getAttribute('aria-label') === 'Joindre un fichier'));
   });
 
@@ -85,6 +85,49 @@ describe('ChatInput machine actions', () => {
     expect(menuButton).not.toBeNull();
     await act(async () => menuButton!.click());
     expect(onOpenMobileMenu).toHaveBeenCalledOnce();
+  });
+
+  it('groups composition and conversation actions while retaining their callbacks', async () => {
+    const onNewChat = vi.fn();
+    const onToggleSidebar = vi.fn();
+    await act(async () => root.render(
+      <ChatInput onSubmit={vi.fn()} hasMessages onNewChat={onNewChat} onToggleSidebar={onToggleSidebar} />,
+    ));
+    const compose = container.querySelector('[role="group"][aria-label="Pièces jointes et saisie vocale"]');
+    const conversations = container.querySelector('[role="group"][aria-label="Conversations"]');
+    expect(compose?.querySelector('[aria-label="Joindre un fichier"]')).not.toBeNull();
+    expect(compose?.querySelector('[aria-label="Saisie vocale"]')).not.toBeNull();
+    expect(conversations?.querySelectorAll('button')).toHaveLength(2);
+    expect(compose?.contains(conversations)).toBe(false);
+    await act(async () => {
+      conversations?.querySelector<HTMLButtonElement>('[aria-label="Nouvelle conversation"]')?.click();
+      conversations?.querySelector<HTMLButtonElement>('[aria-label="Historique des conversations"]')?.click();
+    });
+    expect(onNewChat).toHaveBeenCalledOnce();
+    expect(onToggleSidebar).toHaveBeenCalledOnce();
+  });
+
+  it('keeps disabled actions disabled and hides the conversation group when no callback exists', async () => {
+    await act(async () => root.render(
+      <ChatInput onSubmit={vi.fn()} disabled hasMessages onNewChat={vi.fn()} onToggleSidebar={vi.fn()} />,
+    ));
+    for (const label of ['Joindre un fichier', 'Saisie vocale', 'Nouvelle conversation', 'Historique des conversations']) {
+      expect(container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)?.disabled).toBe(true);
+    }
+    await act(async () => root.render(<ChatInput onSubmit={vi.fn()} />));
+    expect(container.querySelector('[role="group"][aria-label="Conversations"]')).toBeNull();
+  });
+
+  it('retains the new-chat guard when there are no messages', async () => {
+    await act(async () => root.render(<ChatInput onSubmit={vi.fn()} onNewChat={vi.fn()} />));
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Nouvelle conversation"]')?.disabled).toBe(true);
+  });
+
+  it('uses comfortable action targets and keeps conversation buttons together when wrapping', () => {
+    const css = readFileSync(resolve('src/components/chat/ChatInput.module.css'), 'utf8');
+    expect(css).toMatch(/\.actionGroup > button,[\s\S]*?min-width:\s*40px;[\s\S]*?min-height:\s*40px;/);
+    expect(css).toMatch(/\.actionGroup\s*\{[^}]*display:\s*flex;[^}]*flex-shrink:\s*0;/);
+    expect(css).toMatch(/\.conversationActions\s*\{[^}]*border-left:\s*1px solid var\(--colorNeutralStroke2\);/);
   });
 
   it.each([

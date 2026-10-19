@@ -34,6 +34,24 @@ npm-debug.log*
 # Playwright
 .playwright-mcp/
 
+# Logs
+*.log
+
+# Test results and coverage
+TestResults/
+**/TestResults/
+coverage/
+**/coverage/
+*.trx
+*.coverage
+*.coveragexml
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.orig
+
 # Environment files (local dev uses .azure/<env>/.env)
 .env
 .env.local

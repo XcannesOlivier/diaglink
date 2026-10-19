@@ -6,12 +6,15 @@ import { CompanyLogo } from './CompanyLogo';
 
 const useStyles = makeStyles({
   root: {
-    display: 'flex',
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 220px) auto',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
+    columnGap: tokens.spacingHorizontalM,
+    rowGap: tokens.spacingVerticalXXS,
     minWidth: 0,
   },
   email: {
+    gridColumn: 1,
     minWidth: 0,
     color: tokens.colorNeutralForeground2,
     whiteSpace: 'nowrap',
@@ -20,8 +23,15 @@ const useStyles = makeStyles({
     maxWidth: '220px',
   },
   role: {
+    gridColumn: 1,
+    justifySelf: 'start',
     flexShrink: 0,
     whiteSpace: 'nowrap',
+    color: tokens.colorNeutralForeground1,
+  },
+  logo: {
+    gridColumn: 2,
+    gridRow: '1 / span 2',
   },
 });
 
@@ -38,14 +48,14 @@ export const UserBadge: React.FC<UserBadgeProps> = ({ currentUser, companyLogoUr
 
   return (
     <div className={styles.root}>
-      <Text className={styles.email}>
+      <Text className={styles.email} title={[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ') || currentUser.email}>
         {[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ') || currentUser.email}
       </Text>
-      <Badge className={styles.role} appearance="tint" color="informative">
+      <Badge className={styles.role} appearance="outline" color="subtle">
         {ROLE_LABELS[currentUser.role]}
       </Badge>
       {currentUser.role !== 'diaglink_super_admin' && (
-        <CompanyLogo logoObjectUrl={companyLogoUrl} companyName={currentUser.companyBranding?.companyName} />
+        <CompanyLogo className={styles.logo} logoObjectUrl={companyLogoUrl} companyName={currentUser.companyBranding?.companyName} />
       )}
     </div>
   );

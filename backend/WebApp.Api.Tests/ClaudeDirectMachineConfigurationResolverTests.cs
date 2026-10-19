@@ -125,19 +125,28 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
     }
 
     [TestMethod]
-    public void PromptProvider_ClaudeDirectContainsPrincipalBusinessRules()
+    public void PromptProvider_ClaudeDirectContainsDiagnosticAndDocumentationInvariants()
     {
         var prompt = PromptProvider().GetClaudeDirectPrompt();
 
         foreach (var expected in new[]
         {
-            "Utilise File Search comme outil documentaire principal pour les informations propres à la machine.",
-            "Effectue normalement une première recherche ciblée.",
-            "Effectue une recherche supplémentaire uniquement pour :",
-            "Utilise get_page_image uniquement lorsqu’une information nécessaire dépend réellement du contenu visuel",
+            "Observation → interprétation prudente → hypothèse → contrôle discriminant.",
+            "Une cause n’est confirmée que lorsque les contrôles permettent réellement de l’isoler.",
+            "Propose une seule action discriminante par réponse",
+            "Deux changements de branchement, d’état de machine ou de grandeur mesurée constituent normalement deux contrôles distincts.",
+            "**Tension — V :**",
+            "**Courant — A ou mA :**",
+            "**Résistance — Ω :**",
+            "**Continuité :** contrôle hors tension.",
+            "**Chute de tension sous charge — V :**",
+            "Utilise File Search comme outil documentaire principal.",
+            "Utilise get_page_image lorsque le technicien demande à voir un schéma",
             "N’examine pas plusieurs zones lorsqu’une seule suffit.",
-            "[Confirmé / Partiellement confirmé / Non confirmé]",
-            "Partiellement confirmé — le trajet après RENVOI_Y reste à vérifier."
+            "📄 Source : p. XX",
+            "📄 Source : Page PDF : XX",
+            "Ne déduis jamais une page à partir d’une figure",
+            "Ne recopie pas un passage anglais du manuel"
         })
         {
             StringAssert.Contains(prompt, expected);
@@ -145,31 +154,61 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
     }
 
     [TestMethod]
-    public void PromptProvider_ClaudeDirectContainsIndicativeResponseLengthGuidance()
+    public void PromptProvider_ClaudeDirectKeepsConciseResponseModesWithoutRigidTemplateCatalog()
     {
         var prompt = PromptProvider().GetClaudeDirectPrompt();
 
-        foreach (var expected in new[]
-        {
-            "40 à 100 mots",
-            "150 mots",
-            "50 à 120 mots",
-            "30 à 80 mots",
-            "120 mots",
-            "60 à 140 mots",
-            "200 mots",
-            "80 à 250 mots",
-            "350 mots",
-            "80 mots",
-            "150 à 300 mots"
-        })
-        {
-            StringAssert.Contains(prompt, expected);
-        }
+        StringAssert.Contains(prompt, "## Réponse factuelle");
+        StringAssert.Contains(prompt, "## Diagnostic interactif");
+        StringAssert.Contains(prompt, "## Demande d’explication");
+        StringAssert.Contains(prompt, "## Procédure complète");
+        StringAssert.Contains(prompt, "## Recherche de pièce ou de fournisseur");
+        StringAssert.Contains(prompt, "normalement moins de 60 mots");
+        StringAssert.Contains(prompt, "vise 30 à 60 mots hors source documentaire");
+        StringAssert.Contains(prompt, "une interprétation courte et prudente uniquement si elle aide");
+        StringAssert.Contains(prompt, "un seul contrôle immédiatement réalisable");
+        StringAssert.Contains(prompt, "une seule question précise sur le résultat obtenu");
+        StringAssert.Contains(prompt, "N’explique pas les deux scénarios possibles avant d’obtenir le résultat.");
+        StringAssert.Contains(prompt, "La sécurité, les conditions de mesure et les informations techniques indispensables restent prioritaires");
+        StringAssert.Contains(prompt, "sans raconter la recherche ni les résultats écartés");
+        Assert.IsFalse(prompt.Contains("Vise normalement 30 à 90 mots.", StringComparison.Ordinal));
+        Assert.IsFalse(prompt.Contains("Maximum habituel :", StringComparison.Ordinal));
+    }
 
-        Assert.IsFalse(prompt.Contains(
-            "jamais d’un nombre de mots prédéfini",
-            StringComparison.Ordinal));
+    [TestMethod]
+    public void PromptProvider_ClaudeDirectSeparatesVisualExplanationAndDiagramDiagnosticIntents()
+    {
+        var prompt = PromptProvider().GetClaudeDirectPrompt();
+
+        StringAssert.Contains(prompt, "## Visualisation ou localisation visuelle");
+        StringAssert.Contains(prompt, "Vise 20 à 50 mots hors source et légende indispensable.");
+        StringAssert.Contains(prompt, "les composants explicitement demandés et leurs repères vérifiés");
+        StringAssert.Contains(prompt, "N’explique pas le fonctionnement, le trajet, les bornes ou les connexions qui ne sont pas demandés.");
+        StringAssert.Contains(prompt, "Une simple demande d’affichage n’exige pas de suivre le circuit.");
+        StringAssert.Contains(prompt, "affiche-la et identifie brièvement le composant vérifié");
+        StringAssert.Contains(prompt, "## Demande d’explication");
+        StringAssert.Contains(prompt, "les connexions utiles sans appliquer la limite d’une simple visualisation");
+        StringAssert.Contains(prompt, "## Diagnostic interactif");
+        StringAssert.Contains(prompt, "un seul contrôle immédiatement réalisable");
+        StringAssert.Contains(prompt, "les seules conditions de sécurité et de mesure nécessaires");
+        StringAssert.Contains(prompt, "📄 Source : Page PDF : XX");
+    }
+
+    [TestMethod]
+    public void PromptProvider_ClaudeDirectSeparatesTechnicalPartStatusesFromCommercialPolicy()
+    {
+        var prompt = PromptProvider().GetClaudeDirectPrompt();
+
+        StringAssert.Contains(prompt, "## 1. Référence constructeur ou OEM documentée");
+        StringAssert.Contains(prompt, "## 2. Remplacement officiel confirmé");
+        StringAssert.Contains(prompt, "## 3. Correspondance annoncée par un vendeur");
+        StringAssert.Contains(prompt, "## 4. Alternative potentielle non confirmée");
+        StringAssert.Contains(prompt, "## 5. Alternative compatible confirmée");
+        StringAssert.Contains(prompt, "le vendeur n’a pas à démontrer une seconde fois son applicabilité à la machine");
+        StringAssert.Contains(prompt, "⚠️ Équivalence non confirmée — Ne pas commander sans vérification.");
+        StringAssert.Contains(prompt, "Les préférences de fournisseurs, zones géographiques, marketplaces, nombre d’offres et règles de prix sont définies par la politique commerciale active");
+        Assert.IsFalse(prompt.Contains("Prix : non communiqué", StringComparison.Ordinal));
+        Assert.IsFalse(prompt.Contains("Présente au maximum trois", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -282,6 +321,15 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
 
         var exception = Assert.ThrowsExactly<FileNotFoundException>(() => provider.GetClaudeDirectPrompt());
         StringAssert.Contains(exception.Message, TechnicalAssistantPromptProvider.ClaudeDirectRelativePath);
+    }
+
+    [TestMethod]
+    public void PromptProvider_RequiresPagePrefixForEveryPageInAList()
+    {
+        var prompt = PromptProvider().GetClaudeDirectPrompt();
+
+        StringAssert.Contains(prompt, "p. 17, p. 19, p. 32");
+        StringAssert.Contains(prompt, "n’écris jamais `p. 17, 19, 32`");
     }
 
     private static async Task AssertConfigurationError(

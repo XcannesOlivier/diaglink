@@ -144,10 +144,14 @@ describe('chat message presentation', () => {
 
     const section = container.querySelector('section[aria-labelledby="web-sources-web-citations"]');
     const links = section?.querySelectorAll<HTMLAnchorElement>('a');
+    const excerpt = section?.querySelector<HTMLDetailsElement>('details');
     expect(section?.textContent).toContain('Sources Web');
     expect(section?.textContent).toContain('Manufacturer documentation');
     expect(section?.textContent).toContain('Quoted technical passage.');
     expect(section?.textContent).not.toContain('Duplicate');
+    expect(excerpt?.open).toBe(false);
+    expect(excerpt?.querySelector('summary')?.textContent).toBe('Voir l’extrait');
+    expect(excerpt?.querySelector('p')?.textContent).toBe('Quoted technical passage.');
     expect(links).toHaveLength(1);
     expect(links?.[0].getAttribute('href')).toBe('https://example.test/technical-article');
     expect(links?.[0].getAttribute('target')).toBe('_blank');

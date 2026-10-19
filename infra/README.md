@@ -1,236 +1,118 @@
-# Infrastructure - Azure Bicep Templates
+# DiagLink Azure infrastructure
 
-**AI Assistance**: See `.github/skills/writing-bicep-templates/SKILL.md` for Bicep patterns.
+The `infra/` directory contains subscription-scope Bicep templates used by Azure Developer CLI.
+It provisions the hosting, identity, email and observability resources for the DiagLink web
+application. It does not provision every external service consumed by the application.
 
-## Overview
+## Resources provisioned by Bicep
 
-Infrastructure as Code (IaC) using Azure Bicep, deployed via Azure Developer CLI (azd). Provisions:
+- resource group;
+- Azure Container Registry, Basic tier, with admin credentials disabled;
+- user-assigned managed identity and ACR pull assignment;
+- Log Analytics workspace with 30-day retention;
+- separate backend and frontend Application Insights resources connected to that workspace;
+- Azure Container Apps environment and one externally accessible Container App;
+- Microsoft Entra SPA registration and service principal;
+- optional Entra backend registration for the retained OBO compatibility path;
+- Azure Communication Services, Email Communication Service, Azure-managed email domain and a
+  least-privilege custom sender role;
+- Foundry role assignment for the managed identity when the external Foundry resource ID is known.
 
-- **Azure Container Registry** (Basic tier) - Private image storage
-- **Azure Container Apps Environment** - Serverless container runtime
-- **Azure Container App** - Single container (frontend + backend)
-- **Log Analytics Workspace** - Centralized logging (30-day retention)
-- **Application Insights (Backend)** - OpenTelemetry traces and metrics (`appi-<token>`)
-- **Application Insights (Frontend)** - Browser telemetry (`appi-fe-<token>`, separate resource to isolate browser metrics)
-- **User-Assigned Managed Identity** - Regional isolation, used for ACR pull + AI Foundry RBAC + OBO FIC
-- **Entra SPA App Registration** - Microsoft Graph Bicep extension (`Microsoft.Graph/applications@v1.0`)
-- **Entra Backend App** (opt-in, `enableObo=true`) - OBO with FIC, `requiredResourceAccess`, admin consent via `oauth2PermissionGrants`
-- **RBAC Assignments** - MI → AI Foundry access (via Azure CLI, not Bicep); MI → ACR pull (via Bicep)
+The Container App runs one image containing both the React bundle and ASP.NET Core API. It uses
+0.5 vCPU, 1 GiB memory, zero to three replicas, HTTPS ingress on port 8080 and `/api/health`
+startup/liveness probes.
 
-## Architecture
+## Existing or separately managed dependencies
 
-```text
-Subscription (deployment scope)
-├── Resource Group (auto-created)
-├── User-Assigned Managed Identity (isolationScope: Regional)
-│   └── Used for: ACR pull, AI Foundry RBAC, OBO FIC
-├── Entra SPA App Registration (Microsoft Graph Bicep)
-│   ├── SPA redirect URIs (localhost; FQDN added by postprovision)
-│   └── Chat.ReadWrite scope
-├── Entra Backend App (conditional: enableObo=true)
-│   ├── FIC → user-assigned MI (secretless OBO)
-│   ├── requiredResourceAccess → Azure Machine Learning Services
-│   ├── oauth2PermissionGrants → admin consent
-│   └── knownClientApplications → SPA app
-├── Container Registry (ACR, adminUserEnabled: false)
-│   └── AcrPull role → user-assigned MI
-├── Application Insights (Backend: appi-xxx)
-│   └── OpenTelemetry traces, metrics, distributed tracing
-├── Application Insights (Frontend: appi-fe-xxx)
-│   └── Browser telemetry (separate resource)
-├── Container Apps Environment
-│   └── Container App (web)
-│       ├── User-assigned identity only
-│       ├── ACR pull via MI (no admin credentials)
-│       ├── Scale: 0-3 replicas
-│       └── Ingress: HTTPS external
-└── Log Analytics Workspace (shared by both App Insights resources)
+The templates refer to, but do not create:
 
-RBAC (via Azure CLI in postprovision.ps1):
-└── User-Assigned MI → Cognitive Services User + Cognitive Services OpenAI Contributor + Azure AI Developer on AI Foundry resource
-```
+- the Azure SQL server/database named by the managed-identity connection string;
+- the Storage account supplied through `AZURE_STORAGE_CONNECTION_STRING`;
+- the Microsoft Foundry account, its projects and machine Vector Stores;
+- Stripe products, prices, customers, subscriptions and webhook destinations;
+- Container Apps managed certificates supplied by name for custom domains.
+
+The external document-ingestion function is not present in these templates. Its compute,
+observability and retention settings cannot be inferred from this repository.
 
 ## Files
 
 | File | Purpose |
-|------|---------|
-| `main.bicep` | Orchestration (subscription scope) |
-| `main-infrastructure.bicep` | Shared resources (ACR, Log Analytics, Application Insights, Container Apps Env) |
-| `main-app.bicep` | Container App configuration |
-| `entra-app.bicep` | Entra app registration (Microsoft Graph Bicep extension) |
-| `bicepconfig.json` | Bicep configuration (Microsoft Graph v1.0 extension reference) |
-| `main.parameters.json` | Parameter values (environment name, location) |
-| `abbreviations.json` | Azure resource naming abbreviations |
+|---|---|
+| `main.bicep` | Subscription-scope orchestration and parameters. |
+| `main-infrastructure.bicep` | Shared identity, registry, monitoring, Container Apps environment and email modules. |
+| `main-app.bicep` | Container App environment variables, secrets, domains, health probes and image. |
+| `entra-app.bicep` | Entra registrations and service principals. |
+| `foundry-role-assignment.bicep` | Managed-identity role assignment on an existing Foundry resource. |
+| `core/host/*.bicep` | Reusable resource modules. |
+| `main.parameters.json` | Mapping from `azd` environment values to Bicep parameters. |
 
-## Key Features
+The checked-in `*.json` ARM files are compiled representations of the corresponding Bicep
+templates. Bicep is the maintainable source.
 
-- **Subscription Scope**: Single deployment creates resource group + all resources
-- **Parallel Provisioning**: ARM auto-parallelizes independent modules — `infrastructure` and `entraApp` deploy simultaneously when `enableObo=false`. With OBO enabled, `entraApp` waits for `infrastructure` (needs MI principal ID for FIC).
-- **Unique Naming**: `uniqueString()` prevents naming conflicts
-- **Scale-to-Zero**: Container App scales down when idle (cost savings)
-- **Managed Identity**: User-assigned MI with `isolationScope: Regional` for ACR pull + AI Foundry + OBO
-- **RBAC Automation**: Auto-assigns `Cognitive Services User` + `Cognitive Services OpenAI Contributor` + `Azure AI Developer` roles to AI Foundry
+## Important parameters
+
+| Parameter/environment value | Use |
+|---|---|
+| `AZURE_ENV_NAME`, `AZURE_LOCATION` | Resource naming and location. |
+| `ENTRA_TENANT_ID` | Entra registration tenant. |
+| `AUTH_OTP_PEPPER` | Secure HMAC pepper for login codes. |
+| `AZURE_STORAGE_CONNECTION_STRING` | Secure Blob Storage configuration. |
+| `CONTACT_RECIPIENT_ADDRESS` | Contact destination stored as a Container App secret. |
+| `STRIPE_SECRET_KEY` | Stripe test-mode server credential. |
+| `STRIPE_MACHINE_REQUEST_WEBHOOK_SECRET` | Signed machine-request webhook verification. |
+| `STRIPE_ENABLED` | Enables or disables payment workflows. |
+| `CUSTOM_DOMAIN_NAME` and certificate values | Existing managed-certificate bindings. |
+
+The backend additionally reads `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`,
+`STRIPE_TOPUP_WEBHOOK_SECRET` and `STRIPE_TOPUP_RETURN_URL` for subscription,
+machine-addition and wallet-top-up flows. The current Bicep does not inject those four values.
+They must be verified in the approved runtime configuration before those flows are tested; this
+documentation does not assume that they are present remotely.
+
+`AI_AGENT_ENDPOINT`, `AI_AGENT_ID` and the optional OBO registration remain in the templates for
+deployment compatibility, but the current application chat runtime is Claude Direct and does not
+select or call a Foundry Agent.
+
+Machine-specific `ProjectEndpoint`, `VectorStoreId` and `BlobPrefix` values are application data
+stored in SQL, not Bicep parameters.
 
 ## Deployment
 
-### Via azd (recommended)
+Use the lifecycle hooks declared in `azure.yaml`:
 
 ```powershell
-# Initial deployment
-azd up  # Provisions + deploys code
-
-# Update infrastructure only
+azd up
 azd provision
-
-# Change AI Foundry resource
-azd env set AI_FOUNDRY_RESOURCE_GROUP <resource-group>
-azd env set AI_FOUNDRY_RESOURCE_NAME <resource-name>
-azd provision  # Updates RBAC
+azd deploy
 ```
 
-### Direct Bicep (advanced)
+`preprovision.ps1` selects the existing Foundry account. `postprovision.ps1` updates generated
+Entra configuration, assigns RBAC and writes ignored local environment files. See
+[deployment/README.md](../deployment/README.md).
+
+For direct template validation without changing Azure:
 
 ```powershell
-az deployment sub create \
-  --location eastus \
-  --template-file main.bicep \
-  --parameters main.parameters.json \
-  --parameters environmentName=myenv
+az bicep build --file infra/main.bicep
 ```
 
-## Parameters
+A direct `az deployment sub create` additionally requires every mandatory secure parameter and is
+not equivalent to the complete `azd` hook workflow.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `environmentName` | (required) | Unique identifier (appended to resource names) |
-| `location` | (required) | Azure region |
-| `webImageName` | `mcr.microsoft.com/k8se/quickstart:latest` | Container image (placeholder during initial provision) |
-| `serviceManagementReference` | (empty) | Service Management Reference GUID (required by some orgs for Entra app registration) |
-| `entraTenantId` | `tenant().tenantId` | Entra tenant ID (auto-detected or from azd) |
-| `aiAgentEndpoint` | (from azd) | AI Agent endpoint URL |
-| `aiAgentId` | (from azd) | Agent name |
-| `enableObo` | `false` | Enable OBO backend app + FIC + admin consent (backend app in Bicep; FIC + admin consent in postprovision.ps1) |
-| `contactRecipientAddress` | (required) | Contact form recipient, supplied with `azd env set CONTACT_RECIPIENT_ADDRESS <address>` and injected as the `Contact__RecipientAddress` Container App secret. |
+## Identity and secrets
 
-## Outputs
+- A user-assigned managed identity pulls from ACR, accesses the existing SQL database and receives
+  the declared Foundry/email roles.
+- OTP, Storage and Stripe values are secure Bicep parameters stored as Container App secrets.
+- ACR admin credentials are disabled.
+- The production container runs as the non-root `app` user.
+- Secret values must be stored in the selected `azd` environment or an approved secret-management
+  process; they must not be committed.
 
-| Output | Purpose |
-|--------|---------|
-| `AZURE_CONTAINER_APP_NAME` | Container App name (for deployment scripts) |
-| `AZURE_CONTAINER_REGISTRY_NAME` | ACR name (for image push) |
-| `AZURE_RESOURCE_GROUP_NAME` | Resource group name |
-| `WEB_ENDPOINT` | Application FQDN with https:// |
-| `WEB_IDENTITY_PRINCIPAL_ID` | Managed identity principal ID (for RBAC via CLI) |
-| `ENTRA_SPA_CLIENT_ID` | Entra app client ID (generated by Bicep) |
-| `ENTRA_APP_OBJECT_ID` | Entra app object ID (for postprovision updates) |
-| `ENTRA_BACKEND_CLIENT_ID` | Backend app client ID (empty when OBO disabled) |
-| `ENTRA_BACKEND_APP_OBJECT_ID` | Backend app object ID (empty when OBO disabled) |
-| `APPLICATIONINSIGHTS_CONNECTION_STRING` | Backend App Insights connection string |
-| `APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING` | Frontend App Insights connection string (passed as Docker build arg) |
+## Logs and cost controls
 
-## Resource Configuration
-
-### Container App
-
-- **Compute**: 0.5 vCPU, 1GB RAM (parameterized — override via `cpu` and `memory` params in `core/host/container-app.bicep`)
-- **Scaling**: 0-3 replicas (parameterized — override via `minReplicas` and `maxReplicas` params in `core/host/container-app.bicep`)
-- **Ingress**: External HTTPS on port 8080
-- **Identity**: User-assigned MI only (ACR pull, AI Foundry RBAC, OBO FIC)
-- **ACR Pull**: Managed identity with `acrPull` role assignment (no admin credentials)
-- **Health Probes**:
-  - **Liveness**: `GET /api/health` every 30s (failureThreshold: 3)
-  - **Startup**: `GET /api/health` every 10s with 5s initial delay (failureThreshold: 30)
-
-### Container Registry
-
-- **Tier**: Basic (sufficient for single app)
-- **Admin**: Disabled
-- **Pull Authentication**: User-assigned MI with `AcrPull` role (no admin credentials)
-- **Public Access**: Disabled
-
-### Log Analytics
-
-- **Retention**: 30 days (parameterized — override via `retentionInDays` param in `core/host/log-analytics.bicep`)
-- **Pricing**: Pay-as-you-go (5GB/month free tier)
-
-### Overriding Resource Defaults
-
-Pass parameters when deploying via Bicep directly, or edit the module defaults:
-
-```bicep
-// In container-app.bicep — change defaults
-param cpu string = '1.0'        // default: '0.5'
-param memory string = '2Gi'     // default: '1Gi'
-param minReplicas int = 1       // default: 0
-param maxReplicas int = 5       // default: 3
-```
-
-## Cost Optimization
-
-- **Scale-to-zero**: Automatically enabled (no cost when idle)
-- **Basic ACR**: Lowest tier ($5/month)
-- **Shared environment**: Multiple apps can share Container Apps Environment
-
-Estimated monthly cost: **$10-15** (varies by usage).
-
-## Security
-
-- ✅ User-assigned managed identity with regional isolation (zero secrets — no admin credentials, no client secrets)
-- ✅ Private container registry (ACR)
-- ✅ HTTPS-only ingress
-- ✅ Least-privilege RBAC (Cognitive Services User + Cognitive Services OpenAI Contributor + Azure AI Developer)
-- ✅ No public IP addresses
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Deployment fails | Check `az deployment sub show -n <deployment-name>` |
-| RBAC not working | Verify `WEB_IDENTITY_PRINCIPAL_ID` has role on AI Foundry resource |
-| Scale-to-zero not working | Check HTTP/TCP health probes (must succeed) |
-| Name conflicts | Change `environmentName` parameter |
-
-## Customization
-
-### Change Scaling Limits
-
-Edit `main-app.bicep`:
-```bicep
-scale: {
-  minReplicas: 1  // Change from 0 to prevent scale-to-zero
-  maxReplicas: 10  // Change from 3 for more scale
-}
-```
-
-### Change Resource Tier
-
-Edit `main-infrastructure.bicep`:
-```bicep
-sku: {
-  name: 'Standard'  // Upgrade from Basic
-}
-```
-
-### Add Environment Variables
-
-Edit `main-app.bicep`:
-```bicep
-env: [
-  { name: 'CUSTOM_VAR', value: 'custom-value' }
-]
-```
-
-## Validation
-
-```powershell
-# Test Bicep syntax
-az bicep build --file main.bicep
-
-# What-if deployment
-az deployment sub what-if \
-  --location eastus \
-  --template-file main.bicep \
-  --parameters main.parameters.json
-```
-
-For AI-assisted development, see `.github/skills/writing-bicep-templates/SKILL.md`.
+The Container Apps environment sends platform/application console logs to Log Analytics.
+Application Insights sends backend OpenTelemetry and browser telemetry to the same workspace.
+`core/host/log-analytics.bicep` configures 30-day retention. The templates do not configure
+sampling or a daily ingestion cap, so telemetry volume should be monitored during real trials.

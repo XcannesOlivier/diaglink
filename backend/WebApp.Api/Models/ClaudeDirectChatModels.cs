@@ -88,6 +88,11 @@ public sealed record ClaudeDirectWebCitation(
     string? Title,
     string? CitedText);
 
+public sealed record ClaudeDirectWebSearchCandidate(
+    string Url,
+    string? Title,
+    string? PageAge);
+
 public sealed record ClaudeDirectChatResult(
     string? FinalText,
     IReadOnlyList<ClaudeDirectToolUse> ToolUses,
@@ -102,6 +107,7 @@ public sealed record ClaudeDirectChatResult(
     IReadOnlyList<ClaudeDirectError> Errors)
 {
     public IReadOnlyList<ClaudeDirectWebCitation> WebCitations { get; init; } = [];
+    public IReadOnlyList<ClaudeDirectWebSearchCandidate> WebSearchCandidates { get; init; } = [];
     public IReadOnlyList<string> Suggestions { get; init; } = [];
 }
 

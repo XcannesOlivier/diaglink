@@ -7,9 +7,13 @@
 .heading h2,.cta h2 { margin:0; font-size:clamp(2rem,3.6vw,3.3rem); line-height:1.08; letter-spacing:-.035em; }
 .heading p { margin:22px 0 0; color:#52677a; font-size:1.08rem; line-height:1.75; }
 .desktopFrame { width:min(100%,1080px); aspect-ratio:16 / 9; margin:0 auto; overflow:hidden; border:1px solid #d6e5ec; border-radius:14px; background:#edf6fa; box-shadow:0 18px 45px rgba(30,72,96,.09); }
-.desktopFrame video,.mobileFrame video { display:block; width:100%; height:100%; object-fit:contain; background:#0b2742; }
+.desktopFrame video,.desktopFrame iframe,.mobileFrame video { display:block; width:100%; height:100%; border:0; object-fit:contain; background:#0b2742; }
 .placeholder { width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; padding:24px; background:linear-gradient(145deg,#f4fafc,#e6f2f7); color:#31566c; text-align:center; }
 .placeholder p { margin:0; font-weight:650; }
+.videoPlaceholder { position:relative; isolation:isolate; border:0; font:inherit; cursor:pointer; }
+.videoPlaceholder::after { content:""; position:absolute; inset:0; z-index:-1; background:linear-gradient(145deg,rgba(244,250,252,.78),rgba(230,242,247,.9)); }
+.videoPlaceholder:focus-visible { outline:3px solid #007bb4; outline-offset:-4px; }
+.videoThumbnail { position:absolute; inset:0; z-index:-2; width:100%; height:100%; object-fit:cover; }
 .playIcon { width:64px; height:64px; display:grid; place-items:center; border-radius:50%; background:#fff; color:#007bb4; box-shadow:0 10px 26px rgba(30,72,96,.12); }
 .playIcon svg { width:28px; height:28px; }
 .mobileSection { background:#f2f8fa; }

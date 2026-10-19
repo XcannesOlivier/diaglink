@@ -156,6 +156,20 @@ public sealed class ClaudeConversationSummarizerTests
     }
 
     [TestMethod]
+    [DataRow("refusal")]
+    [DataRow("max_tokens")]
+    [DataRow("model_context_window_exceeded")]
+    [DataRow("pause_turn")]
+    [DataRow("future_stop_reason")]
+    public async Task NonEndTurnSummary_ThrowsInsteadOfPersistingIncompleteText(string stopReason)
+    {
+        var fixture = Fixture.Create(ResponseWithStopReason("incomplet", stopReason));
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            fixture.Service.SummarizeConversationAsync(null, Messages()));
+    }
+
+    [TestMethod]
     public void SummarizationPrompt_PreservesLegacyFunctionalContract()
     {
         const string existingSummary = "Résumé antérieur : code F045, page 17.";
@@ -219,6 +233,16 @@ public sealed class ClaudeConversationSummarizerTests
                     ephemeral_1h_input_tokens = 30
                 }
             }
+        }));
+
+    private static HttpResponseMessage ResponseWithStopReason(string text, string stopReason) =>
+        JsonResponse(JsonSerializer.Serialize(new
+        {
+            id = "msg-summary-stop-reason",
+            model = Deployment,
+            stop_reason = stopReason,
+            content = new object[] { new { type = "text", text } },
+            usage = new { input_tokens = 10, output_tokens = 5 }
         }));
 
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)

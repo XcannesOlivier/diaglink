@@ -7,6 +7,7 @@ using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
 using WebApp.Api.Repositories;
 using WebApp.Api.Services;
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -1219,7 +1220,18 @@ app.MapPost("/api/chat/stream", async (
     ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
+    var turnStopwatch = Stopwatch.StartNew();
+    var turnTraceId = Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+    using var performanceScope = logger.BeginScope(new Dictionary<string, object?>
+    {
+        ["TurnTraceId"] = turnTraceId
+    });
+    Activity.Current?.SetTag("diaglink.turn.id", turnTraceId);
+    LogStage("TurnStarted", 0, "started");
+
+    var stageStopwatch = Stopwatch.StartNew();
     var userObjectId = await userIdentityService.GetCanonicalUserObjectIdAsync(httpContext.User, cancellationToken);
+    LogStage("CanonicalUserResolution", stageStopwatch.ElapsedMilliseconds, "success");
 
     // Resolved strictly server-side from SQL. Legacy conversations without a machine are rejected
     // before credit, runtime, provider, or persistence work.
@@ -1235,7 +1247,9 @@ app.MapPost("/api/chat/stream", async (
             return Results.BadRequest(new { error = "machine_id_required", message = "machineId is required to start a new conversation." });
         }
 
+        stageStopwatch.Restart();
         var resolution = await assistantResolutionService.ResolveMachineAsync(httpContext.User, request.MachineId.Value, cancellationToken);
+        LogStage("MachineResolution", stageStopwatch.ElapsedMilliseconds, resolution.Kind.ToString());
         var earlyExit = MapMachineResolutionFailure(resolution);
         if (earlyExit is not null)
         {
@@ -1253,7 +1267,9 @@ app.MapPost("/api/chat/stream", async (
             return Results.NotFound();
         }
 
+        stageStopwatch.Restart();
         var ownership = await historyRepository.GetConversationOwnershipInfoAsync(request.ConversationId!, userObjectId, cancellationToken);
+        LogStage("ConversationOwnershipSql", stageStopwatch.ElapsedMilliseconds, ownership is null ? "not_found" : "success");
         if (ownership is null)
         {
             return Results.NotFound();
@@ -1280,7 +1296,9 @@ app.MapPost("/api/chat/stream", async (
 
             // Re-verified on every message, not just at creation â€” access revoked mid-conversation must
             // refuse immediately rather than keep streaming against a machine the user can no longer see.
+            stageStopwatch.Restart();
             var resolution = await assistantResolutionService.ResolveMachineAsync(httpContext.User, ownership.MachineId.Value, cancellationToken);
+            LogStage("MachineResolution", stageStopwatch.ElapsedMilliseconds, resolution.Kind.ToString());
             var earlyExit = MapMachineResolutionFailure(resolution);
             if (earlyExit is not null)
             {
@@ -1293,7 +1311,9 @@ app.MapPost("/api/chat/stream", async (
     }
 
     // Admission is checked after ownership resolution, before any provider call or message write.
+    stageStopwatch.Restart();
     var admission = await creditAccess.CheckAsync(boundMachineId, cancellationToken);
+    LogStage("CreditAdmissionSql", stageStopwatch.ElapsedMilliseconds, admission.Allowed ? "allowed" : "denied");
     if (!admission.Allowed)
         return Results.Json(new { status = admission.Status, code = admission.Status, message = admission.Message }, statusCode: 402);
 
@@ -1313,6 +1333,7 @@ app.MapPost("/api/chat/stream", async (
             statusCode: StatusCodes.Status400BadRequest);
     }
 
+    var turnOutcome = "success";
     try
     {
         httpContext.Response.Headers.Append("Content-Type", "text/event-stream");
@@ -1322,6 +1343,9 @@ app.MapPost("/api/chat/stream", async (
         var conversationId = request.ConversationId ?? $"claude-direct-{Guid.NewGuid():N}";
 
         await WriteConversationIdEvent(httpContext.Response, conversationId, cancellationToken);
+        var firstEventMs = turnStopwatch.ElapsedMilliseconds;
+        Activity.Current?.SetTag("diaglink.sse.first_event_ms", firstEventMs);
+        LogStage("FirstSseEvent", firstEventMs, "flushed");
 
         if (isNewConversation)
         {
@@ -1330,7 +1354,9 @@ app.MapPost("/api/chat/stream", async (
                 if (!string.IsNullOrEmpty(userObjectId))
                 {
                     var agentName = $"Assistant-Technique-{resolvedMachine!.Name}";
+                    stageStopwatch.Restart();
                     await historyRepository.CreateConversationAsync(conversationId, userObjectId, agentName, boundMachineId, cancellationToken);
+                    LogStage("ConversationCreateSql", stageStopwatch.ElapsedMilliseconds, "success");
                 }
                 else
                 {
@@ -1352,9 +1378,13 @@ app.MapPost("/api/chat/stream", async (
         {
             try
             {
+                stageStopwatch.Restart();
                 var technicalSummary = await historyRepository.GetTechnicalSummaryForUserAsync(conversationId, userObjectId, cancellationToken);
+                LogStage("TechnicalSummaryReadSql", stageStopwatch.ElapsedMilliseconds, "success");
+                stageStopwatch.Restart();
                 var recentMessages = await historyRepository.GetRecentUnsummarizedMessagesForUserAsync(
                     conversationId, userObjectId, ConversationSummaryService.MaxContextMessageCount, cancellationToken);
+                LogStage("RecentMessagesReadSql", stageStopwatch.ElapsedMilliseconds, "success", recentMessages.Count);
                 messageForModel = ConversationContextBuilder.BuildMessage(technicalSummary, recentMessages, request.Message);
             }
             catch (Exception ex)
@@ -1367,7 +1397,9 @@ app.MapPost("/api/chat/stream", async (
         {
             try
             {
+                stageStopwatch.Restart();
                 await historyRepository.AddMessageAsync(conversationId, userObjectId, "user", request.Message, cancellationToken);
+                LogStage("UserMessageWriteSql", stageStopwatch.ElapsedMilliseconds, "success");
             }
             catch (Exception ex)
             {
@@ -1380,6 +1412,7 @@ app.MapPost("/api/chat/stream", async (
         var assistantVisuals = new TechnicalVisualAccumulator();
         var assistantSources = new List<TechnicalSourceReference>();
         var assistantSuggestions = new List<string>();
+        var assistantWebCitations = new List<AnnotationInfo>();
         Guid? sqlConversationId = null;
         // Captured from the authorized machine, never the caller's company claim.
         var machineCompanyId = resolvedMachine?.CompanyId;
@@ -1387,7 +1420,9 @@ app.MapPost("/api/chat/stream", async (
             ? (Guid?)parsedUserId : null;
         try
         {
+            stageStopwatch.Restart();
             sqlConversationId = await historyRepository.GetConversationIdByPublicIdAsync(conversationId, cancellationToken);
+            LogStage("ConversationIdReadSql", stageStopwatch.ElapsedMilliseconds, sqlConversationId.HasValue ? "success" : "not_found");
         }
         catch (Exception ex)
         {
@@ -1410,6 +1445,8 @@ app.MapPost("/api/chat/stream", async (
                 cancellationToken,
                 claudeDirectImages);
 
+        var runtimeStopwatch = Stopwatch.StartNew();
+        long? firstVisibleTextMs = null;
         await foreach (var chunk in runtimeChunks)
         {
             if (chunk.Usage is not null)
@@ -1434,9 +1471,16 @@ app.MapPost("/api/chat/stream", async (
             {
                 assistantText.Append(chunk.TextDelta);
                 await WriteChunkEvent(httpContext.Response, chunk.TextDelta, cancellationToken);
+                if (firstVisibleTextMs is null && chunk.TextDelta.Length > 0)
+                {
+                    firstVisibleTextMs = turnStopwatch.ElapsedMilliseconds;
+                    Activity.Current?.SetTag("diaglink.sse.first_visible_text_ms", firstVisibleTextMs.Value);
+                    LogStage("FirstVisibleText", firstVisibleTextMs.Value, "flushed");
+                }
             }
             else if (chunk.HasAnnotations && chunk.Annotations != null)
             {
+                assistantWebCitations.AddRange(chunk.Annotations);
                 await WriteAnnotationsEvent(httpContext.Response, chunk.Annotations, cancellationToken);
             }
             else if (chunk.IsToolUse && chunk.ToolName != null)
@@ -1444,12 +1488,14 @@ app.MapPost("/api/chat/stream", async (
                 await WriteToolUseEvent(httpContext.Response, chunk.ToolName, cancellationToken);
             }
         }
+        LogStage("ClaudeDirectRuntime", runtimeStopwatch.ElapsedMilliseconds, "completed");
 
         ConversationMessagePersistenceResult? persistedAssistantMessage = null;
         if (!string.IsNullOrEmpty(userObjectId))
         {
             try
             {
+                stageStopwatch.Restart();
                 persistedAssistantMessage = await historyRepository.AddMessageAsync(
                     conversationId,
                     userObjectId,
@@ -1458,7 +1504,9 @@ app.MapPost("/api/chat/stream", async (
                     assistantVisuals.Items,
                     assistantSources,
                     assistantSuggestions,
+                    assistantWebCitations,
                     cancellationToken);
+                LogStage("AssistantMessageWriteSql", stageStopwatch.ElapsedMilliseconds, "success");
                 measurement = measurement with { AssistantMessageId = persistedAssistantMessage?.MessageId };
                 measurements[measurement.EventId] = measurement;
             }
@@ -1473,12 +1521,14 @@ app.MapPost("/api/chat/stream", async (
             if (sqlConversationId.HasValue)
             {
                 var summaryEventId = Guid.NewGuid();
+                stageStopwatch.Restart();
                 await conversationSummaryService.MaybeSummarizeAsync(sqlConversationId.Value, cancellationToken,
                     summaryUsage =>
                     {
                         var summaryMeasurement = measurement with { EventId = summaryEventId, AssistantMessageId = null, Response = summaryUsage };
                         measurements[summaryEventId] = summaryMeasurement;
                     });
+                LogStage("ConversationSummaryCheck", stageStopwatch.ElapsedMilliseconds, "completed");
             }
             else
             {
@@ -1503,10 +1553,11 @@ app.MapPost("/api/chat/stream", async (
             persistedAssistantMessage?.Visuals ?? [],
             persistedAssistantMessage?.Sources ?? [],
             cancellationToken,
-            WriteDoneEvent);
+            WriteMeasuredDoneEvent);
     }
     catch (ArgumentException ex) when (ex.Message.Contains("Invalid") && (ex.Message.Contains("attachments") || ex.Message.Contains("image") || ex.Message.Contains("file")))
     {
+        turnOutcome = "validation_error";
         // Validation errors from image/file processing - return 400 Bad Request
         var errorResponse = ErrorResponseFactory.CreateFromException(
             ex, 
@@ -1520,6 +1571,7 @@ app.MapPost("/api/chat/stream", async (
     }
     catch (Exception ex)
     {
+        turnOutcome = "error";
         logger.LogError(ex, "Chat stream error: {Message}", ex.Message);
         
         var errorResponse = ErrorResponseFactory.CreateFromException(
@@ -1536,10 +1588,33 @@ app.MapPost("/api/chat/stream", async (
     finally
     {
         // RequestAborted must not discard a completed/identified response after an SSE disconnect.
+        stageStopwatch.Restart();
         await usagePersistenceBilling.ProcessAsync(measurements.Values);
+        LogStage("UsagePersistenceAndBilling", stageStopwatch.ElapsedMilliseconds, "completed", measurements.Count);
     }
 
+    Activity.Current?.SetTag("diaglink.turn.duration_ms", turnStopwatch.ElapsedMilliseconds);
+    Activity.Current?.SetTag("diaglink.turn.outcome", turnOutcome);
+    LogStage("TurnCompleted", turnStopwatch.ElapsedMilliseconds, turnOutcome);
     return Results.Empty;
+
+    void LogStage(string stage, long durationMs, string outcome, int itemCount = 0) =>
+        logger.LogInformation(
+            "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} DurationMs={DurationMs} Outcome={Outcome} ItemCount={ItemCount}",
+            turnTraceId,
+            "ChatStreamEndpoint",
+            stage,
+            durationMs,
+            outcome,
+            itemCount);
+
+    async Task WriteMeasuredDoneEvent(HttpResponse response, CancellationToken ct)
+    {
+        await WriteDoneEvent(response, ct);
+        var doneMs = turnStopwatch.ElapsedMilliseconds;
+        Activity.Current?.SetTag("diaglink.sse.done_ms", doneMs);
+        LogStage("DoneSseEvent", doneMs, "flushed");
+    }
 
     // Maps a non-Configured resolution outcome to its HTTP response; returns null when Configured
     // (meaning the caller should proceed). 404 for inaccessible (anti-enumeration, matches

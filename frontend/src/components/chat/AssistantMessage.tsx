@@ -272,7 +272,10 @@ function AssistantMessageComponent({
                       <OpenRegular aria-hidden="true" />
                     </a>
                     {citation.quote && (
-                      <p className={styles.webSourceQuote}>{citation.quote}</p>
+                      <details className={styles.webSourceDetails}>
+                        <summary className={styles.webSourceSummary}>Voir l’extrait</summary>
+                        <p className={styles.webSourceQuote}>{citation.quote}</p>
+                      </details>
                     )}
                   </li>
                 ))}

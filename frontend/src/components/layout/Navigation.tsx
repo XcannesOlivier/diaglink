@@ -8,6 +8,7 @@ import type { DiagLinkRole } from '../../types/currentUser';
 const useStyles = makeStyles({
   root: {
     minWidth: 0,
+    flexWrap: 'wrap',
   },
   tabContent: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
 });

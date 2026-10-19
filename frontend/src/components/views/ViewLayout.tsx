@@ -23,6 +23,7 @@ const useStyles = makeStyles({
     },
   },
   title: {
+    margin: 0,
     fontSize: tokens.fontSizeBase600,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
@@ -48,6 +49,7 @@ const useStyles = makeStyles({
 
 interface ViewRootProps {
   title: string;
+  titleAs?: 'span' | 'h1';
   subtitle?: string;
   headerAction?: React.ReactNode;
   headerClassName?: string;
@@ -55,13 +57,13 @@ interface ViewRootProps {
 }
 
 /** Shared header + scroll container for the real (non-placeholder) DiagLink views. */
-export const ViewRoot: React.FC<ViewRootProps> = ({ title, subtitle, headerAction, headerClassName, children }) => {
+export const ViewRoot: React.FC<ViewRootProps> = ({ title, titleAs = 'span', subtitle, headerAction, headerClassName, children }) => {
   const styles = useStyles();
   return (
     <div className={styles.root}>
       <div className={mergeClasses(styles.header, !!headerAction && styles.headerWithAction, headerClassName)}>
         <div>
-        <Text className={styles.title}>{title}</Text>
+        <Text as={titleAs} className={styles.title}>{title}</Text>
         {subtitle && <Text className={styles.subtitle}>{subtitle}</Text>}
         </div>
         {headerAction}

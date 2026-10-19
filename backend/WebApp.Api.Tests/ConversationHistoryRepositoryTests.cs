@@ -803,6 +803,34 @@ public class ConversationHistoryRepositoryTests
     }
 
     [TestMethod]
+    public async Task AddAssistantMessageAsync_PhysicalPageMarkerIsInternalAndHistoryRemainsCompatible()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-physical-source", "user-A");
+        var source = new TechnicalSourceReference("manual", 20, "20", "p. 20", 11, 16, 0)
+        {
+            PageKind = TechnicalSourcePageKind.Pdf
+        };
+
+        await using (var writeContext = CreateContext(dbName))
+        {
+            await CreateRepository(writeContext).AddMessageAsync(
+                "conv-physical-source", "user-A", "assistant", "Page PDF : p. 20",
+                [], [source], [], default);
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var persisted = await readContext.ConversationMessageSourceReferences.SingleAsync();
+        var history = await CreateRepository(readContext)
+            .GetConversationMessagesAsync("conv-physical-source", "user-A", default);
+        var publicSource = history!.Single().Sources.Single();
+
+        Assert.AreEqual("pdf:20", persisted.DisplayPage);
+        Assert.AreEqual("20", publicSource.DisplayPage);
+        Assert.AreEqual(20, publicSource.PdfPage);
+    }
+
+    [TestMethod]
     public async Task AddAssistantMessageAsync_MessageVisualsAndSourcesAreAtomic()
     {
         await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
@@ -911,6 +939,52 @@ public class ConversationHistoryRepositoryTests
             new[] { "Où est le relais ?" },
             System.Text.Json.JsonSerializer.Deserialize<string[]>(entity.SuggestionsJson!)!);
         CollectionAssert.AreEqual(new[] { "Où est le relais ?" }, history!.Single().Suggestions.ToArray());
+    }
+
+    [TestMethod]
+    public async Task AddAssistantMessageAsync_PersistsSelectedWebCitationsAndReturnsThemInHistory()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await SeedEmptyConversationAsync(dbName, "conv-web-citations", "user-A");
+        await using (var writeContext = CreateContext(dbName))
+        {
+            await CreateRepository(writeContext).AddMessageAsync(
+                "conv-web-citations",
+                "user-A",
+                "assistant",
+                "Fournisseur trouvé",
+                [],
+                [],
+                [],
+                [
+                    new AnnotationInfo
+                    {
+                        Type = "uri_citation",
+                        Label = "Fiche 2544-9024",
+                        Url = "https://supplier.example/parts/2544-9024",
+                        Quote = "Doosan battery relay 2544-9024"
+                    },
+                    new AnnotationInfo
+                    {
+                        Type = "uri_citation",
+                        Label = "Doublon",
+                        Url = "https://supplier.example/parts/2544-9024"
+                    },
+                    new AnnotationInfo { Type = "uri_citation", Label = "Invalide", Url = "ftp://supplier.example/part" }
+                ],
+                CancellationToken.None);
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var history = await CreateRepository(readContext)
+            .GetConversationMessagesAsync("conv-web-citations", "user-A", CancellationToken.None);
+        var citation = history!.Single().WebCitations.Single();
+
+        Assert.AreEqual("uri_citation", citation.Type);
+        Assert.AreEqual("Fiche 2544-9024", citation.Label);
+        Assert.AreEqual("https://supplier.example/parts/2544-9024", citation.Url);
+        Assert.AreEqual("Doosan battery relay 2544-9024", citation.Quote);
+        Assert.AreEqual(0, citation.DisplayOrder);
     }
 
     private static TechnicalSourceReference SourceReference() => new(

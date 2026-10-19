@@ -22,8 +22,24 @@ Claude Sonnet direct
         Azure Blob Storage
                |
                v
-         full.png / tiles
+      full-page PNG / 3 × 3 tiles
 ```
+
+## Authentication and roles
+
+The backend accepts Microsoft Entra bearer tokens and DiagLink session tokens created after email
+OTP verification. Both mechanisms resolve an active SQL user and the same application claims.
+OTP codes expire after ten minutes and are stored as HMAC hashes; plaintext codes are logged only
+under the explicit ASP.NET Development environment.
+
+DiagLink has exactly three roles:
+
+- `technician`: accesses assigned machines and technical chat;
+- `company_admin`: manages their own company's users, machines, branding and finances;
+- `diaglink_super_admin`: manages companies and platform-wide operational/financial views.
+
+Backend authorization policies and ownership checks are authoritative. Frontend role helpers only
+control presentation.
 
 ## Chat request
 
@@ -44,14 +60,31 @@ source-reference positions.
 `ConversationPublicId` is the stable identifier exposed to the frontend. Historical rows without
 a `MachineId` remain readable but cannot be resumed.
 
+The chat keeps the selected machine name and optional reference above the scrolling messages.
+This uses the existing machine selection, not a separate lookup. A new empty chat without a
+selection offers the existing Machines view; historical conversations without a linked machine
+do not display that start instruction. The session-entry confirmation remains independent.
+The input toolbar separates machine documents, composition and conversation actions. At narrow
+widths each action group wraps as a unit; document access still depends only on machine selection.
+
 ## Documents and visuals
 
-Machine PDF ingestion populates the machine Vector Store and Blob assets. Claude can call
-`get_page_image`; the backend validates the tool request against MCP-visible documents and returns
-the matching `full.png` or tile. `ConversationMessageVisuals` preserves displayed visuals in history.
+An external pipeline populates the machine Vector Store and Blob assets. Its implementation is not
+present in this repository, so its trigger, description-TXT filenames, extraction algorithm and
+retention cannot be confirmed here. The application verifies only its consumer contract:
+`{BlobPrefix}/.foundry/toolbox.json`, machine File Search results, source PDFs, page maps and visual
+assets.
+
+Claude can call `get_page_image`; the backend accepts only `asset_type=full` or a 3 × 3 tile from
+`r01-c01` through `r03-c03`. It builds the expected key as
+`{DocumentId}/page-{Page:00000}/{DocumentId}_page-{Page:00000}-full.png` or the corresponding
+`-tile-rNN-cNN.png`, validates the document against MCP-visible IDs, then reads the private Blob.
+`ConversationMessageVisuals` preserves displayed visuals in history.
 
 For clickable page references, `{BlobPrefix}/{DocumentId}/page-map.json` is the documentary source
-of truth that maps an assistant-visible page label to a physical PDF page and the private source PDF.
+of truth that maps an assistant-visible page label to one or more physical PDF pages and the private
+source PDF. Repeated folios are resolved only when File Search evidence leaves one document/page
+candidate.
 `ConversationMessageSourceReferences` preserves the verified mapping with the assistant message.
 `GET /api/chat/sources/{sourceReferenceId}/document` re-checks conversation ownership and current
 machine access, reloads the page map, then streams the private PDF inline without exposing Blob URLs.
@@ -59,9 +92,13 @@ machine access, reloads the page map, then streams the private PDF inline withou
 ## Company identity in the authenticated UI
 
 The company logo uses the existing global session Object URL, with no additional download.
-For company administrators and technicians it appears after the desktop role badge and beside
+For company administrators and technicians it appears beside the desktop name/role block and beside
 the existing name/role block in the mobile/tablet drawer. Missing or failed images leave no
-placeholder; DiagLink branding and super-administrator identity remain unchanged.
+placeholder; super-administrators have no company logo. Desktop identity stacks the name above
+a neutral role badge, with a full-name tooltip when the name is truncated.
+From 1001 to 1200px the header separates navigation and actions into two rows; at 1000px
+and below, the existing mobile/tablet drawer takes over. Compact desktop actions retain their
+accessible labels and tooltips.
 
 Only company administrators can open the separate Personalization view from Settings, not the
 primary desktop/mobile navigation. Logo actions apply
@@ -96,3 +133,14 @@ theme rather than the currently customized one.
 Claude chat and summary calls persist provider usage before common quota/wallet billing. The
 `VisionTool` usage type remains read-only so historical financial rows can still be interpreted;
 new Claude Direct requests do not produce it.
+
+For an admitted request, billing consumes the applicable machine period's included EUR budget and
+then the company wallet according to the persisted usage cost. Period and ledger services use
+explicit transactions and idempotency constraints. The credit check occurs before the Claude call;
+usage persistence and billing are resumable after the stream.
+
+Stripe is restricted to configured test-mode flows. Initial machine requests, additional machines,
+subscription cycles and wallet top-ups each use durable local operation/receipt state. Signed
+webhooks are not sufficient by themselves: the backend re-reads Stripe objects and verifies
+ownership, mode, currency, amount and payment state before activating rights, creating/renewing
+machine periods or crediting a wallet.

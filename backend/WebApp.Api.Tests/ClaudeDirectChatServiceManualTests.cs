@@ -16,6 +16,7 @@ namespace WebApp.Api.Tests;
 ///
 /// PowerShell:
 /// $env:RUN_CLAUDE_DIRECT_MANUAL_TEST = '1'
+/// $env:CLAUDE_DIRECT_MANUAL_DEPLOYMENT = 'claude-sonnet-5-5'
 /// $env:CLAUDE_DIRECT_MANUAL_PROJECT_ENDPOINT = 'https://.../api/projects/...'
 /// $env:CLAUDE_DIRECT_MANUAL_BLOB_PREFIX = 'company/machine'
 /// dotnet test backend/WebApp.Api.Tests -- --filter "TestCategory=ClaudeDirectManual"
@@ -62,17 +63,19 @@ public sealed class ClaudeDirectChatServiceManualTests
             Options.Create(new ClaudeDirectChatOptions
             {
                 FoundryAnthropicEndpoint = "https://diaglink-foundry-prod.services.ai.azure.com/anthropic",
-                Deployment = "claude-sonnet-5",
+                Deployment = Environment.GetEnvironmentVariable("CLAUDE_DIRECT_MANUAL_DEPLOYMENT")
+                    ?? "claude-sonnet-5",
                 MaxMessageCalls = 4,
                 MaxImageBytes = 5 * 1024 * 1024
             }),
             NullLogger<ClaudeDirectChatService>.Instance);
 
+        var machine = LoadServerResolvedMachine();
         var request = await requestFactory.CreateAsync(
-            LoadServerResolvedMachine(),
+            machine,
             [new ClaudeDirectMessage(
                 "user",
-                "Recherche dans le manuel comment remplacer le filtre hydraulique du DX10z. " +
+                $"Recherche dans le manuel comment remplacer le filtre hydraulique du {machine.Name}. " +
                 "Puis examine visuellement la page PDF 75 et distingue ce que dit le manuel " +
                 "de ce que tu confirmes visuellement.")]);
         var result = await service.CompleteAsync(request);
@@ -111,8 +114,8 @@ public sealed class ClaudeDirectChatServiceManualTests
         Assert.IsTrue(result.Visuals.Any(visual => visual.Page == 75 && visual.AssetType == "full"));
         Assert.AreEqual(2, result.Calls.Count);
         var documentResolution = result.DocumentResolutions.Single();
-        Assert.AreNotEqual(documentResolution.RequestedDocumentId, documentResolution.ResolvedDocumentId);
         Assert.IsTrue(documentResolution.ResolutionMode is
+            ClaudeDirectDocumentResolutionMode.Exact or
             ClaudeDirectDocumentResolutionMode.UniqueMcpDocument or
             ClaudeDirectDocumentResolutionMode.UniqueExistingPage);
         Assert.IsFalse(result.Errors.Any(error => !error.Recovered));

@@ -21,6 +21,16 @@ public record ConversationMessageInfo
     public IReadOnlyList<string> Suggestions { get; init; } = [];
     public IReadOnlyList<ConversationMessageVisualInfo> Visuals { get; init; } = [];
     public IReadOnlyList<ConversationMessageSourceReferenceInfo> Sources { get; init; } = [];
+    public IReadOnlyList<ConversationMessageWebCitationInfo> WebCitations { get; init; } = [];
+}
+
+public record ConversationMessageWebCitationInfo
+{
+    public required string Type { get; init; } = "uri_citation";
+    public required string Label { get; init; }
+    public required string Url { get; init; }
+    public string? Quote { get; init; }
+    public int DisplayOrder { get; init; }
 }
 
 public record ConversationMessageVisualInfo
@@ -49,4 +59,5 @@ public sealed record ConversationMessagePersistenceResult(
     long MessageId,
     IReadOnlyList<ConversationMessageVisualInfo> Visuals,
     IReadOnlyList<ConversationMessageSourceReferenceInfo> Sources,
+    IReadOnlyList<ConversationMessageWebCitationInfo> WebCitations,
     IReadOnlyList<string> Suggestions);

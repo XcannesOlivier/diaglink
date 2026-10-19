@@ -282,6 +282,39 @@ public class AiCostCalculatorTests
     }
 
     [TestMethod]
+    public async Task ClaudeSonnet55RatesProduceExpectedExactCostIncludingWebSearch()
+    {
+        await using var db = Db();
+        var price = Price();
+        price.Provider = "Anthropic";
+        price.Model = "claude-sonnet-5-5";
+        price.InputPricePerMillion = 2m;
+        price.OutputPricePerMillion = 10m;
+        price.CacheReadPricePerMillion = 0.1m;
+        price.CacheCreation5mPricePerMillion = 2.5m;
+        price.CacheCreation1hPricePerMillion = 4m;
+        price.WebSearchPricePerRequest = 0.01m;
+        await Seed(db, price);
+        var usage = Usage();
+        usage.Provider = "Anthropic";
+        usage.Model = "claude-sonnet-5-5";
+        usage.InputTokens = 1_000_000;
+        usage.OutputTokens = 1_000_000;
+        usage.CacheReadInputTokens = 1_000_000;
+        usage.CacheCreationInputTokens = 2_000_000;
+        usage.CacheCreation5mInputTokens = 1_000_000;
+        usage.CacheCreation1hInputTokens = 1_000_000;
+        usage.WebSearchRequests = 2;
+
+        var result = await new AiCostCalculator(db).CalculateAsync(usage);
+
+        Assert.IsTrue(result.IsValuable);
+        Assert.AreEqual(0.1m, result.CacheReadCost);
+        Assert.AreEqual(0.02m, result.WebSearchCost);
+        Assert.AreEqual(18.62m, result.RealAiCost);
+    }
+
+    [TestMethod]
     public async Task LegacyUsageAndPricingWithoutCacheFieldsRemainValuable()
     {
         await using var db = Db();

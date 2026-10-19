@@ -9,6 +9,8 @@ import { ROLE_LABELS } from '../../../utils/navigation';
 import { clearDiagLinkSession, setDiagLinkSession } from '../../../utils/apiAuth';
 import { ThemeProvider } from '../../ThemeProvider';
 import { darkTheme, lightTheme } from '../../../config/themes';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 let mockState: AppState;
 const listMachineRequestsMock = vi.hoisted(() => vi.fn());
@@ -98,6 +100,58 @@ describe('AppShell navigation', () => {
       revokeObjectURL: vi.fn(),
     }));
     window.history.replaceState(null, '', '/app');
+  });
+
+  it.each(['technician', 'company_admin', 'diaglink_super_admin'] as const)('groups header actions and stacks the identity without losing access for %s', role => {
+    const name = 'Alexandre Jean-Baptiste de la Maintenance Industrielle';
+    mockState = buildState({ userId: 'u1', companyId: 'c1', role, firstName: name, email: 'admin@acme.test' });
+    const container = renderAppShell();
+    const header = container.querySelector('header')!;
+    const settings = header.querySelector<HTMLButtonElement>('button[aria-label="Paramètres"]')!;
+    const actions = settings.parentElement!;
+    expect(actions.contains(header.querySelector(`[title="${name}"]`))).toBe(true);
+    expect(getComputedStyle(settings).minHeight).toBe('40px');
+    expect(parseFloat(getComputedStyle(settings).minWidth)).toBeGreaterThanOrEqual(40);
+    const identity = header.querySelector(`[title="${name}"]`)!.parentElement!;
+    expect(getComputedStyle(identity).display).toBe('grid');
+    expect(identity.textContent).toContain(ROLE_LABELS[role]);
+    expect(header.querySelector('[role="tablist"]')!.parentElement).not.toBe(actions);
+    expect(header.querySelector('button[aria-label="Contacter DiagLink"]') !== null).toBe(role !== 'diaglink_super_admin');
+  });
+
+  it.each(
+    (['Light', 'Dark'] as const).flatMap(theme =>
+      (['company_admin', 'technician', 'diaglink_super_admin'] as const).flatMap(role =>
+        [null, '#39756B'].map(accent => ({ theme, role, accent })),
+      ),
+    ),
+  )('keeps the desktop role neutral and theme-aware without changing geometry ($theme, $role, $accent)', ({ theme, role, accent }) => {
+    const previousTheme = localStorage.getItem('ai-foundry-theme');
+    localStorage.setItem('ai-foundry-theme', theme);
+    try {
+      mockState = buildState({ userId: 'u1', companyId: 'c1', role, firstName: 'Alice',
+        companyBranding: role === 'diaglink_super_admin' ? null : {
+          companyName: 'Acme', accentColor: accent, hasLogo: false, logoVersion: null,
+        } });
+      const container = renderAppShell(true);
+      const badge = container.querySelector<HTMLElement>('header .fui-Badge')!;
+      const provider = badge.closest('.fui-FluentProvider')!;
+      const expectedTheme = theme === 'Dark' ? darkTheme : lightTheme;
+      expect(badge.textContent).toBe(ROLE_LABELS[role]);
+      expect(getComputedStyle(badge).color).toBe('var(--colorNeutralForeground1)');
+      expect(getComputedStyle(provider).getPropertyValue('--colorNeutralForeground1').trim())
+        .toBe(expectedTheme.colorNeutralForeground1);
+      expect(getComputedStyle(badge).height).toBe('20px');
+      expect(getComputedStyle(badge).gridColumn).toBe('1');
+      expect(getComputedStyle(badge.parentElement!).display).toBe('grid');
+      const source = readFileSync(resolve('src/components/layout/UserBadge.tsx'), 'utf8');
+      expect(source).toContain('color: tokens.colorNeutralForeground1');
+      expect(source).not.toContain('tokens.colorBrand');
+      expect(source).not.toContain('--diaglink-company-accent');
+    } finally {
+      if (previousTheme === null) localStorage.removeItem('ai-foundry-theme');
+      else localStorage.setItem('ai-foundry-theme', previousTheme);
+    }
   });
 
   it.each([
@@ -432,8 +486,8 @@ describe('AppShell navigation', () => {
     expect(logo.getAttribute('src')).toBe('blob:company-v1');
     expect(logo.previousElementSibling?.textContent).toBe(ROLE_LABELS[role]);
     expect(logo.parentElement?.textContent).toBe(`Alice Martin${ROLE_LABELS[role]}`);
-    expect(getComputedStyle(logo).maxHeight).toBe('28px');
-    expect(getComputedStyle(logo).maxWidth).toBe('96px');
+    expect(getComputedStyle(logo).maxHeight).toBe('40px');
+    expect(getComputedStyle(logo).maxWidth).toBe('128px');
     expect(getComputedStyle(logo).objectFit).toBe('contain');
     expect(getComputedStyle(logo).flexShrink).toBe('0');
     expect(container.querySelector('img[alt="DiagLink"]')).not.toBeNull();
@@ -458,8 +512,8 @@ describe('AppShell navigation', () => {
     expect(logo).not.toBeNull();
     expect(logo.previousElementSibling?.textContent).toBe(`Alice Martin${ROLE_LABELS[role]}`);
     expect(getComputedStyle(logo.parentElement!).display).toBe('flex');
-    expect(getComputedStyle(logo).maxHeight).toBe('32px');
-    expect(getComputedStyle(logo).maxWidth).toBe('80px');
+    expect(getComputedStyle(logo).maxHeight).toBe('40px');
+    expect(getComputedStyle(logo).maxWidth).toBe('104px');
     expect(drawer.querySelector('img[alt="DiagLink"]')).not.toBeNull();
     expect(fetchCompanyLogoMock).not.toHaveBeenCalled();
     expect(URL.createObjectURL).not.toHaveBeenCalled();

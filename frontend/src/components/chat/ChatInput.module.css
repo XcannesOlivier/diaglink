@@ -135,7 +135,7 @@
 .buttonRow {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: 0.5rem 0.75rem;
   gap: 0.5rem;
 }
@@ -143,8 +143,35 @@
 .actionButtons {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.5rem;
   min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.actionGroup {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.conversationActions {
+  border-left: 1px solid var(--colorNeutralStroke2);
+  padding-left: 8px;
+  margin-left: auto;
+}
+
+.actionGroup > button,
+.actionButtons .documentsButton,
+.mobileMenuContainer .mobileMenuButton {
+  min-width: 40px;
+  min-height: 40px;
+  flex-shrink: 0;
+}
+
+.documentsButton {
+  white-space: nowrap;
 }
 
 .changeMachineCompactLabel {
@@ -188,7 +215,7 @@
 
   .actionButtons {
     flex-wrap: wrap;
-    gap: 0.25rem;
+    gap: 8px;
   }
 
   .attachmentName {
@@ -218,6 +245,7 @@
 @media (max-width: 480px) {
   .buttonRow {
     flex-wrap: nowrap;
+    align-items: flex-start;
     justify-content: flex-start;
     column-gap: clamp(0.125rem, 1vw, 0.25rem);
   }
@@ -225,7 +253,11 @@
   .actionButtons {
     flex: 1 1 auto;
     flex-wrap: wrap;
-    gap: clamp(0.125rem, 1vw, 0.25rem);
+    gap: 8px;
+  }
+
+  .conversationActions {
+    margin-left: 0;
   }
 
   .mobileMenuContainer {
