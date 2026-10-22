@@ -21,7 +21,8 @@ public sealed record MachineRequestPayment(Guid PaymentRequestId, int TotalPages
     Guid? ReadyByUserId = null,
     MachineRequestKind RequestKind = MachineRequestKind.InitialMachine,
     Guid? RequestedByUserId = null,
-    Guid? TargetMachineId = null);
+    Guid? TargetMachineId = null,
+    uint? PostgreSqlVersion = null);
 
 /// <summary>Durable SQL repository for machine-request payments.</summary>
 public sealed class MachineRequestPaymentStore(DiagLinkDbContext db)
@@ -573,9 +574,12 @@ public sealed class MachineRequestPaymentStore(DiagLinkDbContext db)
         }
     }
 
-    private static void EnsureVersion(PaymentEntity entity, MachineRequestPayment payment)
+    private void EnsureVersion(PaymentEntity entity, MachineRequestPayment payment)
     {
-        if (!(entity.RowVersion ?? []).SequenceEqual(payment.RowVersion ?? []))
+        var versionMatches = db.Database.IsNpgsql()
+            ? entity.PostgreSqlVersion == payment.PostgreSqlVersion
+            : (entity.RowVersion ?? []).SequenceEqual(payment.RowVersion ?? []);
+        if (!versionMatches)
             throw new InvalidOperationException("Le paiement a été modifié par une autre opération.");
     }
 
@@ -639,5 +643,6 @@ public sealed class MachineRequestPaymentStore(DiagLinkDbContext db)
         payment.FinalCaptureAmountCents, payment.CompanyId, payment.MachineId,
         payment.ProvisioningStage, payment.ProvisioningCompletedAtUtc,
         payment.PreparationStatus, payment.ReadyAtUtc, payment.ReadyByUserId,
-        payment.RequestKind, payment.RequestedByUserId, payment.TargetMachineId);
+        payment.RequestKind, payment.RequestedByUserId, payment.TargetMachineId,
+        payment.PostgreSqlVersion);
 }

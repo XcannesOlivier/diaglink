@@ -33,6 +33,9 @@ logs
 .DS_Store
 *.pem
 
+# Local file containing personal data. Never send it in a Docker/ACR build context.
+/-
+
 # Environment files (will be set via build args or runtime env vars)
 .env*.local
 .env

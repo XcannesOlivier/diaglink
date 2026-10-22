@@ -17,17 +17,12 @@ public sealed class DiagLinkDbContextFactory : IDesignTimeDbContextFactory<DiagL
                 "A database connection is required for EF Core design-time operations. Set ConnectionStrings__DiagLink.");
         }
 
-        var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
-            .UseSqlServer(connectionString, sql =>
-            {
-                sql.MigrationsHistoryTable("__EFMigrationsHistory", DiagLinkDbContext.Schema);
-                sql.EnableRetryOnFailure(
-                    maxRetryCount: 5,
-                    maxRetryDelay: TimeSpan.FromSeconds(10),
-                    errorNumbersToAdd: null);
-            })
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<DiagLinkDbContext>();
+        DiagLinkDatabaseConfiguration.Configure(
+            optionsBuilder,
+            connectionString,
+            Environment.GetEnvironmentVariable(DiagLinkDatabaseConfiguration.ProviderEnvironmentVariable));
 
-        return new DiagLinkDbContext(options);
+        return new DiagLinkDbContext(optionsBuilder.Options);
     }
 }

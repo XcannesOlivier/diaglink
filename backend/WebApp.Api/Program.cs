@@ -203,20 +203,17 @@ builder.Services.AddScoped<IConversationSummarizer, ClaudeConversationSummarizer
 builder.Services.AddSingleton<ClaudeDirectChatAttachmentValidator>();
 builder.Services.AddSingleton<MachineAssistantReadiness>();
 
-// Conversation-history persistence â€” isolated 'chat' schema in the shared 'diaglink' Azure SQL database.
+// Persistence in the shared 'diaglink' database, with application tables split across the 'dbo' and 'chat' schemas.
+var diagLinkConnectionString = builder.Configuration.GetConnectionString("DiagLink")
+    ?? throw new InvalidOperationException("ConnectionStrings:DiagLink is not configured");
+var diagLinkProvider = builder.Configuration[DiagLinkDatabaseConfiguration.ProviderConfigurationKey];
+if (builder.Environment.IsProduction()
+    && DiagLinkDatabaseConfiguration.NormalizeProvider(diagLinkProvider) == DiagLinkDatabaseConfiguration.PostgreSqlProvider)
+{
+    DiagLinkDatabaseConfiguration.EnsureProductionPostgreSqlTarget(diagLinkConnectionString);
+}
 builder.Services.AddDbContext<DiagLinkDbContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DiagLink")
-            ?? throw new InvalidOperationException("ConnectionStrings:DiagLink is not configured"),
-        sql =>
-        {
-            sql.MigrationsHistoryTable("__EFMigrationsHistory", DiagLinkDbContext.Schema);
-            // Absorbs transient SQL errors (incl. Azure SQL serverless cold-start) without manual retry logic per endpoint.
-            sql.EnableRetryOnFailure(
-                maxRetryCount: 5,
-                maxRetryDelay: TimeSpan.FromSeconds(10),
-                errorNumbersToAdd: null);
-        }));
+    DiagLinkDatabaseConfiguration.Configure(options, diagLinkConnectionString, diagLinkProvider));
 builder.Services.AddScoped<ConversationHistoryRepository>();
 builder.Services.AddScoped<AiUsageRepository>();
 builder.Services.AddScoped<AiUsageQueryService>();
@@ -355,6 +352,23 @@ app.MapPost("/api/stripe/webhooks/machine-additions", StripeSubscriptionWebhook.
 // Unauthenticated health endpoint for container probes
 app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
 .WithName("GetHealth");
+
+// Readiness is deliberately database-backed: the process must not receive traffic until
+// PostgreSQL (or SQL Server during rollback) is reachable. The query is read-only and portable.
+app.MapGet("/api/health/ready", async (DiagLinkDbContext db, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync("SELECT 1", cancellationToken);
+        return Results.Ok(new { status = "ready" });
+    }
+    catch
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+})
+.AllowAnonymous()
+.WithName("GetReadiness");
 
 // POST /api/files/upload â€” accepts companyName, machineName and PDF files (multipart/form-data)
 app.MapPost("/api/files/upload", async (HttpContext httpContext, DiagLinkDbContext db, CancellationToken cancellationToken) =>

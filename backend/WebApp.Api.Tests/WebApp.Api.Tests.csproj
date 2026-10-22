@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WebApp.Api\WebApp.Api.csproj" />
+    <ProjectReference Include="..\WebApp.Api.Migrations.PostgreSql\WebApp.Api.Migrations.PostgreSql.csproj" />
   </ItemGroup>
 
   <ItemGroup>

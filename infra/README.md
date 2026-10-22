@@ -66,9 +66,14 @@ templates. Bicep is the maintainable source.
 
 The backend additionally reads `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`,
 `STRIPE_TOPUP_WEBHOOK_SECRET` and `STRIPE_TOPUP_RETURN_URL` for subscription,
-machine-addition and wallet-top-up flows. The current Bicep does not inject those four values.
-They must be verified in the approved runtime configuration before those flows are tested; this
-documentation does not assume that they are present remotely.
+machine-addition and wallet-top-up flows. These values are declared by Bicep so provisioning does
+not erase settings that were previously maintained directly on the Container App. Signing secrets
+remain Container App secrets; identifiers and return URLs are ordinary environment values.
+
+The PostgreSQL cutover adds an `autossh` sidecar. Its private key, pinned host key and database
+connection string are Key Vault-backed Container App secrets. See
+[`deployment/POSTGRESQL-CUTOVER.md`](../deployment/POSTGRESQL-CUTOVER.md) for the guarded order of
+operations; do not run `azd provision` until the production schema has been migrated.
 
 `AI_AGENT_ENDPOINT`, `AI_AGENT_ID` and the optional OBO registration remain in the templates for
 deployment compatibility, but the current application chat runtime is Claude Direct and does not

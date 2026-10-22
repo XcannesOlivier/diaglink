@@ -28,6 +28,15 @@ public sealed class EmailOutboxStore(DiagLinkDbContext db, TimeProvider timeProv
                       AND ([LockedUntilUtc] IS NULL OR [LockedUntilUtc] <= {now})
                     ORDER BY [CreatedAtUtc], [Id]";
 
+    internal static FormattableString BuildPostgreSqlClaimQuery(int batchSize, DateTime now) => $@"
+                    SELECT *, xmin FROM ""dbo"".""EmailOutbox""
+                    WHERE ""Status"" = {(int)EmailOutboxStatus.Pending}
+                      AND ""NextAttemptAtUtc"" <= {now}
+                      AND (""LockedUntilUtc"" IS NULL OR ""LockedUntilUtc"" <= {now})
+                    ORDER BY ""CreatedAtUtc"", ""Id""
+                    LIMIT {batchSize}
+                    FOR UPDATE SKIP LOCKED";
+
     public async Task<EmailOutbox> EnqueueAsync(EmailOutboxEnqueue request, CancellationToken ct = default)
     {
         var entry = CreatePending(request, timeProvider.GetUtcNow().UtcDateTime);
@@ -89,6 +98,8 @@ public sealed class EmailOutboxStore(DiagLinkDbContext db, TimeProvider timeProv
             IQueryable<EmailOutbox> query = db.EmailOutbox;
             if (provider.Contains("SqlServer", StringComparison.OrdinalIgnoreCase))
                 query = db.EmailOutbox.FromSqlInterpolated(BuildSqlServerClaimQuery(batchSize, now));
+            else if (db.Database.IsNpgsql())
+                query = db.EmailOutbox.FromSqlInterpolated(BuildPostgreSqlClaimQuery(batchSize, now));
             else
                 query = query.Where(item => item.Status == EmailOutboxStatus.Pending
                         && item.NextAttemptAtUtc <= now

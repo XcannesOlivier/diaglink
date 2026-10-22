@@ -36,22 +36,22 @@ public sealed class CompanyWalletDebitService(DbContextOptions<DiagLinkDbContext
         result = result with { CommercialDebitRequired = required, RemainingCommercialCreditRequired = required };
 
         await using var db = new DiagLinkDbContext(options);
-        if (!db.Database.IsSqlServer() && db.Database.ProviderName != "Microsoft.EntityFrameworkCore.Sqlite")
+        if (!FinancialRowLocks.IsSupported(db))
             return Fail("UnsupportedDatabaseProvider");
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var usage = await db.AiUsageRecords.AsNoTracking().SingleOrDefaultAsync(u => u.Id == usageRecordId, ct);
         if (usage == null) return Fail("UsageNotFound");
         result = result with { CompanyId = usage.CompanyId, MachineId = usage.MachineId };
-        if (usage.CompanyId == null || !await db.Companies.AnyAsync(c => c.Id == usage.CompanyId, ct))
+        if (usage.CompanyId == null)
+            return Fail("CompanyMissing");
+        // Match the company-then-wallet lock order used by top-ups and Stripe workflows.
+        if (await FinancialRowLocks.CompanyAsync(db, usage.CompanyId.Value, ct) is null)
             return Fail("CompanyMissing");
         if (usage.MachineId != null && !await db.Machines.AnyAsync(m => m.Id == usage.MachineId && m.CompanyId == usage.CompanyId, ct))
             return Fail("DataInconsistency");
 
         // One update lock per company wallet, retained through the ledger insert and commit.
-        var wallets = db.Database.IsSqlServer()
-            ? db.CompanyWallets.FromSqlInterpolated($"SELECT * FROM [dbo].[CompanyWallets] WITH (UPDLOCK, HOLDLOCK) WHERE [CompanyId] = {usage.CompanyId.Value}")
-            : db.CompanyWallets.AsQueryable();
-        var wallet = await wallets.SingleOrDefaultAsync(w => w.CompanyId == usage.CompanyId, ct);
+        var wallet = await FinancialRowLocks.WalletAsync(db, usage.CompanyId.Value, ct);
         if (wallet == null) return Fail("WalletNotFound");
         if (wallet.Currency != "EUR") return Fail("InvalidCurrency");
         if (!ValidAmount(wallet.Balance)) return Fail("DataInconsistency");

@@ -41,6 +41,18 @@
     "stripeMachineRequestWebhookSecret": {
       "value": "${STRIPE_MACHINE_REQUEST_WEBHOOK_SECRET}"
     },
+    "stripeWebhookSecret": {
+      "value": "${STRIPE_WEBHOOK_SECRET}"
+    },
+    "stripeTopUpWebhookSecret": {
+      "value": "${STRIPE_TOPUP_WEBHOOK_SECRET}"
+    },
+    "stripePriceId": {
+      "value": "${STRIPE_PRICE_ID}"
+    },
+    "stripeTopUpReturnUrl": {
+      "value": "${STRIPE_TOPUP_RETURN_URL}"
+    },
     "stripeEnabled": {
       "value": "${STRIPE_ENABLED=true}"
     },
@@ -61,6 +73,52 @@
     },
     "publicCustomDomainCertificateName": {
       "value": "${PUBLIC_CUSTOM_DOMAIN_CERTIFICATE_NAME=}"
+    },
+    "claudeDirectDeployment": {
+      "value": "${CLAUDE_DIRECT_DEPLOYMENT=claude-sonnet-5}"
+    },
+    "claudeFileSearchDiagnosticsEnabled": {
+      "value": "${CLAUDE_FILE_SEARCH_DIAGNOSTICS_ENABLED=false}"
+    },
+    "aiPricingIdentityDeployments": {
+      "value": [
+        {
+          "ProjectEndpoint": "https://diaglink-foundry-prod.services.ai.azure.com/api/projects/entreprise-001-demo",
+          "Deployment": "claude-sonnet-5",
+          "Provider": "Anthropic"
+        },
+        {
+          "ProjectEndpoint": "https://diaglink-foundry-prod.services.ai.azure.com/api/projects/entreprise-002-demo",
+          "Deployment": "claude-sonnet-5",
+          "Provider": "Anthropic"
+        },
+        {
+          "ProjectEndpoint": "https://claude-assistant-techni-resource.services.ai.azure.com/api/projects/claude-assistant-technique",
+          "Deployment": "claude-sonnet-5",
+          "Provider": "Anthropic"
+        }
+      ]
+    },
+    "postgresTunnelImageName": {
+      "value": "${POSTGRES_TUNNEL_IMAGE_NAME}"
+    },
+    "vultrSshHost": {
+      "value": "${VULTR_SSH_HOST=65.20.98.165}"
+    },
+    "vultrSshPort": {
+      "value": "${VULTR_SSH_PORT=22}"
+    },
+    "vultrSshUser": {
+      "value": "${VULTR_SSH_USER=diaglink_tunnel}"
+    },
+    "postgresqlConnectionStringSecretUri": {
+      "value": "${POSTGRESQL_CONNECTION_STRING_SECRET_URI=https://kv-diaglink-pg-2026.vault.azure.net/secrets/diaglink-postgresql}"
+    },
+    "vultrSshPrivateKeySecretUri": {
+      "value": "${VULTR_SSH_PRIVATE_KEY_SECRET_URI=https://kv-diaglink-pg-2026.vault.azure.net/secrets/diaglink-vultr-ssh-key}"
+    },
+    "vultrSshKnownHostsSecretUri": {
+      "value": "${VULTR_SSH_KNOWN_HOSTS_SECRET_URI=https://kv-diaglink-pg-2026.vault.azure.net/secrets/diaglink-vultr-known-hosts}"
     }
   }
 }

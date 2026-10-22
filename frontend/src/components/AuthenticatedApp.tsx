@@ -12,12 +12,24 @@ interface AuthenticatedAppProps {
   onDiagLinkSessionExpired?: () => void;
 }
 
+const genericAgentMetadata: IAgentMetadata = {
+  id: 'fallback-agent',
+  object: 'agent',
+  createdAt: Date.now() / 1000,
+  name: 'Assistant Technique',
+  description: 'Votre support pour diagnostiquer, localiser et intervenir plus vite',
+  model: 'gpt-4o-mini',
+  metadata: { logo: 'Avatar_Default.svg' },
+  capabilities: { imageAttachments: false, fileAttachments: false },
+};
+
 export function AuthenticatedApp({ loadingOnly = false, onDiagLinkSessionExpired }: AuthenticatedAppProps) {
   const { state, dispatch } = useAppState();
   const { getAccessToken } = useAuth();
   const [agentMetadata, setAgentMetadata] = useState<IAgentMetadata | null>(null);
   const [isLoadingAgent, setIsLoadingAgent] = useState(true);
   const [hasNoMachines, setHasNoMachines] = useState(false);
+  const [hasMachineLoadError, setHasMachineLoadError] = useState(false);
 
   const fetchAgentMetadata = useCallback(async () => {
     if (loadingOnly || !state.machine.selected) return;
@@ -39,12 +51,7 @@ export function AuthenticatedApp({ loadingOnly = false, onDiagLinkSessionExpired
       document.title = data.name ? `${data.name} - Assistant Technique` : 'Assistant Technique';
     } catch (error) {
       console.error('Error fetching agent metadata:', error);
-      setAgentMetadata({
-        id: 'fallback-agent', object: 'agent', createdAt: Date.now() / 1000,
-        name: 'Assistant Technique', description: 'Votre support pour diagnostiquer, localiser et intervenir plus vite',
-        model: 'gpt-4o-mini', metadata: { logo: 'Avatar_Default.svg' },
-        capabilities: { imageAttachments: false, fileAttachments: false },
-      });
+      setAgentMetadata(genericAgentMetadata);
       document.title = 'Assistant Technique';
     } finally {
       setIsLoadingAgent(false);
@@ -55,22 +62,41 @@ export function AuthenticatedApp({ loadingOnly = false, onDiagLinkSessionExpired
 
   const initializeDefaultMachine = useCallback(async () => {
     if (loadingOnly || state.machine.selected) return;
-    const result = await getMachines(getAccessToken);
-    if (result.kind === 'success' && result.data.length === 0) {
-      setHasNoMachines(true);
-    } else if (result.kind === 'success' && result.data.length > 0) {
-      const firstMachine = result.data[0];
-      dispatch({ type: 'MACHINE_SELECT', machine: { id: firstMachine.id, name: firstMachine.name, reference: firstMachine.reference ?? null } });
-      setHasNoMachines(false);
+    try {
+      const result = await getMachines(getAccessToken);
+      if (result.kind === 'success' && result.data.length === 0) {
+        setHasNoMachines(true);
+        setHasMachineLoadError(false);
+        setAgentMetadata(genericAgentMetadata);
+        setIsLoadingAgent(false);
+      } else if (result.kind === 'success' && result.data.length > 0) {
+        const firstMachine = result.data[0];
+        dispatch({ type: 'MACHINE_SELECT', machine: { id: firstMachine.id, name: firstMachine.name, reference: firstMachine.reference ?? null } });
+        setHasNoMachines(false);
+        setHasMachineLoadError(false);
+      } else {
+        if (result.kind === 'unauthorized' && result.diagLinkSessionExpired) {
+          onDiagLinkSessionExpired?.();
+        }
+        setHasMachineLoadError(true);
+        setIsLoadingAgent(false);
+      }
+    } catch (error) {
+      console.error('Error loading machines:', error);
+      setHasMachineLoadError(true);
+      setIsLoadingAgent(false);
     }
-  }, [dispatch, getAccessToken, loadingOnly, state.machine.selected]);
+  }, [dispatch, getAccessToken, loadingOnly, onDiagLinkSessionExpired, state.machine.selected]);
 
   useEffect(() => { void initializeDefaultMachine(); }, [initializeDefaultMachine]);
 
   if (loadingOnly || isLoadingAgent) {
     return <div className="app-container app-loading"><Spinner size="large" /><p>Chargement...</p></div>;
   }
-  if (hasNoMachines) {
+  if (hasMachineLoadError) {
+    return <div className="app-container app-loading"><h2>Chargement impossible</h2><p>Impossible de charger la liste des machines.</p></div>;
+  }
+  if (hasNoMachines && state.auth.currentUser?.role !== 'diaglink_super_admin') {
     return <div className="app-container app-loading"><h2>Aucune machine disponible</h2><p>Aucune machine ne vous est actuellement assignée.</p></div>;
   }
   if (!agentMetadata) return null;

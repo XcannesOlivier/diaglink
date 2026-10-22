@@ -7,7 +7,7 @@ import {StarterMessages} from '../chat/StarterMessages';
 import {clearDiagLinkSession,markMachineEntryChoiceHandled} from '../../utils/apiAuth';
 import type { SelectedMachine } from '../../types/machine';
 
-const mocks=vi.hoisted(()=>({dispatch:vi.fn(),dispatchToast:vi.fn(),state:null as unknown as ReturnType<typeof makeState>}));
+const mocks=vi.hoisted(()=>({dispatch:vi.fn(),dispatchToast:vi.fn(),getMachines:vi.fn(),sendMessage:vi.fn(),state:null as unknown as ReturnType<typeof makeState>}));
 const makeState=(role:'technician'|'company_admin'|'diaglink_super_admin', selected: SelectedMachine | null = {id:'machine-1',name:'Compresseur Test Alpha',reference:null}, currentConversationId: string | null = null)=>({
  auth:{status:'authenticated',user:null,error:null,currentUser:{userId:'u1',companyId:'c1',role}},
  chat:{status:'idle',messages:[],currentConversationId,error:null,pendingMessages:[]},
@@ -25,15 +25,15 @@ vi.mock('@fluentui/react-components',()=>({
 vi.mock('../../hooks/useAppState',()=>({useAppState:()=>({chat:mocks.state.chat,state:mocks.state})}));
 vi.mock('../../contexts/AppContext',()=>({useAppContext:()=>({dispatch:mocks.dispatch})}));
 vi.mock('../../hooks/useAuth',()=>({useAuth:()=>({getAccessToken:async()=>null})}));
-vi.mock('../../services/chatService',()=>({ChatService:class{clearError(){}cancelStream(){}clearChat(){}deleteConversation(){return Promise.resolve();}sendMessage(){return Promise.resolve();}listConversations(){return Promise.resolve({conversations:[],hasMore:false});}getConversationMessages(){return Promise.resolve([]);}}}));
-vi.mock('../../services/machineService',()=>({getMachines:vi.fn()}));
+vi.mock('../../services/chatService',()=>({ChatService:class{clearError(){}cancelStream(){}clearChat(){}deleteConversation(){return Promise.resolve();}sendMessage(...args:unknown[]){return mocks.sendMessage(...args);}listConversations(){return Promise.resolve({conversations:[],hasMore:false});}getConversationMessages(){return Promise.resolve([]);}}}));
+vi.mock('../../services/machineService',()=>({getMachines:mocks.getMachines}));
 vi.mock('../../services/telemetry',()=>({trackFeedback:vi.fn()}));
 vi.mock('../ConversationSidebar',()=>({ConversationSidebar:()=>null}));
-vi.mock('../ChatInterface',()=>({ChatInterface:({starterAccessory,agentName,machineId,selectedMachine,showMachineSelectionPrompt}:{starterAccessory?:ReactNode;agentName?:string;machineId?:string;selectedMachine?:SelectedMachine|null;showMachineSelectionPrompt?:boolean})=><section aria-label="Assistant Technique" data-machine-id={machineId} data-machine-name={selectedMachine?.name} data-machine-reference={selectedMachine?.reference} data-show-machine-prompt={showMachineSelectionPrompt}><span>{agentName}</span>{starterAccessory}</section>}));
+vi.mock('../ChatInterface',()=>({ChatInterface:({starterAccessory,agentName,machineId,selectedMachine,showMachineSelectionPrompt,onSendMessage}:{starterAccessory?:ReactNode;agentName?:string;machineId?:string;selectedMachine?:SelectedMachine|null;showMachineSelectionPrompt?:boolean;onSendMessage:(text:string)=>void})=><section aria-label="Assistant Technique" data-machine-id={machineId} data-machine-name={selectedMachine?.name} data-machine-reference={selectedMachine?.reference} data-show-machine-prompt={showMachineSelectionPrompt}><span>{agentName}</span>{starterAccessory}<button data-send-message onClick={()=>onSendMessage('Diagnostic')}>Envoyer</button></section>}));
 
 describe('AgentChat machine confirmation panel',()=>{
  let host:HTMLDivElement,root:Root;
- beforeEach(()=>{sessionStorage.clear();mocks.dispatch.mockClear();mocks.state=makeState('company_admin');host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+ beforeEach(()=>{sessionStorage.clear();mocks.dispatch.mockClear();mocks.getMachines.mockReset();mocks.sendMessage.mockReset().mockResolvedValue(undefined);mocks.state=makeState('company_admin');host=document.createElement('div');document.body.append(host);root=createRoot(host);});
  afterEach(async()=>{await act(async()=>root.unmount());host.remove();sessionStorage.clear();});
  const render=async()=>act(async()=>root.render(<AgentChat agentId="agent" agentName="Assistant Technique — Compresseur Test Alpha"/>));
  const remount=async()=>{await act(async()=>root.unmount());root=createRoot(host);await render();};
@@ -50,6 +50,13 @@ describe('AgentChat machine confirmation panel',()=>{
   expect(host.querySelector<HTMLElement>('[aria-label="Assistant Technique"]')?.dataset.showMachinePrompt).toBe('true');
   mocks.state=makeState('technician',null,'legacy-conversation');await render();
   expect(host.querySelector<HTMLElement>('[aria-label="Assistant Technique"]')?.dataset.showMachinePrompt).toBe('false');
+ });
+
+ it('never sends a chat message when no machine is available',async()=>{
+  mocks.state=makeState('diaglink_super_admin',null);mocks.getMachines.mockResolvedValue({kind:'success',data:[]});await render();
+  await act(async()=>host.querySelector<HTMLButtonElement>('[data-send-message]')!.click());
+  expect(mocks.getMachines).toHaveBeenCalledTimes(1);expect(mocks.sendMessage).not.toHaveBeenCalled();
+  expect(mocks.dispatch).toHaveBeenCalledWith({type:'CHAT_ERROR',error:{message:'Aucune machine disponible.',recoverable:false,code:'API'}});
  });
 
  it('keeps only the allowed actions, preserves the machine title elsewhere and confirms through sessionStorage',async()=>{

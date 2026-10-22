@@ -56,6 +56,9 @@ public class DiagLinkDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        var isPostgreSql = Database.IsNpgsql();
+        var isSqlServer = Database.IsSqlServer();
+
         modelBuilder.Entity<EmailOutbox>(entity =>
         {
             entity.ToTable("EmailOutbox", "dbo", table =>
@@ -74,7 +77,16 @@ public class DiagLinkDbContext : DbContext
             entity.Property(item => item.PayloadJson).IsRequired();
             entity.Property(item => item.ProviderOperationId).HasMaxLength(200);
             entity.Property(item => item.LastError).HasMaxLength(1000);
-            entity.Property(item => item.RowVersion).IsRowVersion();
+            if (isPostgreSql)
+            {
+                entity.Ignore(item => item.RowVersion);
+                entity.Property(item => item.PostgreSqlVersion).IsRowVersion().HasColumnName("xmin");
+            }
+            else
+            {
+                entity.Ignore(item => item.PostgreSqlVersion);
+                entity.Property(item => item.RowVersion).IsRowVersion();
+            }
             entity.HasIndex(item => new { item.MachineRequestId, item.NotificationType }).IsUnique();
             entity.HasIndex(item => new { item.Status, item.NextAttemptAtUtc, item.LockedUntilUtc });
             entity.HasIndex(item => item.PaymentRequestId).HasFilter("[PaymentRequestId] IS NOT NULL");
@@ -116,7 +128,16 @@ public class DiagLinkDbContext : DbContext
             entity.Property(payment => payment.StripePaymentIntentId).HasMaxLength(200);
             entity.Property(payment => payment.AuthorizationEventId).HasMaxLength(200);
             entity.Property(payment => payment.MachineRequestId).HasMaxLength(32).IsUnicode(false);
-            entity.Property(payment => payment.RowVersion).IsRowVersion();
+            if (isPostgreSql)
+            {
+                entity.Ignore(payment => payment.RowVersion);
+                entity.Property(payment => payment.PostgreSqlVersion).IsRowVersion().HasColumnName("xmin");
+            }
+            else
+            {
+                entity.Ignore(payment => payment.PostgreSqlVersion);
+                entity.Property(payment => payment.RowVersion).IsRowVersion();
+            }
             entity.HasIndex(payment => payment.StripeSessionId).IsUnique().HasFilter("[StripeSessionId] IS NOT NULL");
             entity.HasIndex(payment => payment.StripePaymentIntentId).IsUnique().HasFilter("[StripePaymentIntentId] IS NOT NULL");
             entity.HasIndex(payment => payment.AuthorizationEventId).IsUnique().HasFilter("[AuthorizationEventId] IS NOT NULL");
@@ -268,7 +289,10 @@ public class DiagLinkDbContext : DbContext
 
         modelBuilder.Entity<CreditLedgerEntry>(entity =>
         {
-            entity.ToTable("CreditLedger", "dbo", t => t.UseSqlOutputClause(false));
+            if (isSqlServer)
+                entity.ToTable("CreditLedger", "dbo", t => t.UseSqlOutputClause(false));
+            else
+                entity.ToTable("CreditLedger", "dbo");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.EntryType).IsRequired().HasMaxLength(50);
             entity.Property(e => e.BucketType).IsRequired().HasMaxLength(50);
@@ -339,7 +363,10 @@ public class DiagLinkDbContext : DbContext
         // Pre-existing 'dbo.Users' table, owned outside this app — read-only, never migrated by this context.
         modelBuilder.Entity<User>(entity =>
         {
-            entity.ToTable("Users", "dbo", t => t.ExcludeFromMigrations());
+            entity.ToTable("Users", "dbo", t =>
+            {
+                if (!isPostgreSql) t.ExcludeFromMigrations();
+            });
             entity.HasKey(u => u.Id);
             entity.Property(u => u.Email).IsRequired().HasMaxLength(320);
             entity.Property(u => u.Role).IsRequired().HasMaxLength(50);
@@ -350,6 +377,13 @@ public class DiagLinkDbContext : DbContext
             entity.Property(u => u.PhoneNumber).HasMaxLength(30);
 
             entity.HasIndex(u => u.Email).IsUnique();
+            if (isPostgreSql)
+            {
+                entity.HasIndex(u => u.EntraObjectId)
+                    .IsUnique()
+                    .HasDatabaseName("IX_Users_EntraObjectId_NotNull")
+                    .HasFilter("\"EntraObjectId\" IS NOT NULL");
+            }
         });
 
         modelBuilder.Entity<Conversation>(entity =>
@@ -414,6 +448,12 @@ public class DiagLinkDbContext : DbContext
                         "CK_ConversationMessageVisuals_RequiredStrings",
                         "LEN([DocumentId]) > 0 AND LEN([Name]) > 0 AND LEN([AssetKey]) > 0");
                 }
+                else if (isPostgreSql)
+                {
+                    table.HasCheckConstraint(
+                        "CK_ConversationMessageVisuals_RequiredStrings",
+                        "char_length(\"DocumentId\") > 0 AND char_length(\"Name\") > 0 AND char_length(\"AssetKey\") > 0");
+                }
             });
             entity.HasKey(v => v.Id);
             entity.Property(v => v.DocumentId).IsRequired().HasMaxLength(200);
@@ -439,6 +479,12 @@ public class DiagLinkDbContext : DbContext
                         "CK_ConversationMessageSourceReferences_RequiredStrings",
                         "LEN([DocumentId]) > 0 AND LEN([DisplayPage]) > 0 AND LEN([Label]) > 0");
                 }
+                else if (isPostgreSql)
+                {
+                    table.HasCheckConstraint(
+                        "CK_ConversationMessageSourceReferences_RequiredStrings",
+                        "char_length(\"DocumentId\") > 0 AND char_length(\"DisplayPage\") > 0 AND char_length(\"Label\") > 0");
+                }
             });
             entity.HasKey(source => source.Id);
             entity.Property(source => source.DocumentId).IsRequired().HasMaxLength(200);
@@ -459,6 +505,12 @@ public class DiagLinkDbContext : DbContext
                     table.HasCheckConstraint(
                         "CK_ConversationMessageWebCitations_RequiredStrings",
                         "LEN([Url]) > 0 AND LEN([Label]) > 0");
+                }
+                else if (isPostgreSql)
+                {
+                    table.HasCheckConstraint(
+                        "CK_ConversationMessageWebCitations_RequiredStrings",
+                        "char_length(\"Url\") > 0 AND char_length(\"Label\") > 0");
                 }
             });
             entity.HasKey(citation => citation.Id);
@@ -495,7 +547,10 @@ public class DiagLinkDbContext : DbContext
         modelBuilder.Entity<Company>(entity =>
         {
             // Use legacy dbo.Companies (pre-existing business table). Do not include in migrations.
-            entity.ToTable("Companies", "dbo", t => t.ExcludeFromMigrations());
+            entity.ToTable("Companies", "dbo", t =>
+            {
+                if (!isPostgreSql) t.ExcludeFromMigrations();
+            });
             entity.HasKey(c => c.Id);
             entity.Property(c => c.Name).IsRequired().HasMaxLength(200);
             entity.Property(c => c.Status).IsRequired().HasMaxLength(50);
@@ -523,7 +578,10 @@ public class DiagLinkDbContext : DbContext
         modelBuilder.Entity<Machine>(entity =>
         {
             // Map to legacy dbo.Machines and reuse existing columns. Do not include in migrations.
-            entity.ToTable("Machines", "dbo", t => t.ExcludeFromMigrations());
+            entity.ToTable("Machines", "dbo", t =>
+            {
+                if (!isPostgreSql) t.ExcludeFromMigrations();
+            });
             entity.HasKey(m => m.Id);
             entity.Property(m => m.Name).IsRequired().HasMaxLength(200);
             // Mapping for legacy dbo.Machines: we reuse existing business columns only.
@@ -553,7 +611,10 @@ public class DiagLinkDbContext : DbContext
         modelBuilder.Entity<UserMachineAccess>(entity =>
         {
             // Map user-machine associations to legacy dbo.UserMachines. Do not include in migrations.
-            entity.ToTable("UserMachines", "dbo", t => t.ExcludeFromMigrations());
+            entity.ToTable("UserMachines", "dbo", t =>
+            {
+                if (!isPostgreSql) t.ExcludeFromMigrations();
+            });
             entity.HasKey(a => new { a.UserId, a.MachineId });
 
             // Real FK to Machine (owned by this app). UserId stays a logical Guid — see entity doc comment.
@@ -566,6 +627,33 @@ public class DiagLinkDbContext : DbContext
             entity.Property(a => a.CreatedAtUtc).HasColumnName("CreatedAt");
         });
 
-        
+        if (isPostgreSql)
+        {
+            foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+            {
+                foreach (var checkConstraint in entityType.GetCheckConstraints().ToArray())
+                {
+                    entityType.RemoveCheckConstraint(checkConstraint.ModelName);
+                    entityType.AddCheckConstraint(
+                        checkConstraint.ModelName,
+                        ToPostgreSqlExpression(checkConstraint.Sql));
+                }
+
+                foreach (var index in entityType.GetIndexes())
+                {
+                    if (index.GetFilter() is { } filter)
+                        index.SetFilter(ToPostgreSqlExpression(filter));
+                }
+            }
+        }
+    }
+
+    private static string ToPostgreSqlExpression(string sql)
+    {
+        var result = System.Text.RegularExpressions.Regex.Replace(
+            sql,
+            @"\[([^\]]+)\]",
+            "\"$1\"");
+        return result.Replace("LEN(", "char_length(", StringComparison.OrdinalIgnoreCase);
     }
 }

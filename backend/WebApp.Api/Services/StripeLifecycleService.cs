@@ -22,8 +22,8 @@ public sealed class StripeLifecycleService(DbContextOptions<DiagLinkDbContext> o
         {
             await using var db = new DiagLinkDbContext(options);
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-            var companies = db.Database.IsSqlServer() ? db.Companies.FromSqlInterpolated($"SELECT * FROM dbo.Companies WITH (UPDLOCK,HOLDLOCK) WHERE Id={companyId.Value}") : db.Companies.AsQueryable();
-            await companies.SingleAsync(c => c.Id == companyId.Value, ct);
+            _ = await FinancialRowLocks.CompanyAsync(db, companyId.Value, ct)
+                ?? throw new InvalidOperationException("Company missing.");
             var previous = await db.StripeLifecycleEvents.SingleOrDefaultAsync(e => e.Id == eventId, ct);
             if (previous != null) return previous.SubscriptionId == subscriptionId ? "AlreadyProcessed" : "ReconciliationRequired";
             var account = await db.BillingAccounts.SingleAsync(a => a.CompanyId == companyId.Value, ct);
@@ -37,6 +37,8 @@ public sealed class StripeLifecycleService(DbContextOptions<DiagLinkDbContext> o
                     || await db.StripeLifecycleEvents.AnyAsync(e => e.CompanyId == companyId && e.CompletedAtUtc == null,ct)) return "RetryRequired";
                 var quantity = await db.Machines.CountAsync(m => m.CompanyId == companyId && m.Status == "active", ct);
                 // This is the upcoming invoice notification, before invoice generation.
+                // The event id is stable, so a PostgreSQL serialization/deadlock replay repeats
+                // the Stripe mutation with the exact same idempotency key.
                 await gateway.SetQuantityAsync(account, state, quantity, eventId, ct);
             }
             account.SubscriptionStatus = state.Status;

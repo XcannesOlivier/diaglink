@@ -61,4 +61,5 @@ public class MachineRequestPayment
     public DateTime? ReadyAtUtc { get; set; }
     public Guid? ReadyByUserId { get; set; }
     public byte[] RowVersion { get; set; } = [];
+    public uint PostgreSqlVersion { get; set; }
 }

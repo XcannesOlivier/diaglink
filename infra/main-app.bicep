@@ -25,6 +25,12 @@ param contactRecipientAddress string
 param stripeSecretKey string
 @secure()
 param stripeMachineRequestWebhookSecret string
+@secure()
+param stripeWebhookSecret string
+@secure()
+param stripeTopUpWebhookSecret string
+param stripePriceId string
+param stripeTopUpReturnUrl string
 @description('Enable Stripe payment flows.')
 param stripeEnabled bool
 @description('Stripe Checkout return URL for the public first-machine request flow.')
@@ -39,6 +45,22 @@ param customDomainCertificateName string
 param publicCustomDomainName string
 @description('Name of the existing Container Apps managed certificate for the public domain.')
 param publicCustomDomainCertificateName string = ''
+param claudeDirectDeployment string = 'claude-sonnet-5'
+param claudeFileSearchDiagnosticsEnabled bool = false
+@description('Existing non-secret deployment identities used to resolve AI pricing.')
+param aiPricingIdentityDeployments array
+@description('Immutable ACR image for the autossh sidecar.')
+param postgresTunnelImageName string
+@description('SSH hostname or IP of the Vultr server. PostgreSQL itself remains private.')
+param vultrSshHost string
+param vultrSshPort int = 22
+param vultrSshUser string = 'diaglink_tunnel'
+@description('Versionless Key Vault secret URI containing the complete PostgreSQL connection string.')
+param postgresqlConnectionStringSecretUri string
+@description('Versionless Key Vault secret URI containing the dedicated OpenSSH private key.')
+param vultrSshPrivateKeySecretUri string
+@description('Versionless Key Vault secret URI containing the pinned Vultr SSH known_hosts line.')
+param vultrSshKnownHostsSecretUri string
 
 var abbrs = loadJsonContent('./abbreviations.json')
 
@@ -108,12 +130,16 @@ var oboEnv = !empty(entraBackendClientId) ? [
   }
 ] : []
 
-// SQL connection string for conversation-history persistence — existing 'diaglink' Azure SQL DB,
-// Managed Identity auth (no secret). Reuses the same user-assigned MI as MANAGED_IDENTITY_CLIENT_ID.
+// PostgreSQL production connection resolved from Key Vault. The application connects to the
+// loopback port exposed by the SSH sidecar; PostgreSQL is never exposed directly to Azure.
 var diagLinkEnv = [
   {
+    name: 'Database__Provider'
+    value: 'PostgreSql'
+  }
+  {
     name: 'ConnectionStrings__DiagLink'
-    value: 'Server=tcp:sql-diaglink.database.windows.net,1433;Database=diaglink;Authentication=Active Directory Managed Identity;User Id=${oboManagedIdentityClientId};Encrypt=True;TrustServerCertificate=False;Connection Timeout=60;'
+    secretRef: 'diaglink-postgresql'
   }
 ]
 
@@ -160,6 +186,22 @@ var stripeEnv = [
     secretRef: 'stripe-machine-request-webhook-secret'
   }
   {
+    name: 'STRIPE_WEBHOOK_SECRET'
+    secretRef: 'stripe-webhook-secret'
+  }
+  {
+    name: 'STRIPE_TOPUP_WEBHOOK_SECRET'
+    secretRef: 'stripe-topup-webhook-secret'
+  }
+  {
+    name: 'STRIPE_PRICE_ID'
+    value: stripePriceId
+  }
+  {
+    name: 'STRIPE_TOPUP_RETURN_URL'
+    value: stripeTopUpReturnUrl
+  }
+  {
     name: 'STRIPE_ENABLED'
     value: string(stripeEnabled)
   }
@@ -194,11 +236,43 @@ var containerSecrets = [
     name: 'stripe-machine-request-webhook-secret'
     value: stripeMachineRequestWebhookSecret
   }
+  {
+    name: 'stripe-webhook-secret'
+    value: stripeWebhookSecret
+  }
+  {
+    name: 'stripe-topup-webhook-secret'
+    value: stripeTopUpWebhookSecret
+  }
+  {
+    name: 'diaglink-postgresql'
+    keyVaultUrl: postgresqlConnectionStringSecretUri
+    identity: userAssignedIdentityId
+  }
+  {
+    name: 'vultr-ssh-private-key'
+    keyVaultUrl: vultrSshPrivateKeySecretUri
+    identity: userAssignedIdentityId
+  }
+  {
+    name: 'vultr-ssh-known-hosts'
+    keyVaultUrl: vultrSshKnownHostsSecretUri
+    identity: userAssignedIdentityId
+  }
 ]
 
-// Share the non-secret tariff identities with local/backend configuration.
-var pricingIdentities = loadJsonContent('../backend/WebApp.Api/appsettings.json').AiPricingIdentity.Deployments
-var pricingIdentityEnvGroups = [for (identity, index) in pricingIdentities: [
+var claudeEnv = [
+  {
+    name: 'ClaudeDirectChat__Deployment'
+    value: claudeDirectDeployment
+  }
+  {
+    name: 'ClaudeDirectChat__FileSearchDiagnostics__Enabled'
+    value: string(claudeFileSearchDiagnosticsEnabled)
+  }
+]
+
+var pricingIdentityEnvGroups = [for (identity, index) in aiPricingIdentityDeployments: [
   {
     name: 'AiPricingIdentity__Deployments__${index}__ProjectEndpoint'
     value: identity.ProjectEndpoint
@@ -214,7 +288,87 @@ var pricingIdentityEnvGroups = [for (identity, index) in pricingIdentities: [
 ]]
 var pricingIdentityEnv = flatten(pricingIdentityEnvGroups)
 
-var containerEnv = concat(baseEnv, miEnv, oboEnv, diagLinkEnv, emailEnv, authEnv, storageEnv, contactEnv, stripeEnv, pricingIdentityEnv)
+var containerEnv = concat(baseEnv, miEnv, oboEnv, diagLinkEnv, emailEnv, authEnv, storageEnv, contactEnv, stripeEnv, claudeEnv, pricingIdentityEnv)
+
+var tunnelContainers = [
+  {
+    name: 'postgres-tunnel'
+    image: postgresTunnelImageName
+    env: [
+      {
+        name: 'VULTR_SSH_HOST'
+        value: vultrSshHost
+      }
+      {
+        name: 'VULTR_SSH_PORT'
+        value: string(vultrSshPort)
+      }
+      {
+        name: 'VULTR_SSH_USER'
+        value: vultrSshUser
+      }
+      {
+        name: 'POSTGRES_TUNNEL_LOCAL_PORT'
+        value: '15432'
+      }
+      {
+        name: 'POSTGRES_REMOTE_HOST'
+        value: '127.0.0.1'
+      }
+      {
+        name: 'POSTGRES_REMOTE_PORT'
+        value: '5432'
+      }
+    ]
+    resources: {
+      cpu: json('0.25')
+      memory: '0.5Gi'
+    }
+    volumeMounts: [
+      {
+        volumeName: 'postgres-tunnel-secrets'
+        mountPath: '/mnt/ssh-secrets'
+      }
+    ]
+    probes: [
+      {
+        type: 'Liveness'
+        tcpSocket: {
+          port: 15432
+        }
+        periodSeconds: 30
+        failureThreshold: 3
+        initialDelaySeconds: 10
+      }
+      {
+        type: 'Startup'
+        tcpSocket: {
+          port: 15432
+        }
+        periodSeconds: 5
+        failureThreshold: 24
+        initialDelaySeconds: 2
+      }
+    ]
+  }
+]
+
+var tunnelVolumes = [
+  {
+    name: 'postgres-tunnel-secrets'
+    storageType: 'Secret'
+    secrets: [
+      {
+        secretRef: 'vultr-ssh-private-key'
+        path: 'id_ed25519'
+      }
+      {
+        secretRef: 'vultr-ssh-known-hosts'
+        path: 'known_hosts'
+      }
+    ]
+  }
+]
 
 // Single Container App - serves both frontend and backend
 module webApp './core/host/container-app.bicep' = {
@@ -231,8 +385,11 @@ module webApp './core/host/container-app.bicep' = {
     enableIngress: true
     external: true
     healthProbePath: '/api/health'
+    readinessProbePath: '/api/health/ready'
     userAssignedIdentityId: userAssignedIdentityId
     secrets: containerSecrets
+    additionalContainers: tunnelContainers
+    volumes: tunnelVolumes
     customDomains: concat([
       {
         name: customDomainName

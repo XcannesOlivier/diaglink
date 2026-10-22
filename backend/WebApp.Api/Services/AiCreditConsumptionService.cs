@@ -30,7 +30,7 @@ public sealed class AiCreditConsumptionService(DbContextOptions<DiagLinkDbContex
             return Fail("InvalidCost");
         // Dedicated context: never flush other request-local tracked changes.
         await using var db = new DiagLinkDbContext(options);
-        if (!db.Database.IsSqlServer() && !string.Equals(db.Database.ProviderName, "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+        if (!FinancialRowLocks.IsSupported(db))
             return Fail("UnsupportedDatabaseProvider");
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var usage = await db.AiUsageRecords.AsNoTracking().SingleOrDefaultAsync(u => u.Id == usageRecordId, ct);
@@ -38,12 +38,8 @@ public sealed class AiCreditConsumptionService(DbContextOptions<DiagLinkDbContex
         result = result with { MachineId = usage.MachineId, CompanyId = usage.CompanyId };
         if (usage.MachineId == null) return Fail("MachineMissing");
         if (usage.CompanyId == null) return Fail("CompanyMissing");
-        // UPDLOCK serializes every consumption for this machine, including distinct usages/periods.
-        // HOLDLOCK + Serializable retain locks until ledger and period have committed together.
-        var machines = db.Database.IsSqlServer()
-            ? db.Machines.FromSqlInterpolated($"SELECT * FROM [dbo].[Machines] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {usage.MachineId.Value}")
-            : db.Machines.AsQueryable();
-        var machine = await machines.SingleOrDefaultAsync(m => m.Id == usage.MachineId, ct);
+        // Serialize every consumption for this machine until ledger and period commit together.
+        var machine = await FinancialRowLocks.MachineAsync(db, usage.MachineId.Value, ct);
         if (machine == null) return Fail("MachineMissing");
         if (!await db.Companies.AnyAsync(c => c.Id == usage.CompanyId, ct)) return Fail("CompanyMissing");
         if (machine.CompanyId != usage.CompanyId) return Fail("DataInconsistency");

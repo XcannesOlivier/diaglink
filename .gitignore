@@ -63,3 +63,6 @@ appsettings.*.local.json
 
 # Local diagnostic and reconciliation tools
 /logs/
+
+# Local file containing personal data. Never stage or publish it.
+/-

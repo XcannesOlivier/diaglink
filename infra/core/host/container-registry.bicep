@@ -12,7 +12,17 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' =
   }
   properties: {
     adminUserEnabled: false
+    anonymousPullEnabled: false
+    dataEndpointEnabled: false
     publicNetworkAccess: 'Enabled'
+    encryption: {
+      status: 'disabled'
+    }
+    policies: {
+      azureADAuthenticationAsArmPolicy: {
+        status: 'enabled'
+      }
+    }
   }
 }
 

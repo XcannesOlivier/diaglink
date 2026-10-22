@@ -122,10 +122,8 @@ public sealed class StripeSubscriptionPaymentService(DbContextOptions<DiagLinkDb
         {
             await using var db = new DiagLinkDbContext(options);
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-            var companies = db.Database.IsSqlServer()
-                ? db.Companies.FromSqlInterpolated($"SELECT * FROM [dbo].[Companies] WITH (UPDLOCK,HOLDLOCK) WHERE [Id]={companyId}")
-                : db.Companies.AsQueryable();
-            if (!await companies.AnyAsync(c => c.Id == companyId && c.Status == "active", ct))
+            var company = await FinancialRowLocks.CompanyAsync(db, companyId, ct);
+            if (company?.Status != "active")
                 throw new SubscriptionReconciliationException("Active company required.");
             var result = await action(db);
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);

@@ -35,13 +35,10 @@ public sealed class MachineBillingPeriodService(DbContextOptions<DiagLinkDbConte
         if (activation >= end) return Fail("ActivationOutsideCycle");
         var periodStart = activation.HasValue && activation.Value > start ? activation.Value : start;
         await using var db = new DiagLinkDbContext(options);
-        if (!db.Database.IsSqlServer() && db.Database.ProviderName != "Microsoft.EntityFrameworkCore.Sqlite")
+        if (!FinancialRowLocks.IsSupported(db))
             return Fail("UnsupportedDatabaseProvider");
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        var machines = db.Database.IsSqlServer()
-            ? db.Machines.FromSqlInterpolated($"SELECT * FROM [dbo].[Machines] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {machineId}")
-            : db.Machines.AsQueryable();
-        var machine = await machines.SingleOrDefaultAsync(m => m.Id == machineId, ct);
+        var machine = await FinancialRowLocks.MachineAsync(db, machineId, ct);
         if (machine == null) return Fail("MachineNotFound");
         if (expectedCompanyId.HasValue && machine.CompanyId != expectedCompanyId.Value) return Fail("MachineCompanyMismatch");
         if (machine.Status != "active") return Fail("MachineInactive");

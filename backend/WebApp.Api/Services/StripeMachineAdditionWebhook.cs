@@ -78,10 +78,8 @@ public sealed class StripeMachineAdditionWebhook(DbContextOptions<DiagLinkDbCont
         {
             await using var db = new DiagLinkDbContext(options);
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
-            var companies = db.Database.IsSqlServer()
-                ? db.Companies.FromSqlInterpolated($"SELECT * FROM [dbo].[Companies] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {candidate.CompanyId}")
-                : db.Companies.AsQueryable();
-            if (!await companies.AnyAsync(c => c.Id == candidate.CompanyId, token)) return "ReconciliationRequired";
+            if (await FinancialRowLocks.CompanyAsync(db, candidate.CompanyId, token) is null)
+                return "ReconciliationRequired";
             var op = await db.StripeMachineAdditions.SingleAsync(a => a.Id == candidate.Id, token);
             if (await db.StripeMachineAdditions.AnyAsync(a => a.ExternalEventId == eventId && a.Id != op.Id, token))
                 return "ReconciliationRequired";

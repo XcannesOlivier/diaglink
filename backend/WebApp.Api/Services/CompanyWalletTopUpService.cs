@@ -136,10 +136,7 @@ public sealed class CompanyWalletTopUpService(DbContextOptions<DiagLinkDbContext
                 || current.StripePaymentIntentId == null || current.PaymentConfirmedAtUtc == null)
                 throw new InvalidOperationException("Confirmed payment required.");
             // Same wallet lock used by CompanyWalletDebitService, including the absent-wallet key range.
-            var wallets = db.Database.IsSqlServer()
-                ? db.CompanyWallets.FromSqlInterpolated($"SELECT * FROM [dbo].[CompanyWallets] WITH (UPDLOCK, HOLDLOCK) WHERE [CompanyId] = {op.CompanyId}")
-                : db.CompanyWallets.AsQueryable();
-            var wallet = await wallets.SingleOrDefaultAsync(w => w.CompanyId == op.CompanyId, ct);
+            var wallet = await FinancialRowLocks.WalletAsync(db, op.CompanyId, ct);
             var now = DateTime.UtcNow;
             if (wallet == null)
             {
@@ -175,10 +172,8 @@ public sealed class CompanyWalletTopUpService(DbContextOptions<DiagLinkDbContext
         {
             await using var db = new DiagLinkDbContext(options);
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
-            var companies = db.Database.IsSqlServer()
-                ? db.Companies.FromSqlInterpolated($"SELECT * FROM [dbo].[Companies] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {companyId}")
-                : db.Companies.AsQueryable();
-            if (await companies.SingleOrDefaultAsync(c => c.Id == companyId, token) == null) throw new InvalidOperationException("Company missing.");
+            if (await FinancialRowLocks.CompanyAsync(db, companyId, token) is null)
+                throw new InvalidOperationException("Company missing.");
             var result = await action(db); await db.SaveChangesAsync(token); await tx.CommitAsync(token); return result;
         }, ct);
     }

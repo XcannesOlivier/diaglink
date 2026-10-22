@@ -35,4 +35,5 @@ public class EmailOutbox
     public string? LastError { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public byte[] RowVersion { get; set; } = [];
+    public uint PostgreSqlVersion { get; set; }
 }

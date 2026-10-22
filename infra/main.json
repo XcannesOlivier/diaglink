@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "8633344796082865393"
+      "templateHash": "5644570286254288895"
     }
   },
   "parameters": {
@@ -22,6 +22,20 @@
       "minLength": 1,
       "metadata": {
         "description": "Primary location for all resources"
+      }
+    },
+    "aiAgentEndpoint": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "AI Agent endpoint (auto-discovered by preprovision hook)"
+      }
+    },
+    "aiAgentId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "AI Agent ID (configured via azd env set AI_AGENT_ID)"
       }
     },
     "entraTenantId": {
@@ -61,7 +75,7 @@
     },
     "senderAddress": {
       "type": "string",
-      "defaultValue": "DoNotReply@diaglink.com",
+      "defaultValue": "DoNotReply@60976bb3-7a7c-4471-818d-5d3fe79e4503.azurecomm.net",
       "metadata": {
         "description": "ACS Email sender address on the Azure-managed domain (known only after first ACS deployment)"
       }
@@ -94,6 +108,30 @@
       "type": "securestring",
       "metadata": {
         "description": "Stripe signing secret for machine request payment webhooks; supply from azd secret STRIPE_MACHINE_REQUEST_WEBHOOK_SECRET."
+      }
+    },
+    "stripeWebhookSecret": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Stripe signing secret for subscription and machine-addition webhooks."
+      }
+    },
+    "stripeTopUpWebhookSecret": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Stripe signing secret dedicated to wallet top-up webhooks."
+      }
+    },
+    "stripePriceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Stripe recurring subscription price identifier."
+      }
+    },
+    "stripeTopUpReturnUrl": {
+      "type": "string",
+      "metadata": {
+        "description": "Stripe Checkout return URL for wallet top-ups."
       }
     },
     "stripeEnabled": {
@@ -141,6 +179,40 @@
       "metadata": {
         "description": "Name of the existing Container Apps managed certificate for the public domain."
       }
+    },
+    "claudeDirectDeployment": {
+      "type": "string",
+      "defaultValue": "claude-sonnet-5"
+    },
+    "claudeFileSearchDiagnosticsEnabled": {
+      "type": "bool",
+      "defaultValue": false
+    },
+    "aiPricingIdentityDeployments": {
+      "type": "array"
+    },
+    "postgresTunnelImageName": {
+      "type": "string"
+    },
+    "vultrSshHost": {
+      "type": "string"
+    },
+    "vultrSshPort": {
+      "type": "int",
+      "defaultValue": 22
+    },
+    "vultrSshUser": {
+      "type": "string",
+      "defaultValue": "diaglink_tunnel"
+    },
+    "postgresqlConnectionStringSecretUri": {
+      "type": "string"
+    },
+    "vultrSshPrivateKeySecretUri": {
+      "type": "string"
+    },
+    "vultrSshKnownHostsSecretUri": {
+      "type": "string"
     }
   },
   "variables": {
@@ -197,7 +269,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "14712465080606419260"
+              "templateHash": "6250678300364133251"
             }
           },
           "parameters": {
@@ -546,7 +618,7 @@
                     "_generator": {
                       "name": "bicep",
                       "version": "0.46.1.21595",
-                      "templateHash": "3003640575178547347"
+                      "templateHash": "12681704969559117515"
                     }
                   },
                   "parameters": {
@@ -579,7 +651,17 @@
                       },
                       "properties": {
                         "adminUserEnabled": false,
-                        "publicNetworkAccess": "Enabled"
+                        "anonymousPullEnabled": false,
+                        "dataEndpointEnabled": false,
+                        "publicNetworkAccess": "Enabled",
+                        "encryption": {
+                          "status": "disabled"
+                        },
+                        "policies": {
+                          "azureADAuthenticationAsArmPolicy": {
+                            "status": "enabled"
+                          }
+                        }
                       }
                     },
                     {
@@ -648,7 +730,7 @@
                     "_generator": {
                       "name": "bicep",
                       "version": "0.46.1.21595",
-                      "templateHash": "15762921203236207197"
+                      "templateHash": "17002324153266558681"
                     }
                   },
                   "parameters": {
@@ -673,6 +755,23 @@
                       "location": "[parameters('location')]",
                       "tags": "[parameters('tags')]",
                       "properties": {
+                        "zoneRedundant": false,
+                        "workloadProfiles": [
+                          {
+                            "name": "Consumption",
+                            "workloadProfileType": "Consumption"
+                          }
+                        ],
+                        "peerAuthentication": {
+                          "mtls": {
+                            "enabled": false
+                          }
+                        },
+                        "peerTrafficConfiguration": {
+                          "encryption": {
+                            "enabled": false
+                          }
+                        },
                         "appLogsConfiguration": {
                           "destination": "log-analytics",
                           "logAnalyticsConfiguration": {
@@ -1216,6 +1315,12 @@
           "containerRegistryName": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'infrastructure'), '2025-04-01').outputs.containerRegistryName.value]"
           },
+          "aiAgentEndpoint": {
+            "value": "[parameters('aiAgentEndpoint')]"
+          },
+          "aiAgentId": {
+            "value": "[parameters('aiAgentId')]"
+          },
           "entraSpaClientId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'entra-app'), '2025-04-01').outputs.clientAppId.value]"
           },
@@ -1259,6 +1364,18 @@
           "stripeMachineRequestWebhookSecret": {
             "value": "[parameters('stripeMachineRequestWebhookSecret')]"
           },
+          "stripeWebhookSecret": {
+            "value": "[parameters('stripeWebhookSecret')]"
+          },
+          "stripeTopUpWebhookSecret": {
+            "value": "[parameters('stripeTopUpWebhookSecret')]"
+          },
+          "stripePriceId": {
+            "value": "[parameters('stripePriceId')]"
+          },
+          "stripeTopUpReturnUrl": {
+            "value": "[parameters('stripeTopUpReturnUrl')]"
+          },
           "stripeEnabled": {
             "value": "[parameters('stripeEnabled')]"
           },
@@ -1279,6 +1396,36 @@
           },
           "publicCustomDomainCertificateName": {
             "value": "[parameters('publicCustomDomainCertificateName')]"
+          },
+          "claudeDirectDeployment": {
+            "value": "[parameters('claudeDirectDeployment')]"
+          },
+          "claudeFileSearchDiagnosticsEnabled": {
+            "value": "[parameters('claudeFileSearchDiagnosticsEnabled')]"
+          },
+          "aiPricingIdentityDeployments": {
+            "value": "[parameters('aiPricingIdentityDeployments')]"
+          },
+          "postgresTunnelImageName": {
+            "value": "[parameters('postgresTunnelImageName')]"
+          },
+          "vultrSshHost": {
+            "value": "[parameters('vultrSshHost')]"
+          },
+          "vultrSshPort": {
+            "value": "[parameters('vultrSshPort')]"
+          },
+          "vultrSshUser": {
+            "value": "[parameters('vultrSshUser')]"
+          },
+          "postgresqlConnectionStringSecretUri": {
+            "value": "[parameters('postgresqlConnectionStringSecretUri')]"
+          },
+          "vultrSshPrivateKeySecretUri": {
+            "value": "[parameters('vultrSshPrivateKeySecretUri')]"
+          },
+          "vultrSshKnownHostsSecretUri": {
+            "value": "[parameters('vultrSshKnownHostsSecretUri')]"
           }
         },
         "template": {
@@ -1288,7 +1435,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "12187522161239179700"
+              "templateHash": "15463241639935000227"
             }
           },
           "parameters": {
@@ -1305,6 +1452,12 @@
               "type": "string"
             },
             "containerRegistryName": {
+              "type": "string"
+            },
+            "aiAgentEndpoint": {
+              "type": "string"
+            },
+            "aiAgentId": {
               "type": "string"
             },
             "entraSpaClientId": {
@@ -1359,6 +1512,18 @@
             "stripeMachineRequestWebhookSecret": {
               "type": "securestring"
             },
+            "stripeWebhookSecret": {
+              "type": "securestring"
+            },
+            "stripeTopUpWebhookSecret": {
+              "type": "securestring"
+            },
+            "stripePriceId": {
+              "type": "string"
+            },
+            "stripeTopUpReturnUrl": {
+              "type": "string"
+            },
             "stripeEnabled": {
               "type": "bool",
               "metadata": {
@@ -1401,9 +1566,68 @@
               "metadata": {
                 "description": "Name of the existing Container Apps managed certificate for the public domain."
               }
+            },
+            "claudeDirectDeployment": {
+              "type": "string",
+              "defaultValue": "claude-sonnet-5"
+            },
+            "claudeFileSearchDiagnosticsEnabled": {
+              "type": "bool",
+              "defaultValue": false
+            },
+            "aiPricingIdentityDeployments": {
+              "type": "array",
+              "metadata": {
+                "description": "Existing non-secret deployment identities used to resolve AI pricing."
+              }
+            },
+            "postgresTunnelImageName": {
+              "type": "string",
+              "metadata": {
+                "description": "Immutable ACR image for the autossh sidecar."
+              }
+            },
+            "vultrSshHost": {
+              "type": "string",
+              "metadata": {
+                "description": "SSH hostname or IP of the Vultr server. PostgreSQL itself remains private."
+              }
+            },
+            "vultrSshPort": {
+              "type": "int",
+              "defaultValue": 22
+            },
+            "vultrSshUser": {
+              "type": "string",
+              "defaultValue": "diaglink_tunnel"
+            },
+            "postgresqlConnectionStringSecretUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Versionless Key Vault secret URI containing the complete PostgreSQL connection string."
+              }
+            },
+            "vultrSshPrivateKeySecretUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Versionless Key Vault secret URI containing the dedicated OpenSSH private key."
+              }
+            },
+            "vultrSshKnownHostsSecretUri": {
+              "type": "string",
+              "metadata": {
+                "description": "Versionless Key Vault secret URI containing the pinned Vultr SSH known_hosts line."
+              }
             }
           },
           "variables": {
+            "copy": [
+              {
+                "name": "pricingIdentityEnvGroups",
+                "count": "[length(parameters('aiPricingIdentityDeployments'))]",
+                "input": "[createArray(createObject('name', format('AiPricingIdentity__Deployments__{0}__ProjectEndpoint', copyIndex('pricingIdentityEnvGroups')), 'value', parameters('aiPricingIdentityDeployments')[copyIndex('pricingIdentityEnvGroups')].ProjectEndpoint), createObject('name', format('AiPricingIdentity__Deployments__{0}__Deployment', copyIndex('pricingIdentityEnvGroups')), 'value', parameters('aiPricingIdentityDeployments')[copyIndex('pricingIdentityEnvGroups')].Deployment), createObject('name', format('AiPricingIdentity__Deployments__{0}__Provider', copyIndex('pricingIdentityEnvGroups')), 'value', parameters('aiPricingIdentityDeployments')[copyIndex('pricingIdentityEnvGroups')].Provider))]"
+              }
+            ],
             "$fxv#0": {
               "resourcesResourceGroups": "rg-",
               "containerRegistryRegistries": "cr",
@@ -1432,6 +1656,14 @@
                 "value": "[parameters('entraTenantId')]"
               },
               {
+                "name": "AI_AGENT_ENDPOINT",
+                "value": "[parameters('aiAgentEndpoint')]"
+              },
+              {
+                "name": "AI_AGENT_ID",
+                "value": "[parameters('aiAgentId')]"
+              },
+              {
                 "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
                 "value": "[parameters('appInsightsConnectionString')]"
               },
@@ -1449,8 +1681,12 @@
             "oboEnv": "[if(not(empty(parameters('entraBackendClientId'))), createArray(createObject('name', 'ENTRA_BACKEND_CLIENT_ID', 'value', parameters('entraBackendClientId'))), createArray())]",
             "diagLinkEnv": [
               {
+                "name": "Database__Provider",
+                "value": "PostgreSql"
+              },
+              {
                 "name": "ConnectionStrings__DiagLink",
-                "value": "[format('Server=tcp:sql-diaglink.database.windows.net,1433;Database=diaglink;Authentication=Active Directory Managed Identity;User Id={0};Encrypt=True;TrustServerCertificate=False;Connection Timeout=60;', parameters('oboManagedIdentityClientId'))]"
+                "secretRef": "diaglink-postgresql"
               }
             ],
             "emailEnv": [
@@ -1491,6 +1727,22 @@
                 "secretRef": "stripe-machine-request-webhook-secret"
               },
               {
+                "name": "STRIPE_WEBHOOK_SECRET",
+                "secretRef": "stripe-webhook-secret"
+              },
+              {
+                "name": "STRIPE_TOPUP_WEBHOOK_SECRET",
+                "secretRef": "stripe-topup-webhook-secret"
+              },
+              {
+                "name": "STRIPE_PRICE_ID",
+                "value": "[parameters('stripePriceId')]"
+              },
+              {
+                "name": "STRIPE_TOPUP_RETURN_URL",
+                "value": "[parameters('stripeTopUpReturnUrl')]"
+              },
+              {
                 "name": "STRIPE_ENABLED",
                 "value": "[string(parameters('stripeEnabled'))]"
               },
@@ -1523,9 +1775,121 @@
               {
                 "name": "stripe-machine-request-webhook-secret",
                 "value": "[parameters('stripeMachineRequestWebhookSecret')]"
+              },
+              {
+                "name": "stripe-webhook-secret",
+                "value": "[parameters('stripeWebhookSecret')]"
+              },
+              {
+                "name": "stripe-topup-webhook-secret",
+                "value": "[parameters('stripeTopUpWebhookSecret')]"
+              },
+              {
+                "name": "diaglink-postgresql",
+                "keyVaultUrl": "[parameters('postgresqlConnectionStringSecretUri')]",
+                "identity": "[parameters('userAssignedIdentityId')]"
+              },
+              {
+                "name": "vultr-ssh-private-key",
+                "keyVaultUrl": "[parameters('vultrSshPrivateKeySecretUri')]",
+                "identity": "[parameters('userAssignedIdentityId')]"
+              },
+              {
+                "name": "vultr-ssh-known-hosts",
+                "keyVaultUrl": "[parameters('vultrSshKnownHostsSecretUri')]",
+                "identity": "[parameters('userAssignedIdentityId')]"
               }
             ],
-            "containerEnv": "[concat(variables('baseEnv'), variables('miEnv'), variables('oboEnv'), variables('diagLinkEnv'), variables('emailEnv'), variables('authEnv'), variables('storageEnv'), variables('contactEnv'), variables('stripeEnv'))]"
+            "claudeEnv": [
+              {
+                "name": "ClaudeDirectChat__Deployment",
+                "value": "[parameters('claudeDirectDeployment')]"
+              },
+              {
+                "name": "ClaudeDirectChat__FileSearchDiagnostics__Enabled",
+                "value": "[string(parameters('claudeFileSearchDiagnosticsEnabled'))]"
+              }
+            ],
+            "pricingIdentityEnv": "[flatten(variables('pricingIdentityEnvGroups'))]",
+            "containerEnv": "[concat(variables('baseEnv'), variables('miEnv'), variables('oboEnv'), variables('diagLinkEnv'), variables('emailEnv'), variables('authEnv'), variables('storageEnv'), variables('contactEnv'), variables('stripeEnv'), variables('claudeEnv'), variables('pricingIdentityEnv'))]",
+            "tunnelContainers": [
+              {
+                "name": "postgres-tunnel",
+                "image": "[parameters('postgresTunnelImageName')]",
+                "env": [
+                  {
+                    "name": "VULTR_SSH_HOST",
+                    "value": "[parameters('vultrSshHost')]"
+                  },
+                  {
+                    "name": "VULTR_SSH_PORT",
+                    "value": "[string(parameters('vultrSshPort'))]"
+                  },
+                  {
+                    "name": "VULTR_SSH_USER",
+                    "value": "[parameters('vultrSshUser')]"
+                  },
+                  {
+                    "name": "POSTGRES_TUNNEL_LOCAL_PORT",
+                    "value": "15432"
+                  },
+                  {
+                    "name": "POSTGRES_REMOTE_HOST",
+                    "value": "127.0.0.1"
+                  },
+                  {
+                    "name": "POSTGRES_REMOTE_PORT",
+                    "value": "5432"
+                  }
+                ],
+                "resources": {
+                  "cpu": "[json('0.25')]",
+                  "memory": "0.5Gi"
+                },
+                "volumeMounts": [
+                  {
+                    "volumeName": "postgres-tunnel-secrets",
+                    "mountPath": "/mnt/ssh-secrets"
+                  }
+                ],
+                "probes": [
+                  {
+                    "type": "Liveness",
+                    "tcpSocket": {
+                      "port": 15432
+                    },
+                    "periodSeconds": 30,
+                    "failureThreshold": 3,
+                    "initialDelaySeconds": 10
+                  },
+                  {
+                    "type": "Startup",
+                    "tcpSocket": {
+                      "port": 15432
+                    },
+                    "periodSeconds": 5,
+                    "failureThreshold": 24,
+                    "initialDelaySeconds": 2
+                  }
+                ]
+              }
+            ],
+            "tunnelVolumes": [
+              {
+                "name": "postgres-tunnel-secrets",
+                "storageType": "Secret",
+                "secrets": [
+                  {
+                    "secretRef": "vultr-ssh-private-key",
+                    "path": "id_ed25519"
+                  },
+                  {
+                    "secretRef": "vultr-ssh-known-hosts",
+                    "path": "known_hosts"
+                  }
+                ]
+              }
+            ]
           },
           "resources": [
             {
@@ -1571,11 +1935,20 @@
                   "healthProbePath": {
                     "value": "/api/health"
                   },
+                  "readinessProbePath": {
+                    "value": "/api/health/ready"
+                  },
                   "userAssignedIdentityId": {
                     "value": "[parameters('userAssignedIdentityId')]"
                   },
                   "secrets": {
                     "value": "[variables('containerSecrets')]"
+                  },
+                  "additionalContainers": {
+                    "value": "[variables('tunnelContainers')]"
+                  },
+                  "volumes": {
+                    "value": "[variables('tunnelVolumes')]"
                   },
                   "customDomains": {
                     "value": "[concat(createArray(createObject('name', parameters('customDomainName'), 'bindingType', 'SniEnabled', 'certificateId', resourceId('Microsoft.App/managedEnvironments/managedCertificates', last(split(parameters('containerAppsEnvironmentId'), '/')), parameters('customDomainCertificateName')))), if(not(empty(parameters('publicCustomDomainCertificateName'))), createArray(createObject('name', parameters('publicCustomDomainName'), 'bindingType', 'SniEnabled', 'certificateId', resourceId('Microsoft.App/managedEnvironments/managedCertificates', last(split(parameters('containerAppsEnvironmentId'), '/')), parameters('publicCustomDomainCertificateName')))), createArray()))]"
@@ -1588,7 +1961,7 @@
                     "_generator": {
                       "name": "bicep",
                       "version": "0.46.1.21595",
-                      "templateHash": "11275091616841573357"
+                      "templateHash": "2086402526963438483"
                     }
                   },
                   "parameters": {
@@ -1629,6 +2002,10 @@
                       "type": "string",
                       "defaultValue": ""
                     },
+                    "readinessProbePath": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
                     "cpu": {
                       "type": "string",
                       "defaultValue": "0.5"
@@ -1655,6 +2032,14 @@
                     "customDomains": {
                       "type": "array",
                       "defaultValue": []
+                    },
+                    "additionalContainers": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "volumes": {
+                      "type": "array",
+                      "defaultValue": []
                     }
                   },
                   "resources": [
@@ -1672,9 +2057,10 @@
                       },
                       "properties": {
                         "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
+                        "workloadProfileName": "Consumption",
                         "configuration": {
                           "activeRevisionsMode": "Single",
-                          "ingress": "[if(parameters('enableIngress'), createObject('external', parameters('external'), 'targetPort', parameters('targetPort'), 'transport', 'auto', 'allowInsecure', false(), 'customDomains', parameters('customDomains')), null())]",
+                          "ingress": "[if(parameters('enableIngress'), createObject('external', parameters('external'), 'targetPort', parameters('targetPort'), 'transport', 'auto', 'allowInsecure', false(), 'traffic', createArray(createObject('latestRevision', true(), 'weight', 100)), 'customDomains', parameters('customDomains')), null())]",
                           "registries": [
                             {
                               "server": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), '2023-07-01').loginServer]",
@@ -1684,18 +2070,8 @@
                           "secrets": "[parameters('secrets')]"
                         },
                         "template": {
-                          "containers": [
-                            {
-                              "name": "[parameters('name')]",
-                              "image": "[parameters('containerImage')]",
-                              "env": "[parameters('env')]",
-                              "resources": {
-                                "cpu": "[json(parameters('cpu'))]",
-                                "memory": "[parameters('memory')]"
-                              },
-                              "probes": "[if(not(empty(parameters('healthProbePath'))), createArray(createObject('type', 'Liveness', 'httpGet', createObject('path', parameters('healthProbePath'), 'port', parameters('targetPort')), 'periodSeconds', 30, 'failureThreshold', 3), createObject('type', 'Startup', 'httpGet', createObject('path', parameters('healthProbePath'), 'port', parameters('targetPort')), 'periodSeconds', 10, 'failureThreshold', 30, 'initialDelaySeconds', 5)), createArray())]"
-                            }
-                          ],
+                          "containers": "[concat(createArray(createObject('name', parameters('name'), 'image', parameters('containerImage'), 'env', parameters('env'), 'resources', createObject('cpu', json(parameters('cpu')), 'memory', parameters('memory')), 'probes', if(not(empty(parameters('healthProbePath'))), createArray(createObject('type', 'Liveness', 'httpGet', createObject('path', parameters('healthProbePath'), 'port', parameters('targetPort')), 'periodSeconds', 30, 'failureThreshold', 3), createObject('type', 'Startup', 'httpGet', createObject('path', parameters('healthProbePath'), 'port', parameters('targetPort')), 'periodSeconds', 10, 'failureThreshold', 30, 'initialDelaySeconds', 5), createObject('type', 'Readiness', 'httpGet', createObject('path', if(not(empty(parameters('readinessProbePath'))), parameters('readinessProbePath'), parameters('healthProbePath')), 'port', parameters('targetPort')), 'periodSeconds', 10, 'failureThreshold', 3, 'successThreshold', 1, 'initialDelaySeconds', 5)), createArray()))), parameters('additionalContainers'))]",
+                          "volumes": "[parameters('volumes')]",
                           "scale": {
                             "minReplicas": "[parameters('minReplicas')]",
                             "maxReplicas": "[parameters('maxReplicas')]"
@@ -1793,6 +2169,10 @@
     "APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'infrastructure'), '2025-04-01').outputs.appInsightsFrontendConnectionString.value]"
+    },
+    "POSTGRES_TUNNEL_IMAGE_NAME": {
+      "type": "string",
+      "value": "[parameters('postgresTunnelImageName')]"
     }
   }
 }

@@ -54,6 +54,20 @@ param stripeSecretKey string
 @description('Stripe signing secret for machine request payment webhooks; supply from azd secret STRIPE_MACHINE_REQUEST_WEBHOOK_SECRET.')
 param stripeMachineRequestWebhookSecret string
 
+@secure()
+@description('Stripe signing secret for subscription and machine-addition webhooks.')
+param stripeWebhookSecret string
+
+@secure()
+@description('Stripe signing secret dedicated to wallet top-up webhooks.')
+param stripeTopUpWebhookSecret string
+
+@description('Stripe recurring subscription price identifier.')
+param stripePriceId string
+
+@description('Stripe Checkout return URL for wallet top-ups.')
+param stripeTopUpReturnUrl string
+
 @description('Enable Stripe payment flows.')
 param stripeEnabled bool = true
 
@@ -74,6 +88,17 @@ param publicCustomDomainName string
 
 @description('Name of the existing Container Apps managed certificate for the public domain.')
 param publicCustomDomainCertificateName string = ''
+
+param claudeDirectDeployment string = 'claude-sonnet-5'
+param claudeFileSearchDiagnosticsEnabled bool = false
+param aiPricingIdentityDeployments array
+param postgresTunnelImageName string
+param vultrSshHost string
+param vultrSshPort int = 22
+param vultrSshUser string = 'diaglink_tunnel'
+param postgresqlConnectionStringSecretUri string
+param vultrSshPrivateKeySecretUri string
+param vultrSshKnownHostsSecretUri string
 
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
@@ -140,6 +165,10 @@ module app 'main-app.bicep' = {
     contactRecipientAddress: contactRecipientAddress
     stripeSecretKey: stripeSecretKey
     stripeMachineRequestWebhookSecret: stripeMachineRequestWebhookSecret
+    stripeWebhookSecret: stripeWebhookSecret
+    stripeTopUpWebhookSecret: stripeTopUpWebhookSecret
+    stripePriceId: stripePriceId
+    stripeTopUpReturnUrl: stripeTopUpReturnUrl
     stripeEnabled: stripeEnabled
     stripeMachineRequestReturnUrl: stripeMachineRequestReturnUrl
     stripeMachineRequestAppReturnUrl: stripeMachineRequestAppReturnUrl
@@ -147,6 +176,16 @@ module app 'main-app.bicep' = {
     customDomainCertificateName: customDomainCertificateName
     publicCustomDomainName: publicCustomDomainName
     publicCustomDomainCertificateName: publicCustomDomainCertificateName
+    claudeDirectDeployment: claudeDirectDeployment
+    claudeFileSearchDiagnosticsEnabled: claudeFileSearchDiagnosticsEnabled
+    aiPricingIdentityDeployments: aiPricingIdentityDeployments
+    postgresTunnelImageName: postgresTunnelImageName
+    vultrSshHost: vultrSshHost
+    vultrSshPort: vultrSshPort
+    vultrSshUser: vultrSshUser
+    postgresqlConnectionStringSecretUri: postgresqlConnectionStringSecretUri
+    vultrSshPrivateKeySecretUri: vultrSshPrivateKeySecretUri
+    vultrSshKnownHostsSecretUri: vultrSshKnownHostsSecretUri
   }
 }
 
@@ -166,3 +205,4 @@ output ENTRA_BACKEND_CLIENT_ID string = enableObo ? entraApp.outputs.backendClie
 output ENTRA_BACKEND_APP_OBJECT_ID string = enableObo ? entraApp.outputs.backendAppObjectId : ''
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = infrastructure.outputs.appInsightsConnectionString
 output APPLICATIONINSIGHTS_FRONTEND_CONNECTION_STRING string = infrastructure.outputs.appInsightsFrontendConnectionString
+output POSTGRES_TUNNEL_IMAGE_NAME string = postgresTunnelImageName

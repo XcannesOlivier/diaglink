@@ -138,10 +138,7 @@ public sealed class StripeBillingService(DbContextOptions<DiagLinkDbContext> opt
         {
             await using var db = new DiagLinkDbContext(options);
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
-            var companies = db.Database.IsSqlServer()
-                ? db.Companies.FromSqlInterpolated($"SELECT * FROM [dbo].[Companies] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {companyId}")
-                : db.Companies.AsQueryable();
-            var company = await companies.SingleOrDefaultAsync(c => c.Id == companyId, token);
+            var company = await FinancialRowLocks.CompanyAsync(db, companyId, token);
             if (company == null || company.Status != "active") throw new InvalidOperationException("Company not found or inactive.");
             var account = await db.BillingAccounts.SingleOrDefaultAsync(a => a.CompanyId == companyId, token);
             if (account == null)

@@ -107,6 +107,17 @@ public class EmailOutboxStoreTests
     }
 
     [TestMethod]
+    public void PostgreSqlClaimUsesSkipLockedAndSelectsXmin()
+    {
+        var query = EmailOutboxStore.BuildPostgreSqlClaimQuery(10, DateTime.UtcNow).Format;
+
+        StringAssert.Contains(query, "SELECT *, xmin FROM \"dbo\".\"EmailOutbox\"");
+        StringAssert.Contains(query, "FOR UPDATE SKIP LOCKED");
+        StringAssert.Contains(query, "\"Status\" =");
+        StringAssert.Contains(query, "LIMIT");
+    }
+
+    [TestMethod]
     public async Task ClaimRetriesWholeTransactionWithoutDuplicateClaim()
     {
         await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");

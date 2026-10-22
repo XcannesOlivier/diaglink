@@ -15,8 +15,7 @@ public sealed class StripeMachineStatusService(DbContextOptions<DiagLinkDbContex
         var operation=await strategy.Database.CreateExecutionStrategy().ExecuteAsync(async()=>
         {
             await using var db=new DiagLinkDbContext(options); await using var tx=await db.Database.BeginTransactionAsync(IsolationLevel.Serializable,ct);
-            var companies=db.Database.IsSqlServer()?db.Companies.FromSqlInterpolated($"SELECT * FROM dbo.Companies WITH (UPDLOCK,HOLDLOCK) WHERE Id={companyId}"):db.Companies.AsQueryable();
-            await companies.SingleAsync(c=>c.Id==companyId,ct);
+            _=await FinancialRowLocks.CompanyAsync(db,companyId,ct)??throw new InvalidOperationException("Company missing");
             var previous=await db.StripeLifecycleEvents.SingleOrDefaultAsync(e=>e.Id==key,ct);
             if(previous!=null)
             {
@@ -37,6 +36,7 @@ public sealed class StripeMachineStatusService(DbContextOptions<DiagLinkDbContex
             if(!active || covered)
             {
                 var count=await db.Machines.CountAsync(m=>m.CompanyId==companyId && m.Status=="active",ct);
+                // key is derived from the durable request id and remains stable across transaction retries.
                 await gateway.SetQuantityAsync(account,state,count,key,ct);
             }
             var op=new StripeLifecycleEvent {Id=key,CompanyId=companyId,MachineId=machineId,SubscriptionId=account.StripeSubscriptionId!,EventType=kind,

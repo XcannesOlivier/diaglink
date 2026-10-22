@@ -224,10 +224,7 @@ public sealed class StripeMachineAdditionService(DbContextOptions<DiagLinkDbCont
         {
             await using var db = new DiagLinkDbContext(options);
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
-            var companies = db.Database.IsSqlServer()
-                ? db.Companies.FromSqlInterpolated($"SELECT * FROM [dbo].[Companies] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {companyId}")
-                : db.Companies.AsQueryable();
-            if (await companies.SingleOrDefaultAsync(c => c.Id == companyId, token) == null)
+            if (await FinancialRowLocks.CompanyAsync(db, companyId, token) is null)
                 throw new InvalidOperationException("Company not found.");
             var result = await action(db);
             await db.SaveChangesAsync(token);
