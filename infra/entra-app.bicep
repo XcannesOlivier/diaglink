@@ -9,6 +9,12 @@ param serviceManagementReference string = ''
 @description('Enable OBO backend API app registration for user-delegated access to Agent Service')
 param enableObo bool = false
 
+@description('Production SPA redirect URIs that must be preserved when reconciling the Entra application.')
+param productionSpaRedirectUris array = []
+
+@description('Stable application-role ID shared with the targeted documentary-ingestion authorization script.')
+param documentIngestionFinalizeRoleId string = 'b7ed8619-c233-4da1-8ff6-55cd46a6e013'
+
 // ============================================================================
 // Well-known first-party app IDs and scope IDs (stable across all Entra tenants)
 // ============================================================================
@@ -32,11 +38,23 @@ resource app 'Microsoft.Graph/applications@v1.0' = {
   signInAudience: 'AzureADMyOrg'
   serviceManagementReference: empty(serviceManagementReference) ? null : serviceManagementReference
   spa: {
-    redirectUris: [
+    redirectUris: union([
       'http://localhost:5173'
       'http://localhost:8080'
-    ]
+    ], productionSpaRedirectUris)
   }
+  appRoles: [
+    {
+      allowedMemberTypes: [
+        'Application'
+      ]
+      description: 'Allows the documentary-ingestion managed identity to finalize machine configuration.'
+      displayName: 'Finalize document ingestion'
+      id: documentIngestionFinalizeRoleId
+      isEnabled: true
+      value: 'DocumentIngestion.Finalize'
+    }
+  ]
   api: {
     // When OBO is enabled, the SPA is a known client of the backend app — combined consent
     knownClientApplications: []

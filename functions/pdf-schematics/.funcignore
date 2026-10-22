@@ -1,0 +1,11 @@
+
+
+.venv/
+.python_packages/
+__pycache__/
+*.py[cod]
+local.settings.json
+test_*.py
+manual_*.py
+.git/
+.gitignore

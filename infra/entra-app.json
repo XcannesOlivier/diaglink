@@ -5,8 +5,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.39.26.7824",
-      "templateHash": "4922226160292137631"
+      "version": "0.46.1.21595",
+      "templateHash": "14209817430275474162"
     }
   },
   "parameters": {
@@ -22,10 +22,34 @@
       "metadata": {
         "description": "Service Management Reference GUID (required by some orgs)"
       }
+    },
+    "enableObo": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Enable OBO backend API app registration for user-delegated access to Agent Service"
+      }
+    },
+    "productionSpaRedirectUris": {
+      "type": "array",
+      "defaultValue": [],
+      "metadata": {
+        "description": "Production SPA redirect URIs that must be preserved when reconciling the Entra application."
+      }
+    },
+    "documentIngestionFinalizeRoleId": {
+      "type": "string",
+      "defaultValue": "b7ed8619-c233-4da1-8ff6-55cd46a6e013",
+      "metadata": {
+        "description": "Stable application-role ID shared with the targeted documentary-ingestion authorization script."
+      }
     }
   },
   "variables": {
-    "chatReadWriteScopeId": "[guid(resourceGroup().id, parameters('environmentName'), 'Chat.ReadWrite')]"
+    "azureMachineLearningAppId": "18a66f5f-dbdf-4c17-9dd7-1634712a9cbe",
+    "azureMachineLearningUserImpersonationScopeId": "1a7925b5-f871-417a-9b8b-303f9f29fa10",
+    "chatReadWriteScopeId": "[guid(resourceGroup().id, parameters('environmentName'), 'Chat.ReadWrite')]",
+    "backendChatScopeId": "[guid(resourceGroup().id, parameters('environmentName'), 'Backend.Chat.ReadWrite')]"
   },
   "imports": {
     "microsoftGraphV1": {
@@ -43,12 +67,22 @@
         "signInAudience": "AzureADMyOrg",
         "serviceManagementReference": "[if(empty(parameters('serviceManagementReference')), null(), parameters('serviceManagementReference'))]",
         "spa": {
-          "redirectUris": [
-            "http://localhost:5173",
-            "http://localhost:8080"
-          ]
+          "redirectUris": "[union(createArray('http://localhost:5173', 'http://localhost:8080'), parameters('productionSpaRedirectUris'))]"
         },
+        "appRoles": [
+          {
+            "allowedMemberTypes": [
+              "Application"
+            ],
+            "description": "Allows the documentary-ingestion managed identity to finalize machine configuration.",
+            "displayName": "Finalize document ingestion",
+            "id": "[parameters('documentIngestionFinalizeRoleId')]",
+            "isEnabled": true,
+            "value": "DocumentIngestion.Finalize"
+          }
+        ],
         "api": {
+          "knownClientApplications": [],
           "oauth2PermissionScopes": [
             {
               "adminConsentDescription": "Allows the app to read and write chat messages",
@@ -73,6 +107,86 @@
       "dependsOn": [
         "app"
       ]
+    },
+    "backendApp": {
+      "condition": "[parameters('enableObo')]",
+      "import": "microsoftGraphV1",
+      "type": "Microsoft.Graph/applications@v1.0",
+      "properties": {
+        "uniqueName": "[format('ai-foundry-agent-backend-{0}', parameters('environmentName'))]",
+        "displayName": "[format('ai-foundry-agent-backend-{0}', parameters('environmentName'))]",
+        "signInAudience": "AzureADMyOrg",
+        "serviceManagementReference": "[if(empty(parameters('serviceManagementReference')), null(), parameters('serviceManagementReference'))]",
+        "web": {
+          "redirectUris": []
+        },
+        "api": {
+          "knownClientApplications": [
+            "[reference('app').appId]"
+          ],
+          "oauth2PermissionScopes": [
+            {
+              "adminConsentDescription": "Allows the backend to access AI Agent Service on behalf of the user",
+              "adminConsentDisplayName": "Access AI Agent Service on behalf of user",
+              "id": "[variables('backendChatScopeId')]",
+              "isEnabled": true,
+              "type": "User",
+              "userConsentDescription": "Allows the app to access AI services on your behalf",
+              "userConsentDisplayName": "Access AI services on your behalf",
+              "value": "Chat.ReadWrite"
+            }
+          ]
+        },
+        "requiredResourceAccess": [
+          {
+            "resourceAppId": "[variables('azureMachineLearningAppId')]",
+            "resourceAccess": [
+              {
+                "id": "[variables('azureMachineLearningUserImpersonationScopeId')]",
+                "type": "Scope"
+              }
+            ]
+          }
+        ]
+      },
+      "dependsOn": [
+        "app"
+      ]
+    },
+    "backendSp": {
+      "condition": "[parameters('enableObo')]",
+      "import": "microsoftGraphV1",
+      "type": "Microsoft.Graph/servicePrincipals@v1.0",
+      "properties": {
+        "appId": "[if(parameters('enableObo'), reference('backendApp').appId, 'placeholder')]"
+      },
+      "dependsOn": [
+        "backendApp"
+      ]
+    },
+    "azureMachineLearningServiceSp": {
+      "condition": "[parameters('enableObo')]",
+      "existing": true,
+      "import": "microsoftGraphV1",
+      "type": "Microsoft.Graph/servicePrincipals@v1.0",
+      "properties": {
+        "appId": "[variables('azureMachineLearningAppId')]"
+      }
+    },
+    "oboAdminConsent": {
+      "condition": "[parameters('enableObo')]",
+      "import": "microsoftGraphV1",
+      "type": "Microsoft.Graph/oauth2PermissionGrants@v1.0",
+      "properties": {
+        "clientId": "[reference('backendSp').id]",
+        "consentType": "AllPrincipals",
+        "resourceId": "[reference('azureMachineLearningServiceSp').id]",
+        "scope": "user_impersonation"
+      },
+      "dependsOn": [
+        "azureMachineLearningServiceSp",
+        "backendSp"
+      ]
     }
   },
   "outputs": {
@@ -83,6 +197,14 @@
     "appObjectId": {
       "type": "string",
       "value": "[reference('app').id]"
+    },
+    "backendClientAppId": {
+      "type": "string",
+      "value": "[if(parameters('enableObo'), reference('backendApp').appId, '')]"
+    },
+    "backendAppObjectId": {
+      "type": "string",
+      "value": "[if(parameters('enableObo'), reference('backendApp').id, '')]"
     }
   }
 }

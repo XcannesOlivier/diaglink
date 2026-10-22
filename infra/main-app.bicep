@@ -8,6 +8,8 @@ param aiAgentId string
 param entraSpaClientId string
 param entraTenantId string
 param entraBackendClientId string = ''
+@description('Allowed Entra object ID for the documentary-ingestion callback. Empty is fail-closed.')
+param documentIngestionFunctionPrincipalId string = ''
 param webImageName string
 param userAssignedIdentityId string = ''
 param oboManagedIdentityClientId string = ''
@@ -140,6 +142,13 @@ var diagLinkEnv = [
   {
     name: 'ConnectionStrings__DiagLink'
     secretRef: 'diaglink-postgresql'
+  }
+]
+
+var documentIngestionEnv = [
+  {
+    name: 'DocumentIngestion__AllowedCallerObjectId'
+    value: documentIngestionFunctionPrincipalId
   }
 ]
 
@@ -288,7 +297,7 @@ var pricingIdentityEnvGroups = [for (identity, index) in aiPricingIdentityDeploy
 ]]
 var pricingIdentityEnv = flatten(pricingIdentityEnvGroups)
 
-var containerEnv = concat(baseEnv, miEnv, oboEnv, diagLinkEnv, emailEnv, authEnv, storageEnv, contactEnv, stripeEnv, claudeEnv, pricingIdentityEnv)
+var containerEnv = concat(baseEnv, miEnv, oboEnv, diagLinkEnv, documentIngestionEnv, emailEnv, authEnv, storageEnv, contactEnv, stripeEnv, claudeEnv, pricingIdentityEnv)
 
 var tunnelContainers = [
   {

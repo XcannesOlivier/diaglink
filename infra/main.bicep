@@ -25,6 +25,12 @@ param serviceManagementReference string = ''
 @description('Enable OBO (On-Behalf-Of) flow for user-delegated access to Agent Service (secretless via FIC)')
 param enableObo bool = false
 
+@description('Production SPA redirect URIs preserved by the Entra application deployment.')
+param entraProductionSpaRedirectUris array = []
+
+@description('Object ID of the system-assigned managed identity used by the documentary-ingestion Function. Empty denies every callback.')
+param documentIngestionFunctionPrincipalId string = ''
+
 @description('Container image for web service (set by postprovision hook)')
 param webImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'  // Placeholder during initial provision
 
@@ -135,6 +141,7 @@ module entraApp 'entra-app.bicep' = {
     environmentName: environmentName
     serviceManagementReference: serviceManagementReference
     enableObo: enableObo
+    productionSpaRedirectUris: entraProductionSpaRedirectUris
   }
 }
 
@@ -153,6 +160,7 @@ module app 'main-app.bicep' = {
     entraSpaClientId: entraApp.outputs.clientAppId
     entraTenantId: entraTenantId
     entraBackendClientId: enableObo ? entraApp.outputs.backendClientAppId : ''
+    documentIngestionFunctionPrincipalId: documentIngestionFunctionPrincipalId
     webImageName: webImageName
     userAssignedIdentityId: infrastructure.outputs.managedIdentityId
     oboManagedIdentityClientId: infrastructure.outputs.managedIdentityClientId

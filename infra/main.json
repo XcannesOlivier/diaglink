@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "5644570286254288895"
+      "templateHash": "10046296558375074378"
     }
   },
   "parameters": {
@@ -57,6 +57,20 @@
       "defaultValue": false,
       "metadata": {
         "description": "Enable OBO (On-Behalf-Of) flow for user-delegated access to Agent Service (secretless via FIC)"
+      }
+    },
+    "entraProductionSpaRedirectUris": {
+      "type": "array",
+      "defaultValue": [],
+      "metadata": {
+        "description": "Production SPA redirect URIs preserved by the Entra application deployment."
+      }
+    },
+    "documentIngestionFunctionPrincipalId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Object ID of the system-assigned managed identity used by the documentary-ingestion Function. Empty denies every callback."
       }
     },
     "webImageName": {
@@ -1095,6 +1109,9 @@
           },
           "enableObo": {
             "value": "[parameters('enableObo')]"
+          },
+          "productionSpaRedirectUris": {
+            "value": "[parameters('entraProductionSpaRedirectUris')]"
           }
         },
         "template": {
@@ -1105,7 +1122,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "181113123305102352"
+              "templateHash": "14209817430275474162"
             }
           },
           "parameters": {
@@ -1127,6 +1144,20 @@
               "defaultValue": false,
               "metadata": {
                 "description": "Enable OBO backend API app registration for user-delegated access to Agent Service"
+              }
+            },
+            "productionSpaRedirectUris": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Production SPA redirect URIs that must be preserved when reconciling the Entra application."
+              }
+            },
+            "documentIngestionFinalizeRoleId": {
+              "type": "string",
+              "defaultValue": "b7ed8619-c233-4da1-8ff6-55cd46a6e013",
+              "metadata": {
+                "description": "Stable application-role ID shared with the targeted documentary-ingestion authorization script."
               }
             }
           },
@@ -1152,11 +1183,20 @@
                 "signInAudience": "AzureADMyOrg",
                 "serviceManagementReference": "[if(empty(parameters('serviceManagementReference')), null(), parameters('serviceManagementReference'))]",
                 "spa": {
-                  "redirectUris": [
-                    "http://localhost:5173",
-                    "http://localhost:8080"
-                  ]
+                  "redirectUris": "[union(createArray('http://localhost:5173', 'http://localhost:8080'), parameters('productionSpaRedirectUris'))]"
                 },
+                "appRoles": [
+                  {
+                    "allowedMemberTypes": [
+                      "Application"
+                    ],
+                    "description": "Allows the documentary-ingestion managed identity to finalize machine configuration.",
+                    "displayName": "Finalize document ingestion",
+                    "id": "[parameters('documentIngestionFinalizeRoleId')]",
+                    "isEnabled": true,
+                    "value": "DocumentIngestion.Finalize"
+                  }
+                ],
                 "api": {
                   "knownClientApplications": [],
                   "oauth2PermissionScopes": [
@@ -1328,6 +1368,9 @@
             "value": "[parameters('entraTenantId')]"
           },
           "entraBackendClientId": "[if(parameters('enableObo'), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourcesResourceGroups, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'entra-app'), '2025-04-01').outputs.backendClientAppId.value), createObject('value', ''))]",
+          "documentIngestionFunctionPrincipalId": {
+            "value": "[parameters('documentIngestionFunctionPrincipalId')]"
+          },
           "webImageName": {
             "value": "[parameters('webImageName')]"
           },
@@ -1435,7 +1478,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15463241639935000227"
+              "templateHash": "11137981580277880830"
             }
           },
           "parameters": {
@@ -1469,6 +1512,13 @@
             "entraBackendClientId": {
               "type": "string",
               "defaultValue": ""
+            },
+            "documentIngestionFunctionPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Allowed Entra object ID for the documentary-ingestion callback. Empty is fail-closed."
+              }
             },
             "webImageName": {
               "type": "string"
@@ -1689,6 +1739,12 @@
                 "secretRef": "diaglink-postgresql"
               }
             ],
+            "documentIngestionEnv": [
+              {
+                "name": "DocumentIngestion__AllowedCallerObjectId",
+                "value": "[parameters('documentIngestionFunctionPrincipalId')]"
+              }
+            ],
             "emailEnv": [
               {
                 "name": "Email__AcsEndpoint",
@@ -1811,7 +1867,7 @@
               }
             ],
             "pricingIdentityEnv": "[flatten(variables('pricingIdentityEnvGroups'))]",
-            "containerEnv": "[concat(variables('baseEnv'), variables('miEnv'), variables('oboEnv'), variables('diagLinkEnv'), variables('emailEnv'), variables('authEnv'), variables('storageEnv'), variables('contactEnv'), variables('stripeEnv'), variables('claudeEnv'), variables('pricingIdentityEnv'))]",
+            "containerEnv": "[concat(variables('baseEnv'), variables('miEnv'), variables('oboEnv'), variables('diagLinkEnv'), variables('documentIngestionEnv'), variables('emailEnv'), variables('authEnv'), variables('storageEnv'), variables('contactEnv'), variables('stripeEnv'), variables('claudeEnv'), variables('pricingIdentityEnv'))]",
             "tunnelContainers": [
               {
                 "name": "postgres-tunnel",

@@ -14,6 +14,12 @@
     "serviceManagementReference": {
       "value": "${ENTRA_SERVICE_MANAGEMENT_REFERENCE=}"
     },
+    "entraProductionSpaRedirectUris": {
+      "value": [
+        "https://app.diaglink.com",
+        "https://ca-web-yhobipnkhkqdy.livelyhill-27d72b6f.swedencentral.azurecontainerapps.io"
+      ]
+    },
     "webImageName": {
       "value": "${SERVICE_WEB_IMAGE_NAME=}"
     },
@@ -25,6 +31,9 @@
     },
     "enableObo": {
       "value": "${ENABLE_OBO=false}"
+    },
+    "documentIngestionFunctionPrincipalId": {
+      "value": "${DOCUMENT_INGESTION_FUNCTION_PRINCIPAL_ID=}"
     },
     "authOtpPepper": {
       "value": "${AUTH_OTP_PEPPER}"

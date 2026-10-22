@@ -170,6 +170,17 @@ builder.Services.AddAuthorization(options =>
     // machine assignment) must never be reachable by that role; the super-admin equivalents take an
     // explicit companyId route parameter instead (see /api/companies/{companyId}/... endpoints).
     AddRolePolicy("CompanyAdminOnly", DiagLinkRoles.CompanyAdmin);
+
+    // App-only callback used by the documentary-ingestion Function. A valid app role is not
+    // sufficient by itself: only the explicitly configured Function managed identity may call it.
+    options.AddPolicy(DocumentIngestionAuthorization.PolicyName, policy =>
+    {
+        policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme);
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(context => DocumentIngestionAuthorization.IsAllowedCaller(
+            context.User,
+            builder.Configuration[DocumentIngestionAuthorization.AllowedCallerObjectIdConfigurationKey]));
+    });
 });
 
 // Register the single Claude Direct runtime and its machine-scoped tools.
@@ -273,6 +284,7 @@ builder.Services.AddScoped<ICompanyBrandingService, CompanyBrandingService>();
 builder.Services.AddScoped<CompanyOnboardingService>();
 builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<MachineAssignmentService>();
+builder.Services.AddScoped<DocumentIngestionFinalizationService>();
 builder.Services.AddSingleton<IPdfPageCounter, PdfPigPageCounter>();
 builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ChatAccessAuthorizationHandler>();
 
@@ -340,6 +352,7 @@ app.MapCompanyFinance();
 app.MapPublicMachineRequests();
 app.MapPublicContact();
 app.MapSupportContact();
+app.MapDocumentIngestionEndpoints();
 app.MapTechnicalVisualEndpoints(ScopePolicyName);
 app.MapTechnicalSourceEndpoints(ScopePolicyName);
 app.MapAdditionalMachineRequests();
