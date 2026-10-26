@@ -600,6 +600,152 @@ public sealed class TechnicalSourceReferenceResolverTests
     }
 
     [TestMethod]
+    public async Task RepeatedPhysicalCitationUsesVerifiedHistoryWhenCurrentSearchHasNoDocumentId()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("dx225-parts", Fixture.PageMap("dx225-parts", """{"pdfPage":669,"displayPage":null,"source":"ExtractedText"}""")));
+        const string text = "ðŸ“„ Source : Page PDF : 669";
+
+        var references = await fixture.Resolver.ResolveAsync(
+            text,
+            BlobPrefix,
+            [],
+            [],
+            [],
+            [new("dx225-parts", 669, "669", TechnicalSourcePageKind.Pdf)],
+            default);
+
+        var reference = references.Single();
+        Assert.AreEqual("dx225-parts", reference.DocumentId);
+        Assert.AreEqual(669, reference.PdfPage);
+        Assert.AreEqual(TechnicalSourcePageKind.Pdf, reference.PageKind);
+        Assert.AreEqual(text.IndexOf("669", StringComparison.Ordinal), reference.StartIndex);
+    }
+
+    [TestMethod]
+    public async Task CurrentAndHistoricalPhysicalContradictionCreatesNoReference()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("current-manual", Fixture.PageMap("current-manual", """{"pdfPage":669,"displayPage":null,"source":"ExtractedText"}""")),
+            ("historical-manual", Fixture.PageMap("historical-manual", """{"pdfPage":669,"displayPage":null,"source":"ExtractedText"}""")));
+
+        var references = await fixture.Resolver.ResolveAsync(
+            "Source : Page PDF : 669",
+            BlobPrefix,
+            ["current-manual"],
+            [new("current-manual", 669)],
+            [],
+            [new("historical-manual", 669, "669", TechnicalSourcePageKind.Pdf)],
+            default);
+
+        Assert.IsEmpty(references);
+    }
+
+    [TestMethod]
+    public async Task SameHistoricalPhysicalPageAcrossDocumentsRemainsAmbiguous()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("manual-a", Fixture.PageMap("manual-a", """{"pdfPage":669,"displayPage":null,"source":"ExtractedText"}""")),
+            ("manual-b", Fixture.PageMap("manual-b", """{"pdfPage":669,"displayPage":null,"source":"ExtractedText"}""")));
+
+        var references = await fixture.Resolver.ResolveAsync(
+            "Source : Page PDF : 669",
+            BlobPrefix,
+            [],
+            [],
+            [],
+            [
+                new("manual-a", 669, "669", TechnicalSourcePageKind.Pdf),
+                new("manual-b", 669, "669", TechnicalSourcePageKind.Pdf)
+            ],
+            default);
+
+        Assert.IsEmpty(references);
+    }
+
+    [TestMethod]
+    public async Task HistoricalDisplayPageRevalidatesExactPhysicalMapping()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("manual", Fixture.PageMap("manual", """{"pdfPage":72,"displayPage":"70","source":"ExtractedText"}""")));
+
+        var references = await fixture.Resolver.ResolveAsync(
+            "Source : p. 70",
+            BlobPrefix,
+            [],
+            [],
+            [],
+            [new("manual", 72, "70", TechnicalSourcePageKind.Display)],
+            default);
+
+        Assert.AreEqual(72, references.Single().PdfPage);
+        Assert.AreEqual(TechnicalSourcePageKind.Display, references.Single().PageKind);
+    }
+
+    [TestMethod]
+    public async Task RemovedOrRemappedHistoricalDocumentCreatesNoReference()
+    {
+        var removed = Fixture.WithDocuments(("manual", null));
+        var remapped = Fixture.WithDocuments(
+            ("manual", Fixture.PageMap("manual", """{"pdfPage":73,"displayPage":"70","source":"ExtractedText"}""")));
+        HistoricalTechnicalSourceEvidence[] history =
+            [new("manual", 72, "70", TechnicalSourcePageKind.Display)];
+
+        var removedReferences = await removed.Resolver.ResolveAsync(
+            "Source : p. 70", BlobPrefix, [], [], [], history, default);
+        var remappedReferences = await remapped.Resolver.ResolveAsync(
+            "Source : p. 70", BlobPrefix, [], [], [], history, default);
+
+        Assert.IsEmpty(removedReferences);
+        Assert.IsEmpty(remappedReferences);
+    }
+
+    [TestMethod]
+    public async Task HistoricalDisplayPageDoesNotProveNewCitationAnchor()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("manual", Fixture.PageMap("manual", """{"pdfPage":72,"displayPage":"70","source":"ExtractedText"}""")));
+
+        var references = await fixture.Resolver.ResolveAsync(
+            "SP000913 p. 70",
+            BlobPrefix,
+            [],
+            [],
+            [],
+            [new("manual", 72, "70", TechnicalSourcePageKind.Display)],
+            default);
+
+        Assert.IsEmpty(references);
+    }
+
+    [TestMethod]
+    public async Task PrintedAndPhysicalHistoricalEvidenceAreNotInterchangeable()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("manual", Fixture.PageMap("manual", """{"pdfPage":70,"displayPage":"68","source":"ExtractedText"}""")));
+
+        var physicalFromPrinted = await fixture.Resolver.ResolveAsync(
+            "Page PDF : 70",
+            BlobPrefix,
+            [],
+            [],
+            [],
+            [new("manual", 70, "68", TechnicalSourcePageKind.Display)],
+            default);
+        var printedFromPhysical = await fixture.Resolver.ResolveAsync(
+            "Source : p. 68",
+            BlobPrefix,
+            [],
+            [],
+            [],
+            [new("manual", 70, "70", TechnicalSourcePageKind.Pdf)],
+            default);
+
+        Assert.IsEmpty(physicalFromPrinted);
+        Assert.IsEmpty(printedFromPhysical);
+    }
+
+    [TestMethod]
     public async Task AmbiguousDisplayPageCreatesNoReference()
     {
         var fixture = Fixture.Valid(("70", 72), ("70", 73));

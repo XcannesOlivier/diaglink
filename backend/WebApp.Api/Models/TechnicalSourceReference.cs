@@ -22,6 +22,13 @@ public enum TechnicalSourcePageKind
     Pdf
 }
 
+/// <summary>A previously persisted, server-verified document/page pair from the same conversation.</summary>
+public sealed record HistoricalTechnicalSourceEvidence(
+    string DocumentId,
+    int PdfPage,
+    string DisplayPage,
+    TechnicalSourcePageKind PageKind);
+
 /// <summary>A document/physical-page pair and its containing individual File Search result.</summary>
 public sealed record TechnicalDocumentPageEvidence(
     string DocumentId,

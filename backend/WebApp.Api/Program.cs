@@ -1417,6 +1417,36 @@ app.MapPost("/api/chat/stream", async (
             }
         }
 
+        IReadOnlyList<HistoricalTechnicalSourceEvidence> historicalSourceEvidence = [];
+        if (!isNewConversation &&
+            !string.IsNullOrEmpty(userObjectId) &&
+            boundMachineId is Guid historicalMachineId)
+        {
+            try
+            {
+                stageStopwatch.Restart();
+                historicalSourceEvidence = await historyRepository.GetHistoricalTechnicalSourceEvidenceAsync(
+                    conversationId,
+                    userObjectId,
+                    historicalMachineId,
+                    cancellationToken);
+                LogStage(
+                    "HistoricalSourceEvidenceReadSql",
+                    stageStopwatch.ElapsedMilliseconds,
+                    "success",
+                    historicalSourceEvidence.Count);
+            }
+            catch (Exception ex)
+            {
+                // Historical reuse is fail-closed and best-effort. Current-turn File Search evidence
+                // remains sufficient and must not be disrupted by a SQL read failure.
+                logger.LogError(
+                    ex,
+                    "Failed to load historical source evidence for conversation {ConversationId}; continuing with current-turn evidence only.",
+                    conversationId);
+            }
+        }
+
         if (!string.IsNullOrEmpty(userObjectId))
         {
             try
@@ -1467,7 +1497,8 @@ app.MapPost("/api/chat/stream", async (
                     "Claude Direct requires a server-resolved machine."),
                 messageForModel,
                 cancellationToken,
-                claudeDirectImages);
+                claudeDirectImages,
+                historicalSourceEvidence);
 
         var runtimeStopwatch = Stopwatch.StartNew();
         long? firstVisibleTextMs = null;

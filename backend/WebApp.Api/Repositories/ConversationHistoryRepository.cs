@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Text.Json;
 using WebApp.Api.Data;
 using WebApp.Api.Models;
@@ -328,6 +329,48 @@ public class ConversationHistoryRepository
             .Where(c => c.ConversationPublicId == conversationPublicId && c.UserObjectId == userObjectId)
             .Select(c => new ConversationOwnershipInfo(c.Id, c.MachineId))
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Returns only durable source metadata from the requested conversation, owner, and bound machine.
+    /// Free-form message text is deliberately excluded from documentary evidence.
+    /// </summary>
+    public async Task<IReadOnlyList<HistoricalTechnicalSourceEvidence>> GetHistoricalTechnicalSourceEvidenceAsync(
+        string conversationPublicId,
+        string userObjectId,
+        Guid machineId,
+        CancellationToken cancellationToken)
+    {
+        var stored = await _db.ConversationMessageSourceReferences
+            .AsNoTracking()
+            .Where(source =>
+                source.ConversationMessage!.Role == "assistant" &&
+                source.ConversationMessage.Conversation!.ConversationPublicId == conversationPublicId &&
+                source.ConversationMessage.Conversation.UserObjectId == userObjectId &&
+                source.ConversationMessage.Conversation.MachineId == machineId)
+            .Select(source => new
+            {
+                source.DocumentId,
+                source.PdfPage,
+                source.DisplayPage
+            })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return stored
+            .Select(source => TechnicalSourcePageStorage.TryReadPdfPage(source.DisplayPage, out var pdfPage)
+                ? new HistoricalTechnicalSourceEvidence(
+                    source.DocumentId,
+                    source.PdfPage,
+                    pdfPage.ToString(CultureInfo.InvariantCulture),
+                    TechnicalSourcePageKind.Pdf)
+                : new HistoricalTechnicalSourceEvidence(
+                    source.DocumentId,
+                    source.PdfPage,
+                    source.DisplayPage,
+                    TechnicalSourcePageKind.Display))
+            .Distinct()
+            .ToArray();
     }
 
     /// <summary>

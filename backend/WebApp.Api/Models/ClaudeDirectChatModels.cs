@@ -19,7 +19,11 @@ public sealed record ClaudeDirectMessage(
 public sealed record ClaudeDirectChatRequest(
     ClaudeDirectMachineContext Machine,
     string SystemPrompt,
-    IReadOnlyList<ClaudeDirectMessage> Messages);
+    IReadOnlyList<ClaudeDirectMessage> Messages)
+{
+    /// <summary>Trusted SQL metadata used only for source resolution; never sent to the model.</summary>
+    public IReadOnlyList<HistoricalTechnicalSourceEvidence> HistoricalSourceEvidence { get; init; } = [];
+}
 
 public sealed record ClaudeDirectToolUse(
     string Id,

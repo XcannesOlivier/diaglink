@@ -14,7 +14,23 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
         string blobPrefix,
         IReadOnlyCollection<string> allowedDocumentIds,
         CancellationToken cancellationToken) =>
-        ResolveAsync(assistantText, blobPrefix, allowedDocumentIds, [], [], cancellationToken);
+        ResolveAsync(assistantText, blobPrefix, allowedDocumentIds, [], [], [], cancellationToken);
+
+    public Task<IReadOnlyList<TechnicalSourceReference>> ResolveAsync(
+        string? assistantText,
+        string blobPrefix,
+        IReadOnlyCollection<string> allowedDocumentIds,
+        IReadOnlyCollection<TechnicalDocumentPageEvidence> fileSearchPageEvidence,
+        IReadOnlyCollection<TechnicalVisualReference> visuals,
+        CancellationToken cancellationToken) =>
+        ResolveAsync(
+            assistantText,
+            blobPrefix,
+            allowedDocumentIds,
+            fileSearchPageEvidence,
+            visuals,
+            [],
+            cancellationToken);
 
     public async Task<IReadOnlyList<TechnicalSourceReference>> ResolveAsync(
         string? assistantText,
@@ -22,6 +38,7 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
         IReadOnlyCollection<string> allowedDocumentIds,
         IReadOnlyCollection<TechnicalDocumentPageEvidence> fileSearchPageEvidence,
         IReadOnlyCollection<TechnicalVisualReference> visuals,
+        IReadOnlyCollection<HistoricalTechnicalSourceEvidence> historicalSourceEvidence,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(assistantText))
@@ -39,7 +56,12 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
         // consulted for another part of the answer. Only File Search results establish
         // document/page evidence for citations.
         _ = visuals;
-        var documentIds = allowedDocumentIds
+        var currentDocumentIds = allowedDocumentIds
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        var documentIds = currentDocumentIds
+            .Concat(historicalSourceEvidence.Select(source => source.DocumentId))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -74,14 +96,23 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
 
         mentions = ExpandRangeMentions(mentions, pageMaps);
 
+        var currentPageMaps = pageMaps
+            .Where(item => currentDocumentIds.Contains(item.Key, StringComparer.Ordinal))
+            .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
         var evidence = fileSearchPageEvidence
-            .Where(item => pageMaps.ContainsKey(item.DocumentId))
+            .Where(item => currentPageMaps.ContainsKey(item.DocumentId))
             .ToArray();
         var resolutions = new Dictionary<PageMention, ResolvedMention>();
-        var isSingleDocument = documentIds.Length == 1;
+        var isSingleDocument = currentDocumentIds.Length == 1;
 
-        ResolvePhysicalGroups(mentions, pageMaps, evidence, isSingleDocument, resolutions);
-        ResolveDisplayMentions(mentions, pageMaps, evidence, isSingleDocument, resolutions);
+        ResolvePhysicalGroups(mentions, currentPageMaps, evidence, isSingleDocument, resolutions);
+        ResolveDisplayMentions(mentions, currentPageMaps, evidence, isSingleDocument, resolutions);
+        ResolveFromHistoricalEvidence(
+            mentions,
+            pageMaps,
+            currentPageMaps,
+            historicalSourceEvidence,
+            resolutions);
 
         var references = new List<TechnicalSourceReference>();
         foreach (var mention in mentions)
@@ -105,6 +136,129 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
         }
 
         return references;
+    }
+
+    private static void ResolveFromHistoricalEvidence(
+        IReadOnlyList<PageMention> mentions,
+        IReadOnlyDictionary<string, TechnicalPageMapResolution> pageMaps,
+        IReadOnlyDictionary<string, TechnicalPageMapResolution> currentPageMaps,
+        IReadOnlyCollection<HistoricalTechnicalSourceEvidence> historicalSourceEvidence,
+        IDictionary<PageMention, ResolvedMention> resolutions)
+    {
+        var verifiedHistory = historicalSourceEvidence
+            .Where(source => HistoricalEvidenceMatchesCurrentPageMap(source, pageMaps))
+            .Distinct()
+            .ToArray();
+
+        foreach (var group in mentions
+            .Where(mention => mention.PageKind == TechnicalSourcePageKind.Pdf)
+            .GroupBy(mention => mention.GroupStartIndex))
+        {
+            var pages = group
+                .Select(mention => int.TryParse(mention.Page, out var page) ? page : 0)
+                .Where(page => page > 0)
+                .Distinct()
+                .ToArray();
+            var historicalDocuments = verifiedHistory
+                .Where(source => source.PageKind == TechnicalSourcePageKind.Pdf)
+                .GroupBy(source => source.DocumentId, StringComparer.Ordinal)
+                .Where(document => pages.All(page => document.Any(source => source.PdfPage == page)))
+                .Select(document => document.Key)
+                .ToHashSet(StringComparer.Ordinal);
+            if (historicalDocuments.Count == 0)
+            {
+                continue;
+            }
+
+            var currentResolutions = group
+                .Where(resolutions.ContainsKey)
+                .Select(mention => resolutions[mention].DocumentId)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            var candidateDocuments = currentResolutions.Length > 0
+                ? currentResolutions.Concat(historicalDocuments).ToHashSet(StringComparer.Ordinal)
+                : currentPageMaps
+                    .Where(item => pages.All(item.Value.PdfPages.Contains))
+                    .Select(item => item.Key)
+                    .Concat(historicalDocuments)
+                    .ToHashSet(StringComparer.Ordinal);
+
+            if (candidateDocuments.Count != 1)
+            {
+                foreach (var mention in group)
+                {
+                    resolutions.Remove(mention);
+                }
+                continue;
+            }
+
+            if (currentResolutions.Length == 0)
+            {
+                var documentId = candidateDocuments.Single();
+                foreach (var mention in group)
+                {
+                    resolutions[mention] = new(
+                        documentId,
+                        int.Parse(mention.Page, CultureInfo.InvariantCulture));
+                }
+            }
+        }
+
+        foreach (var mention in mentions.Where(mention => mention.PageKind == TechnicalSourcePageKind.Display))
+        {
+            // Historical rows do not retain the File Search text that proved an anchor such as a
+            // figure or fault code. Do not infer that relationship from old assistant prose.
+            if (mention.CitationAnchor is not null)
+            {
+                continue;
+            }
+
+            var historicalCandidates = verifiedHistory
+                .Where(source =>
+                    source.PageKind == TechnicalSourcePageKind.Display &&
+                    string.Equals(source.DisplayPage, mention.Page, StringComparison.Ordinal))
+                .Select(source => new ResolvedMention(source.DocumentId, source.PdfPage))
+                .Distinct()
+                .ToArray();
+            if (historicalCandidates.Length == 0)
+            {
+                continue;
+            }
+
+            var candidates = resolutions.TryGetValue(mention, out var currentResolution)
+                ? historicalCandidates.Append(currentResolution).Distinct().ToArray()
+                : currentPageMaps
+                    .Where(item => item.Value.PdfPagesByDisplayPage.ContainsKey(mention.Page))
+                    .SelectMany(item => item.Value.PdfPagesByDisplayPage[mention.Page]
+                        .Select(pdfPage => new ResolvedMention(item.Key, pdfPage)))
+                    .Concat(historicalCandidates)
+                    .Distinct()
+                    .ToArray();
+
+            if (candidates.Length == 1)
+            {
+                resolutions[mention] = candidates[0];
+            }
+            else
+            {
+                resolutions.Remove(mention);
+            }
+        }
+    }
+
+    private static bool HistoricalEvidenceMatchesCurrentPageMap(
+        HistoricalTechnicalSourceEvidence source,
+        IReadOnlyDictionary<string, TechnicalPageMapResolution> pageMaps)
+    {
+        if (!pageMaps.TryGetValue(source.DocumentId, out var pageMap))
+        {
+            return false;
+        }
+
+        return source.PageKind == TechnicalSourcePageKind.Pdf
+            ? pageMap.PdfPages.Contains(source.PdfPage)
+            : pageMap.PdfPagesByDisplayPage.TryGetValue(source.DisplayPage, out var pdfPages) &&
+                pdfPages.Contains(source.PdfPage);
     }
 
     private static void ResolvePhysicalGroups(

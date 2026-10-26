@@ -554,6 +554,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                 fileSearchDocumentIds,
                 fileSearchPageEvidence,
                 visuals,
+                request.HistoricalSourceEvidence,
                 cancellationToken));
             LogPerformance(
                 "TechnicalSourceResolution",

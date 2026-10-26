@@ -831,6 +831,102 @@ public class ConversationHistoryRepositoryTests
     }
 
     [TestMethod]
+    public async Task HistoricalSourceEvidenceIsScopedToConversationOwnerAndMachineAndIncludesSummarizedMessages()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var machineA = Guid.NewGuid();
+        var machineB = Guid.NewGuid();
+        await using (var seedContext = CreateContext(dbName))
+        {
+            var repository = CreateRepository(seedContext);
+            await repository.CreateConversationAsync("target", "user-A", null, machineA, default);
+            await repository.CreateConversationAsync("other-conversation", "user-A", null, machineA, default);
+            await repository.CreateConversationAsync("other-machine", "user-A", null, machineB, default);
+
+            await repository.AddMessageAsync(
+                "target",
+                "user-A",
+                "assistant",
+                "Page PDF : 669",
+                [],
+                [new TechnicalSourceReference("dx225-parts", 669, "669", "669", 11, 14, 0)
+                {
+                    PageKind = TechnicalSourcePageKind.Pdf
+                }],
+                [],
+                default);
+            var targetMessage = await seedContext.ConversationMessages.SingleAsync();
+            targetMessage.IsSummarized = true;
+
+            await repository.AddMessageAsync(
+                "other-conversation", "user-A", "assistant", "p. 70", [],
+                [new TechnicalSourceReference("foreign", 72, "70", "p. 70", 0, 5, 0)], [], default);
+            await repository.AddMessageAsync(
+                "other-machine", "user-A", "assistant", "p. 80", [],
+                [new TechnicalSourceReference("other-machine", 82, "80", "p. 80", 0, 5, 0)], [], default);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var repositoryUnderTest = CreateRepository(readContext);
+        var evidence = await repositoryUnderTest.GetHistoricalTechnicalSourceEvidenceAsync(
+            "target", "user-A", machineA, default);
+        var wrongOwner = await repositoryUnderTest.GetHistoricalTechnicalSourceEvidenceAsync(
+            "target", "user-B", machineA, default);
+        var wrongMachine = await repositoryUnderTest.GetHistoricalTechnicalSourceEvidenceAsync(
+            "target", "user-A", machineB, default);
+
+        var source = evidence.Single();
+        Assert.AreEqual("dx225-parts", source.DocumentId);
+        Assert.AreEqual(669, source.PdfPage);
+        Assert.AreEqual("669", source.DisplayPage);
+        Assert.AreEqual(TechnicalSourcePageKind.Pdf, source.PageKind);
+        Assert.IsEmpty(wrongOwner);
+        Assert.IsEmpty(wrongMachine);
+    }
+
+    [TestMethod]
+    public async Task RepeatedSourceOccurrencesReceiveDistinctOpaqueIdsAndReloadFromHistory()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var machineId = Guid.NewGuid();
+        await using (var seedContext = CreateContext(dbName))
+        {
+            await CreateRepository(seedContext).CreateConversationAsync(
+                "repeated-source", "user-A", null, machineId, default);
+        }
+
+        ConversationMessagePersistenceResult first;
+        ConversationMessagePersistenceResult second;
+        await using (var writeContext = CreateContext(dbName))
+        {
+            var repository = CreateRepository(writeContext);
+            var source = new TechnicalSourceReference("dx225-parts", 669, "669", "669", 11, 14, 0)
+            {
+                PageKind = TechnicalSourcePageKind.Pdf
+            };
+            first = (await repository.AddMessageAsync(
+                "repeated-source", "user-A", "assistant", "Page PDF : 669", [], [source], [], default))!;
+            second = (await repository.AddMessageAsync(
+                "repeated-source", "user-A", "assistant", "Encore, Page PDF : 669", [],
+                [source with { StartIndex = 19, EndIndex = 22 }], [], default))!;
+        }
+
+        await using var readContext = CreateContext(dbName);
+        var history = await CreateRepository(readContext)
+            .GetConversationMessagesAsync("repeated-source", "user-A", default);
+        var sourceIds = history!
+            .SelectMany(message => message.Sources)
+            .Select(source => source.Id)
+            .ToArray();
+
+        Assert.AreNotEqual(first.Sources.Single().Id, second.Sources.Single().Id);
+        CollectionAssert.AreEquivalent(
+            new[] { first.Sources.Single().Id, second.Sources.Single().Id },
+            sourceIds);
+    }
+
+    [TestMethod]
     public async Task AddAssistantMessageAsync_MessageVisualsAndSourcesAreAtomic()
     {
         await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");

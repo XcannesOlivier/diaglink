@@ -37,6 +37,27 @@ public sealed class ClaudeDirectChatRuntimeTests
     }
 
     [TestMethod]
+    public async Task HistoricalSourceEvidenceFlowsAsInternalRequestMetadata()
+    {
+        var fixture = Fixture(Result(finalText: "answer"));
+        HistoricalTechnicalSourceEvidence[] history =
+            [new("dx225-parts", 669, "669", TechnicalSourcePageKind.Pdf)];
+
+        await Collect(fixture.Runtime.StreamMessageAsync(
+            fixture.Machine,
+            "question",
+            default,
+            null,
+            history));
+
+        CollectionAssert.AreEqual(history, fixture.Service.Request!.HistoricalSourceEvidence.ToArray());
+        var messages = fixture.Factory.Messages;
+        Assert.IsNotNull(messages);
+        Assert.AreEqual("question", messages.Single().Text);
+        Assert.IsFalse(messages.Single().Text.Contains("dx225-parts", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task CallsClaudeDirectServiceExactlyOnce()
     {
         var fixture = Fixture(Result(finalText: "answer"));

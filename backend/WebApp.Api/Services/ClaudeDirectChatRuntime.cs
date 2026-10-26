@@ -15,7 +15,8 @@ public sealed class ClaudeDirectChatRuntime(
         Machine machine,
         string message,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
-        IReadOnlyList<ClaudeDirectUserImage>? userImages = null)
+        IReadOnlyList<ClaudeDirectUserImage>? userImages = null,
+        IReadOnlyList<HistoricalTechnicalSourceEvidence>? historicalSourceEvidence = null)
     {
         ArgumentNullException.ThrowIfNull(machine);
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
@@ -24,6 +25,10 @@ public sealed class ClaudeDirectChatRuntime(
             machine,
             [new ClaudeDirectMessage("user", message, userImages)],
             cancellationToken);
+        if (historicalSourceEvidence is { Count: > 0 })
+        {
+            request = request with { HistoricalSourceEvidence = historicalSourceEvidence };
+        }
         ClaudeDirectChatResult? result = null;
         await foreach (var update in chatService.StreamAsync(request, cancellationToken))
         {
