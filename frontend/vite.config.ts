@@ -4,6 +4,7 @@ import { resolve, dirname } from "path";
 import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { envCheckPlugin } from "./plugins/envcheck";
+import { pdfjsWasmPlugin } from "./plugins/pdfjsWasm";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -22,7 +23,7 @@ export default defineConfig(({ mode }) => {
   process.env.VITE_ENTRA_TENANT_ID = env.ENTRA_TENANT_ID || env.VITE_ENTRA_TENANT_ID;
 
   return {
-    plugins: [react(), envCheckPlugin()],
+    plugins: [react(), envCheckPlugin(), pdfjsWasmPlugin(__dirname)],
     resolve: {
       alias: {
         "~": resolve(__dirname, "./src"),

@@ -24,6 +24,13 @@ import styles from './TechnicalSourcePdfDialog.module.css';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
+export function createPdfJsWasmUrl(baseUrl: string) {
+  const normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  return `${normalizedBaseUrl}pdfjs-wasm/`;
+}
+
+const pdfJsWasmUrl = createPdfJsWasmUrl(import.meta.env.BASE_URL);
+
 interface TechnicalSourcePdfDialogProps {
   source: TechnicalSourceReference;
   loadPdf: (sourceReferenceId: number, signal?: AbortSignal) => Promise<Blob>;
@@ -55,7 +62,10 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
       .then(blob => blob.arrayBuffer())
       .then(data => {
         if (controller.signal.aborted) return undefined;
-        loadingTask = getDocument({ data: new Uint8Array(data) });
+        loadingTask = getDocument({
+          data: new Uint8Array(data),
+          wasmUrl: pdfJsWasmUrl,
+        });
         return loadingTask.promise;
       })
       .then(pdf => {
