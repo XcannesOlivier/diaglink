@@ -6,20 +6,6 @@
   height: 100dvh;
   overflow: hidden;
 }
-.fui-Input {
-  background-color: #ffffff !important;
-}
-
-.fui-Input input {
-  background-color: #ffffff !important;
-  color: #1a1a1a !important;
-  caret-color: #1a1a1a !important;
-}
-
-.fui-Input input::placeholder {
-  color: #777777 !important;
-}
-
 .app-loading {
   display: flex;
   align-items: center;

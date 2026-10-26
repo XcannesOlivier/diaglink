@@ -74,8 +74,18 @@
 
 .fullWidthInput {
   width: 100%;
-  background-color: #ffffff;
-  color: #1a1a1a;
+  background-color: #ffffff !important;
+  color: #1a1a1a !important;
+}
+
+.fullWidthInput input {
+  background-color: #ffffff !important;
+  color: #1a1a1a !important;
+  caret-color: #1a1a1a !important;
+}
+
+.fullWidthInput input::placeholder {
+  color: #777777 !important;
 }
 
 .fieldMessage {

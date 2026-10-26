@@ -113,11 +113,19 @@ public class AdditionalDocumentsRequestEndpointsTests
     public async Task EnforcesPdfAndMultipartLimitsAndServerPageCount()
     {
         await using var f = await Fixture.CreateAsync();
+        Assert.AreEqual(10, MachineRequestUploadLimits.MaxDocumentCount);
+        Assert.AreEqual(200L * 1024 * 1024, MachineRequestUploadLimits.MaxDocumentBytes);
+        Assert.AreEqual(200L * 1024 * 1024, MachineRequestUploadLimits.MaxCombinedDocumentBytes);
+        Assert.AreEqual(205L * 1024 * 1024, MachineRequestUploadLimits.MaxRequestBodyBytes);
         Assert.AreEqual(StatusCodes.Status400BadRequest, ((IStatusCodeHttpResult)await f.SubmitAsync(1, fileCount: 0)).StatusCode);
+        Assert.AreEqual(StatusCodes.Status201Created, ((IStatusCodeHttpResult)await f.SubmitAsync(1, fileCount: 10)).StatusCode);
         Assert.AreEqual(StatusCodes.Status400BadRequest, ((IStatusCodeHttpResult)await f.SubmitAsync(1, fileCount: 11)).StatusCode);
         Assert.AreEqual(StatusCodes.Status400BadRequest, ((IStatusCodeHttpResult)await f.SubmitAsync(1, fileName: "manual.txt")).StatusCode);
-        Assert.AreEqual(StatusCodes.Status400BadRequest, ((IStatusCodeHttpResult)await f.SubmitAsync(1, length: MachineRequestUploadLimits.MaxDocumentBytes + 1)).StatusCode);
-        Assert.AreEqual(StatusCodes.Status413PayloadTooLarge, ((IStatusCodeHttpResult)await f.SubmitAsync(1, fileCount: 5, length: 45L * 1024 * 1024)).StatusCode);
+        Assert.AreEqual(StatusCodes.Status201Created, ((IStatusCodeHttpResult)await f.SubmitAsync(1, length: MachineRequestUploadLimits.MaxDocumentBytes)).StatusCode);
+        Assert.AreEqual(StatusCodes.Status413PayloadTooLarge, ((IStatusCodeHttpResult)await f.SubmitAsync(1, length: MachineRequestUploadLimits.MaxDocumentBytes + 1)).StatusCode);
+        Assert.AreEqual(StatusCodes.Status201Created, ((IStatusCodeHttpResult)await f.SubmitAsync(1, fileCount: 2, length: 100L * 1024 * 1024)).StatusCode);
+        Assert.AreEqual(StatusCodes.Status413PayloadTooLarge, ((IStatusCodeHttpResult)await f.SubmitAsync(1, fileCount: 2, length: 100L * 1024 * 1024 + 1)).StatusCode);
+        Assert.AreEqual(StatusCodes.Status400BadRequest, ((IStatusCodeHttpResult)await f.SubmitAsync(1, length: 0)).StatusCode);
         f.Counter.Throws = true;
         Assert.AreEqual(StatusCodes.Status400BadRequest, ((IStatusCodeHttpResult)await f.SubmitAsync(1)).StatusCode);
     }
@@ -229,7 +237,17 @@ public class AdditionalDocumentsRequestEndpointsTests
             http.Request.ContentType = "multipart/form-data; boundary=test";
             if (keyHeader is not null) http.Request.Headers["Idempotency-Key"] = keyHeader == "auto" ? (key ?? Guid.NewGuid()).ToString() : keyHeader;
             var files = new FormFileCollection();
-            for (var i = 0; i < fileCount; i++) { var bytes = Encoding.UTF8.GetBytes(content); var file = new FormFile(new MemoryStream(bytes), 0, length ?? bytes.Length, "documents", fileName) { Headers = new HeaderDictionary(), ContentType = "application/pdf" }; files.Add(file); }
+            for (var i = 0; i < fileCount; i++)
+            {
+                var bytes = Encoding.UTF8.GetBytes(content);
+                IFormFile file = length is null
+                    ? new FormFile(new MemoryStream(bytes), 0, bytes.Length, "documents", fileName)
+                    {
+                        Headers = new HeaderDictionary(), ContentType = "application/pdf"
+                    }
+                    : new LogicalLengthFormFile(fileName, bytes, length.Value);
+                files.Add(file);
+            }
             http.Features.Set<IFormFeature>(new FormFeature(new FormCollection(new Dictionary<string, StringValues>
             {
                 ["companyId"] = Guid.NewGuid().ToString(), ["totalPages"] = "999999", ["amountCents"] = "1"
@@ -241,6 +259,19 @@ public class AdditionalDocumentsRequestEndpointsTests
     }
     private sealed class Counter : IPdfPageCounter { public int Pages { get; set; } public bool Throws { get; set; }
         public Task<int> CountPagesAsync(Stream content, CancellationToken cancellationToken = default) => Throws ? throw new InvalidDataException() : Task.FromResult(Pages); }
+    private sealed class LogicalLengthFormFile(string name, byte[] content, long length) : IFormFile
+    {
+        public string ContentType { get; set; } = "application/pdf";
+        public string ContentDisposition { get; set; } = string.Empty;
+        public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
+        public long Length => length;
+        public string Name => "documents";
+        public string FileName => name;
+        public void CopyTo(Stream target) => target.Write(content);
+        public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default) =>
+            target.WriteAsync(content, cancellationToken).AsTask();
+        public Stream OpenReadStream() => new MemoryStream(content, writable: false);
+    }
     private sealed class BlobFake : IMachineRequestBlobClient
     {
         private readonly Dictionary<string, byte[]> data = new(StringComparer.Ordinal); public IReadOnlyCollection<string> Names => data.Keys;

@@ -56,6 +56,7 @@ public class MachineRequestStorageServiceTests
         json.Remove("isArchived");
         json.Remove("archivedAtUtc");
         json.Remove("archivedByUserId");
+        json.Remove("termsAcceptance");
         await using var content = new MemoryStream(Encoding.UTF8.GetBytes(json.ToJsonString()));
         await blobs.UploadAsync($"{requestId}/request.json", content, "application/json", overwrite: false);
 
@@ -69,6 +70,7 @@ public class MachineRequestStorageServiceTests
         Assert.IsFalse(restored.IsArchived);
         Assert.IsNull(restored.ArchivedAtUtc);
         Assert.IsNull(restored.ArchivedByUserId);
+        Assert.IsNull(restored.TermsAcceptance);
     }
 
     [TestMethod]

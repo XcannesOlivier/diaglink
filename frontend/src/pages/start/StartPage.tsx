@@ -10,8 +10,9 @@ import { trimStartFormValues, validateStartForm, type RequiredStartField, type S
 import { MachineRequestSubmissionError, submitMachineRequest, type MachineRequestResponse } from '../../services/machineRequestApi';
 import { createMachineRequestPayment, MachineRequestPaymentTerminalError, waitForMachineRequestAuthorization } from '../../services/machineRequestPaymentApi';
 import { authorizationConfirmedMessage, checkoutReturnedMessage, checkoutWindowName, isCheckoutReturnWindow, isTrustedCheckoutMessage, requestSubmittedMessage } from './checkoutPopup';
-import { formatFileSize, inspectPdfFiles, type SelectedPdf } from './pdfSelection';
+import { COMBINED_PDF_LIMIT_ERROR, formatFileSize, inspectPdfFiles, type SelectedPdf } from './pdfSelection';
 import { ConditionsDialog } from './ConditionsDialog';
+import { CURRENT_TERMS_VERSION } from '../conditions/termsVersion';
 
 const steps = ['Coordonnées', 'Machine', 'Documents', 'Récapitulatif'];
 const euroFormatter = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
@@ -86,6 +87,8 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
   const preparationPrice = useMemo(() => calculatePreparationPrice(totalPages), [totalPages]);
   const maximumAuthorizationPrice = useMemo(() => calculateMaximumAuthorizationPrice(totalPages), [totalPages]);
   const formErrors = useMemo(() => validateStartForm(formValues, selectedPdfs.length), [formValues, selectedPdfs.length]);
+  const combinedPdfLimitReached = fileErrors.includes(COMBINED_PDF_LIMIT_ERROR);
+  const otherFileErrors = fileErrors.filter(error => error !== COMBINED_PDF_LIMIT_ERROR);
   const isFormReady = Object.keys(formErrors).length === 0 && !isReadingFiles && fileErrors.length === 0 && !isSubmitting;
   const isFormComplete = isFormReady && termsAccepted;
 
@@ -173,6 +176,7 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
   const removePdf = (id: number) => {
     if (submissionLock.current) return;
     setSelectedPdfs(current => current.filter(pdf => pdf.id !== id));
+    setFileErrors(current => current.filter(error => error !== COMBINED_PDF_LIMIT_ERROR));
   };
 
   const handleValidation = async (event: FormEvent<HTMLFormElement>) => {
@@ -230,7 +234,13 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
         checkoutWindow.current?.postMessage({ type: authorizationConfirmedMessage }, window.location.origin);
       }
       setSubmissionPhase('uploading');
-      const completedRequest = await submitMachineRequest(trimmedValues, selectedPdfs.map(pdf => pdf.file), paymentRequestId);
+      const completedRequest = await submitMachineRequest(
+        trimmedValues,
+        selectedPdfs.map(pdf => pdf.file),
+        paymentRequestId,
+        termsAccepted,
+        CURRENT_TERMS_VERSION,
+      );
       setConfirmation(completedRequest);
       localStorage.removeItem(paymentAttemptStorageKey);
       paymentAttempt.current = null;
@@ -333,7 +343,11 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
               <small>PDF</small>
             </div>
             {isReadingFiles && <p className={styles.readingStatus}>Analyse des PDF en cours…</p>}
-            {fileErrors.length > 0 && <ul className={styles.fileErrors} role="alert">{fileErrors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}</ul>}
+            {combinedPdfLimitReached && <div className={styles.fileErrors} role="alert">
+              <strong>Limite de téléchargement atteinte</strong><br />
+              La taille cumulée des PDF ne peut pas dépasser 200 Mio. Vous pourrez ajouter d’autres PDF depuis votre espace administrateur après l’activation de votre compte.
+            </div>}
+            {otherFileErrors.length > 0 && <ul className={styles.fileErrors} role="alert">{otherFileErrors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}</ul>}
             {documentsTouched && formErrors.documents && !isReadingFiles && <p className={styles.documentError}>{formErrors.documents}</p>}
             {selectedPdfs.length > 0 && (
               <ul className={styles.fileList} aria-label="Documents PDF sélectionnés">
@@ -395,7 +409,7 @@ export function StartPage({ isAuthenticated }: { isAuthenticated: boolean }) {
               </div>
               {termsAcceptanceAttempted && !termsAccepted && <p className={styles.termsError} id="terms-acceptance-error" role="alert">Vous devez accepter les Conditions générales de service pour continuer.</p>}
             </div>
-            <button className={styles.submitButton} type="submit" disabled={!isFormComplete}>{isSubmitting
+            <button className={styles.submitButton} type="submit" disabled={!isFormReady}>{isSubmitting
               ? submissionPhase === 'preparing' ? 'Préparation du paiement…'
                 : submissionPhase === 'waiting' ? 'Autorisation en attente…'
                   : 'Transmission de vos documents…'

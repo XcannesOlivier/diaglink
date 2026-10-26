@@ -81,6 +81,19 @@ async function completeForm(acceptTerms = true) {
   }
 }
 
+function sizedPdf(name: string, size: number) {
+  const file = new File(['local-pdf'], name, { type: 'application/pdf' });
+  Object.defineProperty(file, 'size', { configurable: true, value: size });
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(8) });
+  return file;
+}
+
+async function selectPdfs(files: File[]) {
+  const input = host.querySelector('input[type="file"]') as HTMLInputElement;
+  Object.defineProperty(input, 'files', { configurable: true, value: files });
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+}
+
 async function submitTwice() {
   const form = host.querySelector('form')!;
   await act(async () => {
@@ -117,6 +130,29 @@ afterEach(async () => {
 });
 
 describe('/commencer submission', () => {
+  it('shows the upload-limit explanation only after the combined PDF size exceeds 200 Mio', async () => {
+    await renderPage();
+
+    expect(host.textContent).not.toContain('Limite de téléchargement atteinte');
+
+    const halfLimit = 100 * 1024 * 1024;
+    await selectPdfs([sizedPdf('manual-1.pdf', halfLimit), sizedPdf('manual-2.pdf', halfLimit)]);
+
+    expect(host.textContent).not.toContain('Limite de téléchargement atteinte');
+
+    await selectPdfs([sizedPdf('manual-3.pdf', 1)]);
+
+    expect(host.textContent).toContain('Limite de téléchargement atteinte');
+    expect(host.textContent).toContain('Vous pourrez ajouter d’autres PDF depuis votre espace administrateur après l’activation de votre compte.');
+    expect(host.textContent).not.toContain('manual-3.pdf');
+
+    const removeButton = [...host.querySelectorAll<HTMLButtonElement>('button')]
+      .find(button => button.getAttribute('aria-label') === 'Retirer manual-1.pdf')!;
+    await act(async () => removeButton.click());
+
+    expect(host.textContent).not.toContain('Limite de téléchargement atteinte');
+  });
+
   it('renders the required service conditions acceptance unchecked by default', async () => {
     await renderPage();
 
@@ -126,31 +162,42 @@ describe('/commencer submission', () => {
     expect(host.textContent).toContain('J’ai lu et j’accepte les Conditions générales de service de DiagLink.');
   });
 
-  it('keeps submission disabled without acceptance', async () => {
-    await renderPage();
-    await completeForm(false);
-
-    const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
-    expect(button.disabled).toBe(true);
-    await act(async () => button.click());
-
-    expect(mocks.createPayment).not.toHaveBeenCalled();
-    expect(mocks.submitMachineRequest).not.toHaveBeenCalled();
-  });
-
-  it('enables submission only while the conditions are accepted', async () => {
+  it('shows an accessible error without starting payment when acceptance is missing', async () => {
     await renderPage();
     await completeForm(false);
 
     const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
     const terms = host.querySelector<HTMLInputElement>('input[name="termsAccepted"]')!;
-    expect(button.disabled).toBe(true);
+    expect(button.disabled).toBe(false);
+    await act(async () => button.click());
+
+    const error = host.querySelector<HTMLElement>('#terms-acceptance-error');
+    expect(error?.textContent).toContain('Vous devez accepter les Conditions générales de service');
+    expect(error?.getAttribute('role')).toBe('alert');
+    expect(terms.getAttribute('aria-invalid')).toBe('true');
+    expect(terms.getAttribute('aria-describedby')).toBe('terms-acceptance-error');
+    expect(mocks.createPayment).not.toHaveBeenCalled();
+    expect(mocks.submitMachineRequest).not.toHaveBeenCalled();
+  });
+
+  it('clears the acceptance error when checked and restores it after unchecking and retrying', async () => {
+    await renderPage();
+    await completeForm(false);
+
+    const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    const terms = host.querySelector<HTMLInputElement>('input[name="termsAccepted"]')!;
+    await act(async () => button.click());
+    expect(host.querySelector('#terms-acceptance-error')).not.toBeNull();
 
     await act(async () => terms.click());
     expect(button.disabled).toBe(false);
+    expect(host.querySelector('#terms-acceptance-error')).toBeNull();
 
     await act(async () => terms.click());
-    expect(button.disabled).toBe(true);
+    expect(button.disabled).toBe(false);
+    await act(async () => button.click());
+    expect(host.querySelector('#terms-acceptance-error')).not.toBeNull();
+    expect(mocks.createPayment).not.toHaveBeenCalled();
   });
 
   it('opens and closes the conditions dialog without navigation or form state loss', async () => {

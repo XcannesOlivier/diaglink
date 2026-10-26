@@ -111,4 +111,45 @@ describe('ConversationSidebar activity date', () => {
     expect(document.body.textContent).toContain('Hier');
     expect(document.body.textContent).not.toContain("Aujourd'hui");
   });
+
+  it.each([
+    ['desktop', 1280],
+    ['mobile', 390],
+  ])('does not expose conversation deletion on %s while keeping selection available', async (_device, viewportWidth) => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: viewportWidth });
+    const onSelectConversation = vi.fn();
+    const onDeleteConversation = vi.fn();
+    const onOpenChange = vi.fn();
+
+    await act(async () => root.render(React.createElement(ConversationSidebar, {
+      isOpen: true,
+      onOpenChange,
+      conversations: [{
+        id: 'conversation-1',
+        title: 'Conversation test',
+        createdAt: unixSeconds(localDate(2026, 10, 1, 9, 0)),
+        lastActivityAt: unixSeconds(localDate(2026, 10, 8, 9, 0)),
+      }],
+      isLoading: false,
+      hasMore: false,
+      currentConversationId: null,
+      onSelectConversation,
+      onNewChat: vi.fn(),
+      onDeleteConversation,
+      onLoadMore: vi.fn(),
+      onCollapse: vi.fn(),
+      canCollapse: false,
+    })));
+
+    expect(document.querySelector('[aria-label^="Supprimer la conversation"]')).toBeNull();
+    expect(document.querySelector('[data-company-accent-exempt]')).toBeNull();
+
+    const conversationItem = document.querySelector<HTMLElement>('[role="listitem"]');
+    expect(conversationItem).not.toBeNull();
+    await act(async () => conversationItem?.click());
+
+    expect(onSelectConversation).toHaveBeenCalledWith('conversation-1');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onDeleteConversation).not.toHaveBeenCalled();
+  });
 });

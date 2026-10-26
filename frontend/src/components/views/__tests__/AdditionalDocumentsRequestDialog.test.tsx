@@ -44,6 +44,54 @@ describe('AdditionalDocumentsRequestDialog', () => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111');
   });
 
+  it('ouvre le sélecteur PDF au clic, avec Entrée et avec Espace sans double activation', async () => {
+    const rendered = await renderDialog();
+    const dropzone = document.body.querySelector<HTMLElement>('[role="button"]')!;
+    const fileInput = document.body.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const clickSpy = vi.spyOn(fileInput, 'click').mockImplementation(() => undefined);
+
+    await act(async () => dropzone.click());
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => dropzone.dispatchEvent(enter));
+    expect(enter.defaultPrevented).toBe(true);
+    expect(clickSpy).toHaveBeenCalledTimes(2);
+
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => dropzone.dispatchEvent(space));
+    expect(space.defaultPrevented).toBe(true);
+    expect(clickSpy).toHaveBeenCalledTimes(3);
+
+    await act(async () => rendered.root.unmount());
+    rendered.host.remove();
+  });
+
+  it('n’active pas la zone de dépôt verrouillée au clic, avec Entrée ou avec Espace', async () => {
+    api.stage.mockResolvedValue(staged);
+    api.start.mockResolvedValue({ status: 'pending', checkoutUrl: 'https://checkout.stripe.test/docs' });
+    const rendered = await renderDialog();
+    await selectPdf();
+    await click('Continuer');
+
+    const dropzone = document.body.querySelector<HTMLElement>('[role="button"]')!;
+    const fileInput = document.body.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const clickSpy = vi.spyOn(fileInput, 'click').mockImplementation(() => undefined);
+    expect(dropzone.getAttribute('aria-disabled')).toBe('true');
+    expect(fileInput.disabled).toBe(true);
+
+    await act(async () => dropzone.click());
+    for (const key of ['Enter', ' ']) {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      await act(async () => dropzone.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(true);
+    }
+    expect(clickSpy).not.toHaveBeenCalled();
+
+    await act(async () => rendered.root.unmount());
+    rendered.host.remove();
+  });
+
   it('shows the existing machine, per-page estimate and no subscription pricing', async () => {
     await renderDialog(); await selectPdf();
     expect(document.body.textContent).toContain('Compresseur Alpha'); expect(document.body.textContent).toContain('100 pages');

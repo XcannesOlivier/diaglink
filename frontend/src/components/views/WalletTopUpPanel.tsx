@@ -3,6 +3,7 @@ import styles from './CompanyFinancePanel.module.css';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { getWalletTopUps, type WalletOverview } from '../../services/walletTopUpService';
 import type { GlobalFinanceIntervention } from './financeInterventions';
+import { walletTopUpStatusLabel } from '../../utils/statusLabels';
 
 interface Props {
   companyId: string;
@@ -15,7 +16,6 @@ interface Props {
   onLoadComplete?: () => void;
 }
 const euro=(value:number)=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',minimumFractionDigits:2,maximumFractionDigits:2}).format(value);
-const topUpStatus=(value:string)=>value==='Completed'?'Payé':value==='AwaitingPayment'?'En attente de paiement':value==='PaymentCreated'?'Paiement créé':value;
 export function WalletTopUpPanel({ companyId, getAccessToken, onDiagLinkSessionExpired, technicalTarget, repairTarget, onInterventionsChange, revision=0, onLoadComplete }: Props) {
   const [data, setData] = useState<WalletOverview | null>(null);
   const [message, setMessage] = useState('');
@@ -44,7 +44,7 @@ export function WalletTopUpPanel({ companyId, getAccessToken, onDiagLinkSessionE
     () => incompleteOperations.map(operation => ({
       id: operation.id,
       type: 'wallet-top-up' as const,
-      label: `Recharge de ${euro(operation.amountEur)} — ${topUpStatus(operation.stage)}`,
+      label: `Recharge de ${euro(operation.amountEur)} — ${walletTopUpStatusLabel(operation.stage)}`,
     })),
     [incompleteOperations]);
   useEffect(() => { onInterventionsChange?.(interventions); }, [interventions, onInterventionsChange]);
@@ -61,7 +61,7 @@ export function WalletTopUpPanel({ companyId, getAccessToken, onDiagLinkSessionE
     <section aria-label="Réparation des recharges"><h4>Recharges à reprendre</h4>
       {incompleteOperations.length === 0 && <p>Aucune recharge ne nécessite d’intervention.</p>}
       {incompleteOperations.map(operation => <article key={operation.id} className={styles.repairItem}>
-        <p><strong>{euro(operation.amountEur)}</strong> · {topUpStatus(operation.stage)}</p>
+        <p><strong>{euro(operation.amountEur)}</strong> · {walletTopUpStatusLabel(operation.stage)}</p>
       </article>)}
     </section>
   );
@@ -78,7 +78,7 @@ export function WalletTopUpPanel({ companyId, getAccessToken, onDiagLinkSessionE
       {loading&&<p>Chargement de l’historique…</p>}
       {data?.operations.length===0&&<p className={styles.note}>Aucune recharge.</p>}
       {data?.operations.map(op => <article key={op.id} className={styles.rechargeHistory}>
-        <strong>{euro(op.amountEur)}</strong><span className={`${styles.badge} ${op.stage==='Completed'?styles.topUpCompleted:op.stage==='AwaitingPayment'?styles.topUpAwaiting:''}`}>{topUpStatus(op.stage)}</span>
+        <strong>{euro(op.amountEur)}</strong><span className={`${styles.badge} ${op.stage==='Completed'?styles.topUpCompleted:op.stage==='AwaitingPayment'?styles.topUpAwaiting:''}`}>{walletTopUpStatusLabel(op.stage)}</span>
       </article>)}
     </section>}
     {technicalTarget ? createPortal(technicalDetails, technicalTarget) : technicalTarget === undefined ? technicalDetails : null}

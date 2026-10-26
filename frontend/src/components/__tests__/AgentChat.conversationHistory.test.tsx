@@ -28,7 +28,13 @@ const makeState = (
   conversationId: string | null = null,
 ) => ({
   auth: { status: 'authenticated', user: null, error: null, currentUser: { userId: 'user', companyId: 'company', role } },
-  chat: { status: 'idle', messages: [], currentConversationId: conversationId, error: null, pendingMessages: [] },
+  chat: {
+    status: 'idle',
+    messages: [],
+    currentConversationId: conversationId,
+    error: null,
+    pendingMessages: [] as Array<{ text: string; files?: File[] }>,
+  },
   conversations: { list: conversations, isLoading: false, sidebarOpen: true, hasMore: false },
   ui: { chatInputEnabled: true, currentView: 'chat' },
   machine: { selected: { id: machineId, name: machineId, reference: null } },
@@ -72,9 +78,13 @@ vi.mock('../../services/chatService', () => ({
 vi.mock('../../services/machineService', () => ({ getMachines: vi.fn() }));
 vi.mock('../../services/telemetry', () => ({ trackFeedback: vi.fn() }));
 vi.mock('../ChatInterface', () => ({
-  ChatInterface: ({ onSendMessage }: { onSendMessage: (text: string) => void }) => (
+  ChatInterface: ({ onSendMessage, onToggleSidebar }: {
+    onSendMessage: (text: string) => void;
+    onToggleSidebar?: () => void;
+  }) => <>
     <button type="button" data-testid="send-message" onClick={() => onSendMessage('Question')}>send</button>
-  ),
+    <button type="button" data-testid="toggle-sidebar" onClick={onToggleSidebar}>toggle</button>
+  </>,
 }));
 vi.mock('../ConversationSidebar', () => ({
   ConversationSidebar: ({ conversations, onSelectConversation, onLoadMore }: {
@@ -127,6 +137,50 @@ describe('AgentChat machine-scoped conversation history', () => {
     await render();
 
     expect(mocks.listConversations).toHaveBeenCalledWith(5, 'machine-role', expect.any(AbortSignal));
+  });
+
+  it('logs the technical history failure without exposing it in the user message', async () => {
+    const technicalError = new Error('Failed to fetch private history endpoint');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.state.conversations.sidebarOpen = false;
+    await render();
+    mocks.dispatch.mockClear();
+    mocks.listConversations.mockRejectedValueOnce(technicalError);
+
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="toggle-sidebar"]')?.click());
+
+    expect(consoleError).toHaveBeenCalledWith('Failed to load conversations:', technicalError);
+    expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'CHAT_ERROR',
+      error: expect.objectContaining({
+        message: "Impossible de charger l'historique des conversations. Veuillez réessayer.",
+      }),
+    }));
+    const displayedMessages = mocks.dispatch.mock.calls
+      .map(call => call[0]?.error?.message)
+      .filter((message): message is string => typeof message === 'string');
+    expect(displayedMessages.join(' ')).not.toContain(technicalError.message);
+    consoleError.mockRestore();
+  });
+
+  it('sends queued photos in order when the queue drains', async () => {
+    const files = [
+      new File(['one'], 'queued-1.png', { type: 'image/png' }),
+      new File(['two'], 'queued-2.jpg', { type: 'image/jpeg' }),
+    ];
+    mocks.state = makeState('company_admin', 'machine-a', [], 'conversation');
+    mocks.state.chat.pendingMessages = [{ text: 'Question en attente', files }];
+
+    await render();
+
+    expect(mocks.dispatch).toHaveBeenCalledWith({ type: 'CHAT_CLEAR_QUEUE' });
+    expect(mocks.sendMessage).toHaveBeenCalledWith(
+      'Question en attente',
+      'conversation',
+      files,
+    );
+    expect((mocks.sendMessage.mock.calls[0][2] as File[]).map(file => file.name))
+      .toEqual(['queued-1.png', 'queued-2.jpg']);
   });
 
   it('clears the list and ignores a late response after switching machines', async () => {
@@ -339,7 +393,7 @@ describe('AgentChat machine-scoped conversation history', () => {
     ], sources: [
       { id: 21, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: 0, endIndex: 5, displayOrder: 0 },
     ], suggestions: ['Où est le relais ?'], webCitations: [
-      { type: 'uri_citation', label: 'Fiche fournisseur', url: 'https://supplier.example/2544-9024' },
+      { type: 'uri_citation', label: 'Documentation constructeur', url: 'https://manufacturer.example/manuals/2544-9024' },
     ] }]);
     await render();
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="conversation-conversation"]')?.click());
@@ -349,7 +403,7 @@ describe('AgentChat machine-scoped conversation history', () => {
       messages: [expect.objectContaining({
         visuals: [expect.objectContaining({ id: 12 })],
         sources: [expect.objectContaining({ id: 21, pdfPage: 74 })],
-        annotations: [expect.objectContaining({ url: 'https://supplier.example/2544-9024' })],
+        annotations: [expect.objectContaining({ url: 'https://manufacturer.example/manuals/2544-9024' })],
         suggestions: ['Où est le relais ?'],
         more: { time: createdAtUtc },
       })],

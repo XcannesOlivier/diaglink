@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Azure.Core;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -69,6 +70,7 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.AreEqual(3, result.Usage.InputTokens);
         Assert.AreEqual(7, result.Usage.OutputTokens);
         using var request = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
+        Assert.AreEqual(8192, request.RootElement.GetProperty("max_tokens").GetInt32());
         Assert.IsTrue(request.RootElement.GetProperty("stream").GetBoolean());
     }
 
@@ -112,6 +114,13 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.IsFalse(visible.Contains("Je vérifie la page", StringComparison.Ordinal));
         Assert.IsFalse(visible.Contains("private reasoning", StringComparison.Ordinal));
         Assert.HasCount(2, fixture.Handler.Requests);
+        foreach (var capturedRequest in fixture.Handler.Requests)
+        {
+            using var body = JsonDocument.Parse(capturedRequest.Body);
+            Assert.AreEqual(8192, body.RootElement.GetProperty("max_tokens").GetInt32());
+            Assert.IsTrue(body.RootElement.GetProperty("stream").GetBoolean());
+        }
+
         using var secondRequest = JsonDocument.Parse(fixture.Handler.Requests[1].Body);
         var assistantBlocks = secondRequest.RootElement.GetProperty("messages")[1].GetProperty("content");
         Assert.AreEqual("Je vérifie la page...", assistantBlocks[0].GetProperty("text").GetString());
@@ -126,18 +135,18 @@ public sealed class ClaudeDirectChatServiceTests
         var fixture = Fixture.Create(
             PausedTextAndCitationResponse(
                 "msg-paused-1",
-                "Je cherche des fournisseurs...",
+                "Je recherche la documentation constructeur...",
                 "https://example.test/intermediate",
                 "Intermediate"),
             PausedTextAndCitationResponse(
                 "msg-paused-2",
-                "Je vérifie les offres...",
+                "Je vérifie la fiche technique...",
                 "https://example.test/also-intermediate",
                 "Also intermediate"),
             TextAndCitationResponse(
                 "Réponse finale compacte.",
                 "https://example.test/final",
-                "Final supplier"));
+                "Documentation constructeur finale"));
 
         var updates = new List<ClaudeDirectChatStreamUpdate>();
         await foreach (var update in fixture.Service.StreamAsync(Request()))
@@ -156,8 +165,8 @@ public sealed class ClaudeDirectChatServiceTests
 
         using var thirdRequest = JsonDocument.Parse(fixture.Handler.Requests[2].Body);
         var messages = thirdRequest.RootElement.GetProperty("messages");
-        Assert.AreEqual("Je cherche des fournisseurs...", messages[1].GetProperty("content")[0].GetProperty("text").GetString());
-        Assert.AreEqual("Je vérifie les offres...", messages[2].GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.AreEqual("Je recherche la documentation constructeur...", messages[1].GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.AreEqual("Je vérifie la fiche technique...", messages[2].GetProperty("content")[0].GetProperty("text").GetString());
     }
 
     [TestMethod]
@@ -508,9 +517,9 @@ public sealed class ClaudeDirectChatServiceTests
             "type":"web_search_tool_result",
             "tool_use_id":"web-1",
             "content":[
-              {"type":"web_search_result","url":"https://supplier.example/2544-9024","title":"Doosan 2544-9024","page_age":"October 2026"},
-              {"type":"web_search_result","url":"https://supplier.example/2544-9024","title":"Duplicate"},
-              {"type":"web_search_result","url":"ftp://invalid.example/part","title":"Invalid"}
+              {"type":"web_search_result","url":"https://manufacturer.example/manuals/2544-9024","title":"Doosan 2544-9024 technical manual","page_age":"October 2026"},
+              {"type":"web_search_result","url":"https://manufacturer.example/manuals/2544-9024","title":"Duplicate"},
+              {"type":"web_search_result","url":"ftp://invalid.example/manual","title":"Invalid"}
             ]
           }
         ]
@@ -519,36 +528,10 @@ public sealed class ClaudeDirectChatServiceTests
         var candidates = ClaudeDirectChatService.ExtractWebSearchCandidates(document.RootElement);
 
         Assert.HasCount(1, candidates);
-        Assert.AreEqual("https://supplier.example/2544-9024", candidates[0].Url);
-        Assert.AreEqual("Doosan 2544-9024", candidates[0].Title);
+        Assert.AreEqual("https://manufacturer.example/manuals/2544-9024", candidates[0].Url);
+        Assert.AreEqual("Doosan 2544-9024 technical manual", candidates[0].Title);
         Assert.AreEqual("October 2026", candidates[0].PageAge);
         Assert.IsEmpty(ClaudeDirectChatService.ExtractWebCitations(document.RootElement));
-    }
-
-    [TestMethod]
-    public void SelectWebSearchBudget_UsesOnlyCurrentQuestionFromConversationEnvelope()
-    {
-        var request = Request() with
-        {
-            Messages = [new("user", """
-                [DERNIERS ECHANGES]
-                Utilisateur: Trouve un fournisseur pour cette pièce.
-                [/DERNIERS ECHANGES]
-
-                [NOUVELLE QUESTION]
-                Comment contrôler la pression hydraulique ?
-                [/NOUVELLE QUESTION]
-                """)]
-        };
-        var options = new ClaudeDirectWebSearchOptions { DiagnosticMaxUses = 2, PartsMaxUses = 6 };
-
-        Assert.AreEqual(2, ClaudeDirectChatService.SelectWebSearchBudget(request, options));
-
-        request = request with
-        {
-            Messages = [new("user", "Trouve un fournisseur pour la référence 2544-9024")]
-        };
-        Assert.AreEqual(6, ClaudeDirectChatService.SelectWebSearchBudget(request, options));
     }
 
     [TestMethod]
@@ -668,51 +651,6 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    public async Task CompleteAsync_AppendsActiveCommercialPolicyOnceAfterMachineContext()
-    {
-        const string instructions = "Instruction commerciale unique.";
-        var fixture = Fixture.Create(DirectResponse("ok"));
-
-        await fixture.Service.CompleteAsync(Request(new(true, instructions)));
-
-        using var body = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
-        var systemPrompt = body.RootElement.GetProperty("system")[0].GetProperty("text").GetString()!;
-        const string technicalPrompt = "Use File Search before inspecting technical images.";
-        const string machineHeader = "Contexte machine fourni par le serveur :";
-        const string policyHeader = "Politique commerciale active fournie par le serveur :";
-        Assert.IsTrue(systemPrompt.StartsWith(technicalPrompt, StringComparison.Ordinal));
-        Assert.IsTrue(systemPrompt.IndexOf(machineHeader, StringComparison.Ordinal) >
-            systemPrompt.IndexOf(technicalPrompt, StringComparison.Ordinal));
-        Assert.IsTrue(systemPrompt.IndexOf(policyHeader, StringComparison.Ordinal) >
-            systemPrompt.IndexOf(machineHeader, StringComparison.Ordinal));
-        Assert.AreEqual(1, Regex.Matches(systemPrompt, Regex.Escape(policyHeader)).Count);
-        Assert.AreEqual(1, Regex.Matches(systemPrompt, Regex.Escape(instructions)).Count);
-        Assert.AreEqual(
-            technicalPrompt + "\n\n" +
-            machineHeader + "\nMachine DX10z; use the connected technical manual.\n\n" +
-            policyHeader + "\n" + instructions,
-            systemPrompt);
-    }
-
-    [TestMethod]
-    [DataRow(false, "Instruction configurée")]
-    [DataRow(true, "")]
-    [DataRow(true, "   ")]
-    public async Task CompleteAsync_OmitsInactiveOrEmptyCommercialPolicy(
-        bool enabled,
-        string instructions)
-    {
-        var fixture = Fixture.Create(DirectResponse("ok"));
-
-        await fixture.Service.CompleteAsync(Request(new(enabled, instructions)));
-
-        var requestBody = fixture.Handler.Requests.Single().Body;
-        Assert.IsFalse(requestBody.Contains(
-            "Politique commerciale active fournie par le serveur :",
-            StringComparison.Ordinal));
-    }
-
-    [TestMethod]
     public async Task CompleteAsync_CachingDoesNotChangeMcpOrLocalToolDefinitions()
     {
         var fixture = Fixture.Create(DirectResponse("ok"));
@@ -798,18 +736,32 @@ public sealed class ClaudeDirectChatServiceTests
     {
         var options = new ClaudeDirectChatOptions();
 
+        Assert.AreEqual("claude-sonnet-5-5", options.Deployment);
         Assert.IsFalse(options.WebSearch.Enabled);
-        Assert.AreEqual(2, options.WebSearch.DiagnosticMaxUses);
-        Assert.AreEqual(6, options.WebSearch.PartsMaxUses);
+        Assert.AreEqual(3, options.WebSearch.MaxUses);
         Assert.AreEqual(8, options.MaxMessageCalls);
     }
 
     [TestMethod]
-    [DataRow(-1, 3)]
-    [DataRow(2, -1)]
-    public async Task CompleteAsync_RejectsNegativeWebSearchLimits(
-        int diagnosticMaxUses,
-        int partsMaxUses)
+    public void AppSettings_ConfiguresSingleThreeRequestWebSearchBudgetWithoutCommercialPolicy()
+    {
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: false)
+            .Build();
+        var options = configuration
+            .GetSection(ClaudeDirectChatOptions.SectionName)
+            .Get<ClaudeDirectChatOptions>();
+
+        Assert.IsNotNull(options);
+        Assert.AreEqual("claude-sonnet-5-5", options.Deployment);
+        Assert.IsTrue(options.WebSearch.Enabled);
+        Assert.AreEqual(3, options.WebSearch.MaxUses);
+        Assert.IsFalse(configuration.GetSection("CommercialPolicy").Exists());
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_RejectsNegativeWebSearchLimit()
     {
         var fixture = Fixture.CreateWithOptions(new ClaudeDirectChatOptions
         {
@@ -820,8 +772,7 @@ public sealed class ClaudeDirectChatServiceTests
             WebSearch = new ClaudeDirectWebSearchOptions
             {
                 Enabled = false,
-                DiagnosticMaxUses = diagnosticMaxUses,
-                PartsMaxUses = partsMaxUses
+                MaxUses = -1
             }
         }, DirectResponse("must not be used"));
 
@@ -844,8 +795,7 @@ public sealed class ClaudeDirectChatServiceTests
             WebSearch = new ClaudeDirectWebSearchOptions
             {
                 Enabled = false,
-                DiagnosticMaxUses = 0,
-                PartsMaxUses = 0
+                MaxUses = 0
             }
         }, DirectResponse("ok"));
 
@@ -859,11 +809,7 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    [DataRow(false, 2)]
-    [DataRow(true, 6)]
-    public async Task CompleteAsync_EnabledWebSearchSelectsRequestProfileWithoutChangingExistingTools(
-        bool partsRequest,
-        int expectedMaxUses)
+    public async Task CompleteAsync_EnabledWebSearchUsesConfiguredBudgetWithoutChangingExistingTools()
     {
         var disabledFixture = Fixture.Create(DirectResponse("disabled"));
         var enabledFixture = Fixture.CreateWithOptions(new ClaudeDirectChatOptions
@@ -875,16 +821,15 @@ public sealed class ClaudeDirectChatServiceTests
             WebSearch = new ClaudeDirectWebSearchOptions
             {
                 Enabled = true,
-                DiagnosticMaxUses = 2,
-                PartsMaxUses = 6
+                MaxUses = 3
             }
         }, DirectResponse("enabled"));
 
         await disabledFixture.Service.CompleteAsync(Request());
-        var request = partsRequest
-            ? Request() with { Messages = [new("user", "Trouve un fournisseur et un lien d'achat pour la référence 2544-9024.")] }
-            : Request();
-        await enabledFixture.Service.CompleteAsync(request);
+        await enabledFixture.Service.CompleteAsync(Request() with
+        {
+            Messages = [new("user", "Recherche la documentation technique de la référence 2544-9024.")]
+        });
 
         using var disabledBody = JsonDocument.Parse(disabledFixture.Handler.Requests.Single().Body);
         using var enabledBody = JsonDocument.Parse(enabledFixture.Handler.Requests.Single().Body);
@@ -902,7 +847,7 @@ public sealed class ClaudeDirectChatServiceTests
             webSearch.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.AreEqual("web_search_20250305", webSearch.GetProperty("type").GetString());
         Assert.AreEqual("web_search", webSearch.GetProperty("name").GetString());
-        Assert.AreEqual(expectedMaxUses, webSearch.GetProperty("max_uses").GetInt32());
+        Assert.AreEqual(3, webSearch.GetProperty("max_uses").GetInt32());
         var location = webSearch.GetProperty("user_location");
         Assert.AreEqual("approximate", location.GetProperty("type").GetString());
         Assert.AreEqual("FR", location.GetProperty("country").GetString());
@@ -1821,8 +1766,7 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.IsTrue(result.Errors.Any(error => error.Code == "tool_loop_limit"));
     }
 
-    private static ClaudeDirectChatRequest Request(
-        CommercialPolicySnapshot? commercialPolicy = null) => new(
+    private static ClaudeDirectChatRequest Request() => new(
         new(
             ProjectEndpoint,
             "dx10z-toolbox",
@@ -1832,8 +1776,7 @@ public sealed class ClaudeDirectChatServiceTests
             "company/machine",
             "Machine DX10z; use the connected technical manual."),
         "Use File Search before inspecting technical images.",
-        [new("user", "How do I replace the hydraulic filter?")],
-        commercialPolicy ?? new(false, string.Empty));
+        [new("user", "How do I replace the hydraulic filter?")]);
 
     private static HttpResponseMessage DirectResponse(string text, long inputTokens = 1, long outputTokens = 1) =>
         JsonResponse(JsonSerializer.Serialize(new
@@ -2125,8 +2068,7 @@ public sealed class ClaudeDirectChatServiceTests
         WebSearch = new ClaudeDirectWebSearchOptions
         {
             Enabled = true,
-            DiagnosticMaxUses = 3,
-            PartsMaxUses = 3
+            MaxUses = 3
         }
     };
 

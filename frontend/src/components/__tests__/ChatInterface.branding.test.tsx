@@ -161,4 +161,86 @@ describe('ChatInterface branding', () => {
 
     expect(container.querySelector<HTMLElement>('[role="alert"]')?.dataset.intent).toBe('error');
   });
+
+  it('never exposes a raw technical original error when the public message is invalid', async () => {
+    const technicalMessage = 'Internal stream failed for request trace-private-42';
+    await act(async () => root.render(
+      <ChatInterface
+        messages={[]}
+        status="error"
+        error={{
+          code: 'STREAM',
+          message: undefined as unknown as string,
+          recoverable: true,
+          originalError: new Error(technicalMessage),
+        }}
+        onSendMessage={vi.fn()}
+        disabled={false}
+      />,
+    ));
+
+    const alertText = container.querySelector<HTMLElement>('[role="alert"]')?.textContent;
+    expect(alertText).toContain('Une erreur inattendue est survenue. Veuillez réessayer.');
+    expect(alertText).not.toContain(technicalMessage);
+  });
+
+  it('announces completion only after a normally completed stream', async () => {
+    const messages = [{ id: 'assistant-1', role: 'assistant' as const, content: 'Response' }];
+
+    await act(async () => root.render(
+      <ChatInterface
+        messages={messages}
+        status="streaming"
+        error={null}
+        streamingMessageId="assistant-1"
+        onSendMessage={vi.fn()}
+        disabled={false}
+      />,
+    ));
+    expect(container.querySelector<HTMLElement>('[role="status"]')?.textContent)
+      .toContain("L'assistant répond");
+
+    await act(async () => root.render(
+      <ChatInterface
+        messages={messages}
+        status="idle"
+        error={null}
+        lastStreamEndReason="completed"
+        onSendMessage={vi.fn()}
+        disabled={false}
+      />,
+    ));
+
+    expect(container.querySelector<HTMLElement>('[role="status"]')?.textContent)
+      .toContain('Réponse terminée');
+  });
+
+  it('does not announce completion after a voluntary cancellation', async () => {
+    const messages = [{ id: 'assistant-1', role: 'assistant' as const, content: 'Partial response' }];
+
+    await act(async () => root.render(
+      <ChatInterface
+        messages={messages}
+        status="streaming"
+        error={null}
+        streamingMessageId="assistant-1"
+        onSendMessage={vi.fn()}
+        disabled={false}
+      />,
+    ));
+    await act(async () => root.render(
+      <ChatInterface
+        messages={messages}
+        status="idle"
+        error={null}
+        lastStreamEndReason="cancelled"
+        onSendMessage={vi.fn()}
+        disabled={false}
+      />,
+    ));
+
+    const announcement = container.querySelector<HTMLElement>('[role="status"]')?.textContent ?? '';
+    expect(announcement).not.toContain('Réponse terminée');
+    expect(announcement).not.toContain("L'assistant répond");
+  });
 });

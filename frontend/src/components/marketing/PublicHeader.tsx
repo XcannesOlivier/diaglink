@@ -17,7 +17,8 @@ export function PublicHeader({ loginTarget, landingPath = '' }: { loginTarget: s
   return (
     <header className={styles.header}>
       <div className={styles.headerInner}>
-        <a href="#top" className={styles.brand} aria-label="DiagLink — accueil"><DiagLinkLogo /></a>
+        <Link to="/" className={styles.brand} aria-label="DiagLink — accueil"
+          onClick={() => window.scrollTo({ top: 0, left: 0, behavior: 'auto' })}><DiagLinkLogo /></Link>
         <nav className={styles.desktopNav} aria-label="Navigation principale">
           {links.map(([label, href]) => <a key={href} href={landingHref(href)}>{label}</a>)}
         </nav>

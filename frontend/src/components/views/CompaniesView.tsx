@@ -22,6 +22,7 @@ import { getApiAuthHeaders } from '../../utils/apiAuth';
 import type { CompanyUserDto } from '../../types/company';
 import type { CompanyDto } from '../../types/company';
 import { DialogCloseButton } from '../core/DialogCloseButton';
+import { companyStatusLabel } from '../../utils/statusLabels';
 
 const useStyles = makeStyles({
   list: {
@@ -303,8 +304,9 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({ getAccessToken, on
         selectedFiles.forEach(f => formData.append('files', f));
 
         const { headers } = await getApiAuthHeaders(getAccessToken);
+        const apiUrl = import.meta.env.VITE_API_URL || '/api';
 
-        const resp = await fetch('/api/files/upload', {
+        const resp = await fetch(`${apiUrl}/files/upload`, {
           method: 'POST',
           body: formData,
           headers,
@@ -313,6 +315,10 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({ getAccessToken, on
         if (!resp.ok) {
           const txt = await resp.text();
           throw new Error(`Upload failed: ${resp.status} ${txt}`);
+        }
+
+        if (resp.headers.get('content-type')?.toLowerCase().includes('text/html')) {
+          throw new Error(`Upload failed: ${resp.status} unexpected HTML response`);
         }
       }
 
@@ -375,10 +381,15 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({ getAccessToken, on
                 <div
                   role="button"
                   tabIndex={0}
+                  aria-expanded={selectedCompany?.id === company.id}
+                  aria-controls={`company-details-${company.id}`}
                   className={`${styles.row} ${selectedCompany?.id === company.id ? styles.rowSelected : ''}`}
                   onClick={() => setSelectedCompany(company)}
                   onKeyDown={event => {
-                    if (event.key === 'Enter') setSelectedCompany(company);
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedCompany(company);
+                    }
                   }}
                 >
                   <div className={styles.mobileCompanyInfo}>
@@ -388,12 +399,12 @@ export const CompaniesView: React.FC<CompaniesViewProps> = ({ getAccessToken, on
                   {loading ? <Spinner className={styles.desktopOnly} size="tiny" /> : <Text className={styles.desktopOnly}>{adminName}</Text>}
                   <Text className={styles.desktopOnly}>{adminEmailInline ?? '—'}</Text>
                   <Text className={styles.desktopOnly}>{adminPhone}</Text>
-                  <Text className={styles.status}>{company.status}</Text>
+                  <Text className={styles.status}>{companyStatusLabel(company.status)}</Text>
                 </div>
                 {selectedCompany?.id === company.id && (
-                  <div className={styles.detailPanel}>
+                  <div id={`company-details-${company.id}`} className={styles.detailPanel}>
                     <Text weight="semibold">{selectedCompany.name}</Text>
-                    <Text>Statut : {selectedCompany.status}</Text>
+                    <Text>Statut : {companyStatusLabel(selectedCompany.status)}</Text>
                     <StripeCompanyPanel key={selectedCompany.id} companyId={selectedCompany.id}
                       getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} />
                     <Text weight="semibold">Administrateurs</Text>

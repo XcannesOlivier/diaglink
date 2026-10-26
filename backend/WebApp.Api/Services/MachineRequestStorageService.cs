@@ -121,7 +121,8 @@ public sealed class MachineRequestStorageService
                 RequestKind: requestKind,
                 CompanyId: companyId,
                 RequestedByUserId: requestedByUserId,
-                TargetMachineId: targetMachineId);
+                TargetMachineId: targetMachineId,
+                TermsAcceptance: draft.TermsAcceptance);
 
             await SaveRecordAsync(record, overwrite: false, cancellationToken);
             return record;

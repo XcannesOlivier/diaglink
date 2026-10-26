@@ -8,9 +8,9 @@ import styles from './CompanyFinancePanel.module.css';
 import {getMachines} from '../../services/machineService';
 import {usagePeriods,usageWindow,type UsagePeriod} from '../../utils/aiUsage';
 import {MachineSubscriptionDialog} from './MachineSubscriptionDialog';
+import {subscriptionStatusLabel} from '../../utils/statusLabels';
 
 const euro=(n:number)=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',maximumFractionDigits:2}).format(n);
-const labels:Record<string,string>={active:'Actif',past_due:'Paiement en retard',unpaid:'Impayé',canceled:'Résilié',incomplete:'Paiement initial en attente',incomplete_expired:'Paiement initial expiré',trialing:'Abonnement en cours d’activation',paused:'Suspendu'};
 type Pending={requestId:string;amount:number;currency:'EUR'};
 export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionExpired}:{companyId:string;machine?:{id:string;name:string};getAccessToken:()=>Promise<string|null>;onDiagLinkSessionExpired?:()=>void}) {
   const [data,setData]=useState<FinanceSummary|null>(null);
@@ -92,7 +92,7 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
       {data.creditStatus==='AiCreditExhausted'&&<div role="alert" className={styles.alert}>Crédit IA épuisé. Ajoutez du crédit supplémentaire pour continuer. Votre historique reste accessible.</div>}
       <div className={`${styles.cards} ${styles.companyCards}`}>
         <details className={`${styles.card} ${styles.subscription} ${styles.companySubscription}`} aria-label="Abonnement">
-        <summary className={`${styles.cardHeading} ${styles.subscriptionSummary}`}><div className={styles.companySectionHeading}><h2>Abonnement</h2><span className={styles.note}>Statut et facturation de vos machines actives.</span></div><span className={data.subscriptionStatus==='past_due'||data.subscriptionStatus==='unpaid'?styles.warning:`${styles.badge}${data.subscriptionStatus==='trialing'?` ${styles.activationBadge}`:''}`}>{data.subscriptionStatus?(labels[data.subscriptionStatus]??'À vérifier'):'Aucun abonnement'}</span></summary>
+        <summary className={`${styles.cardHeading} ${styles.subscriptionSummary}`}><div className={styles.companySectionHeading}><h2>Abonnement</h2><span className={styles.note}>Statut et facturation de vos machines actives.</span></div><span className={data.subscriptionStatus==='past_due'||data.subscriptionStatus==='unpaid'?styles.warning:`${styles.badge}${data.subscriptionStatus==='trialing'?` ${styles.activationBadge}`:''}`}>{data.subscriptionStatus?subscriptionStatusLabel(data.subscriptionStatus):'Aucun abonnement'}</span></summary>
         <dl className={styles.details}>
         <dt>Prochaine échéance</dt><dd>{data.nextDueUtc&&!data.cancelAtPeriodEnd&&data.subscriptionStatus!=='canceled'?new Date(data.nextDueUtc).toLocaleString('fr-FR'):'—'}</dd>
         <dt>Nombre total de machines</dt><dd>{machines?.length??'Indisponible'}</dd>

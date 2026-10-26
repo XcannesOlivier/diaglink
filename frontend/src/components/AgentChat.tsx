@@ -231,7 +231,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           type: 'CHAT_ERROR',
           error: {
             code: 'API',
-            message: `Impossible de charger l'historique des conversations : ${error instanceof Error ? error.message : 'erreur inconnue'}`,
+            message: "Impossible de charger l'historique des conversations. Veuillez réessayer.",
             recoverable: true,
             action: { label: 'Réessayer', handler: () => handleToggleSidebar() },
           },
@@ -277,6 +277,8 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     conversationMessagesRequest.current = request;
     try {
       chatService.cancelStream();
+      // A conversation switch takes precedence over a pending user-requested regeneration.
+      dispatch({ type: 'CHAT_CONSUMED_REGENERATE' });
       const messages = await chatService.getConversationMessages(conversationId, request.controller.signal);
       if (request.controller.signal.aborted || conversationMessagesRequest.current?.generation !== request.generation) return;
       const chatItems: IChatItem[] = messages
@@ -373,6 +375,8 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           status={chat.status}
           error={chat.error}
           streamingMessageId={chat.streamingMessageId}
+          lastStreamEndReason={chat.lastStreamEndReason}
+          currentConversationId={chat.currentConversationId}
           recoveredInput={chat.recoveredInput}
           recoveredAttachments={chat.recoveredAttachments}
           onSendMessage={handleSendMessage}

@@ -47,7 +47,7 @@ param customDomainCertificateName string
 param publicCustomDomainName string
 @description('Name of the existing Container Apps managed certificate for the public domain.')
 param publicCustomDomainCertificateName string = ''
-param claudeDirectDeployment string = 'claude-sonnet-5'
+param claudeDirectDeployment string = 'claude-sonnet-5-5'
 param claudeFileSearchDiagnosticsEnabled bool = false
 @description('Existing non-secret deployment identities used to resolve AI pricing.')
 param aiPricingIdentityDeployments array

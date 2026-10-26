@@ -20,6 +20,10 @@ import {
 } from '@fluentui/react-icons';
 import type { ConversationSummary } from '../types/appState';
 
+// Product rule: conversation history is retained and cannot be deleted by users.
+// Keep the existing deletion plumbing dormant until it is reviewed separately.
+const isConversationDeletionVisible = false;
+
 interface ConversationSidebarProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -298,15 +302,17 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                       {formatDate(conversation.lastActivityAt)}
                     </Text>
                   </div>
-                  <Button
-                    appearance="subtle"
-                    icon={<Delete24Regular />}
-                    size="small"
-                    className={styles.deleteButton}
-                    data-company-accent-exempt
-                    aria-label={`Supprimer la conversation : ${conversation.title || 'Sans titre'}`}
-                    onClick={(e) => handleDelete(e, conversation.id)}
-                  />
+                  {isConversationDeletionVisible && (
+                    <Button
+                      appearance="subtle"
+                      icon={<Delete24Regular />}
+                      size="small"
+                      className={styles.deleteButton}
+                      data-company-accent-exempt
+                      aria-label={`Supprimer la conversation : ${conversation.title || 'Sans titre'}`}
+                      onClick={(e) => handleDelete(e, conversation.id)}
+                    />
+                  )}
                 </div>
               ))}
             </div>

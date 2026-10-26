@@ -203,10 +203,10 @@ export function AdditionalDocumentsRequestDialog({ open, onOpenChange, machine, 
         {!recoveredRequestId && <>
         <Field label="Documents PDF" required><div className={styles.dropzone} role="button" tabIndex={0}
           aria-disabled={locked} onClick={() => !locked && inputRef.current?.click()}
-          onKeyDown={event => event.key === 'Enter' && !locked && inputRef.current?.click()}
+          onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (!locked) inputRef.current?.click(); } }}
           onDragOver={event => event.preventDefault()} onDrop={drop}>
           <ArrowUpload24Regular /><Text block weight="semibold">Déposez vos PDF ici ou cliquez pour les sélectionner</Text>
-          <Text block size={200}>10 fichiers maximum, 50 Mo par fichier et 200 Mo au total</Text>
+          <Text block size={200}>10 fichiers maximum, 200 Mio par fichier et 200 Mio au total</Text>
         </div><input ref={inputRef} className={styles.hidden} type="file" accept=".pdf,application/pdf" multiple disabled={locked} onChange={selectFiles} /></Field>
         {reading && <Spinner size="tiny" label="Lecture des PDF" />}
         {pdfs.length > 0 && <div className={styles.files}>{pdfs.map(pdf => <div className={styles.file} key={pdf.id}>

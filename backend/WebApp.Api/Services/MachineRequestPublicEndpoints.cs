@@ -8,6 +8,7 @@ namespace WebApp.Api.Services;
 public static partial class MachineRequestPublicEndpoints
 {
     public const string Route = "/api/public/machine-requests";
+    public const string CurrentTermsVersion = "2026-09";
 
     public static void MapPublicMachineRequests(this WebApplication app)
     {
@@ -23,6 +24,7 @@ public static partial class MachineRequestPublicEndpoints
         [FromServices] MachineRequestStorageService storageService,
         MachineRequestPaymentService paymentService,
         IPdfPageCounter pageCounter,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken,
         [FromServices] RequestReceivedNotificationService? notifications = null)
     {
@@ -94,6 +96,15 @@ public static partial class MachineRequestPublicEndpoints
             }
         }
 
+        if (!bool.TryParse(form["termsAccepted"].FirstOrDefault(), out var termsAccepted) || !termsAccepted)
+            return ValidationError("termsAccepted", "Vous devez accepter les Conditions générales de service.");
+        if (!string.Equals(Trim(form["termsVersion"].FirstOrDefault()), CurrentTermsVersion, StringComparison.Ordinal))
+            return ValidationError("termsVersion", "La version des Conditions générales de service n’est plus valide. Rechargez la page.");
+        var termsAcceptance = new MachineRequestTermsAcceptance(
+            Accepted: true,
+            AcceptedAtUtc: timeProvider.GetUtcNow(),
+            Version: CurrentTermsVersion);
+
         var uploads = new List<MachineRequestDocumentUpload>(files.Count);
         try
         {
@@ -137,7 +148,8 @@ public static partial class MachineRequestPublicEndpoints
 
             var draft = new MachineRequestDraft(
                 new MachineRequestClient(values["firstName"]!, values["lastName"]!, values["company"]!, values["email"]!, values["phone"]!),
-                new MachineRequestMachine(values["machineName"]!, values["manufacturer"]!, values["model"]!, values["serialNumber"], values["description"]));
+                new MachineRequestMachine(values["machineName"]!, values["manufacturer"]!, values["model"]!, values["serialNumber"], values["description"]),
+                termsAcceptance);
             MachineRequestRecord record;
             try { record = await storageService.CreateAsync(draft, uploads, requestId, paymentReference, cancellationToken); }
             catch

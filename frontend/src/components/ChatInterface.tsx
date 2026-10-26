@@ -24,6 +24,8 @@ interface ChatInterfaceProps {
   status: AppState['chat']['status'];
   error: AppError | null;
   streamingMessageId?: string;
+  lastStreamEndReason?: AppState['chat']['lastStreamEndReason'];
+  currentConversationId?: string | null;
   recoveredInput?: string;
   recoveredAttachments?: import('../types/chat').IFileAttachment[];
   pendingMessages?: Array<{ text: string; files?: File[] }>;
@@ -54,7 +56,7 @@ interface ChatInterfaceProps {
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
-  const { messages, status, error, streamingMessageId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onLoadTechnicalVisual, onLoadTechnicalSource, hasMessages, disabled, agentName, agentDescription, starterAccessory, onChangeMachine } = props;
+  const { messages, status, error, streamingMessageId, lastStreamEndReason, currentConversationId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onLoadTechnicalVisual, onLoadTechnicalSource, hasMessages, disabled, agentName, agentDescription, starterAccessory, onChangeMachine } = props;
   const deferredMessages = useDeferredValue(messages);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesWrapperRef = useRef<HTMLDivElement>(null);
@@ -190,12 +192,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
       } else {
         setLiveRegionMessage("L'assistant répond");
       }
-    } else if (status === 'idle' && messages.length > 0 && messages[messages.length - 1].role === 'assistant') {
+    } else if (status === 'idle' && lastStreamEndReason === 'completed') {
       setLiveRegionMessage('Réponse terminée');
       const timer = setTimeout(() => setLiveRegionMessage(''), 1000);
       return () => clearTimeout(timer);
+    } else {
+      setLiveRegionMessage('');
     }
-  }, [isStreaming, status, messages, streamingMessageId]);
+  }, [isStreaming, status, messages, streamingMessageId, lastStreamEndReason]);
 
   const handleSendMessage = (messageText: string, files?: File[]) => {
     if (!messageText.trim() || disabled) return;
@@ -363,10 +367,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
         {error && (
           <div className={styles.errorWrapper}>
             <ErrorMessage
-              message={typeof error.message === 'string' ? error.message : 
-                      typeof error === 'string' ? error :
-                      error.originalError?.message || 
-                      'Une erreur inattendue est survenue. Veuillez réessayer.'}
+              message={typeof error.message === 'string' && error.message.trim()
+                ? error.message
+                : 'Une erreur inattendue est survenue. Veuillez réessayer.'}
               intent={error.code === 'AiCreditExhausted' ? 'warning' : 'error'}
               recoverable={error.recoverable}
               onRetry={error.action?.handler}
@@ -394,6 +397,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
           onCancelEdit={onCancelEdit}
           recoveredInput={recoveredInput}
           recoveredAttachments={recoveredAttachments}
+          currentConversationId={currentConversationId}
           onRecoveredInputConsumed={onRecoveredInputConsumed}
           pendingMessages={pendingMessages}
           onDequeueMessage={onDequeueMessage}

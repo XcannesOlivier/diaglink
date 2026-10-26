@@ -5,7 +5,7 @@ import {
   type ImperativeControlPluginRef,
 } from '@fluentui-copilot/react-copilot';
 import { Button, Tooltip, Toast, ToastTitle, Toaster, useId, useToastController, Text, makeStyles, tokens } from '@fluentui/react-components';
-import { Attach24Regular, History24Regular, Navigation24Regular, ChatAdd24Regular } from '@fluentui/react-icons';
+import { Attach24Regular, History24Regular, Navigation24Regular, ChatAdd24Regular, Stop24Regular } from '@fluentui/react-icons';
 import { FilePreview } from './FilePreview';
 import { MachineDocuments } from './MachineDocuments';
 import { VoiceInput } from './VoiceInput';
@@ -56,6 +56,7 @@ interface ChatInputProps {
   onCancelEdit?: () => void;
   recoveredInput?: string;
   recoveredAttachments?: import('../../types/chat').IFileAttachment[];
+  currentConversationId?: string | null;
   onRecoveredInputConsumed?: () => void;
   pendingMessages?: Array<{ text: string; files?: File[] }>;
   onDequeueMessage?: (index: number) => void;
@@ -106,6 +107,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onCancelEdit,
   recoveredInput,
   recoveredAttachments,
+  currentConversationId = null,
   onRecoveredInputConsumed,
   pendingMessages = [],
   onDequeueMessage,
@@ -119,6 +121,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
   const processedDroppedFilesRef = useRef<File[] | undefined>(undefined);
+  const recoveredDraftRef = useRef<{ conversationId: string | null } | null>(null);
   
   const toasterId = useId("toaster");
   const { dispatchToast } = useToastController(toasterId);
@@ -162,28 +165,59 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   }, [hasMessages, disabled]);
 
   useEffect(() => {
-    if (recoveredInput) {
+    if (recoveredInput !== undefined) {
+      recoveredDraftRef.current = { conversationId: currentConversationId };
       setInputText(recoveredInput);
       controlRef.current?.setInputText(recoveredInput);
-      // Restore attachments by converting dataURIs back to Files
-      if (recoveredAttachments?.length) {
-        for (const att of recoveredAttachments) {
-          if (att.dataUri) {
+
+      let active = true;
+      let focusTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const restoreRecoveredInput = async () => {
+        const restoredFiles: File[] = [];
+
+        // Restore sequentially so several photos keep their original order.
+        for (const attachment of recoveredAttachments ?? []) {
+          if (attachment.dataUri) {
             try {
-              const res = fetch(att.dataUri);
-              res.then(r => r.blob()).then(blob => {
-                const file = new File([blob], att.fileName, { type: blob.type });
-                setSelectedFiles(prev => [...prev, file]);
-              });
-            } catch { /* skip unrecoverable attachments */ }
+              const response = await fetch(attachment.dataUri);
+              const blob = await response.blob();
+              restoredFiles.push(new File([blob], attachment.fileName, { type: blob.type }));
+            } catch {
+              // Keep the text and any other recoverable photos if one data URI is unusable.
+            }
           }
         }
-      }
-      onRecoveredInputConsumed?.();
-      const timer = setTimeout(() => focusInput(inputContainerRef), 50);
-      return () => clearTimeout(timer);
+
+        if (!active) {
+          return;
+        }
+
+        setSelectedFiles(restoredFiles);
+        onRecoveredInputConsumed?.();
+        focusTimer = setTimeout(() => focusInput(inputContainerRef), 50);
+      };
+
+      void restoreRecoveredInput();
+
+      return () => {
+        active = false;
+        if (focusTimer) {
+          clearTimeout(focusTimer);
+        }
+      };
     }
-  }, [recoveredInput, recoveredAttachments, onRecoveredInputConsumed]);
+  }, [recoveredInput, recoveredAttachments, onRecoveredInputConsumed, currentConversationId]);
+
+  useEffect(() => {
+    const recoveredDraft = recoveredDraftRef.current;
+    if (recoveredDraft && recoveredDraft.conversationId !== currentConversationId) {
+      recoveredDraftRef.current = null;
+      setInputText('');
+      controlRef.current?.setInputText('');
+      setSelectedFiles([]);
+    }
+  }, [currentConversationId]);
 
   // Clear input when edit is cancelled
   const prevEditingRef = useRef(isEditing);
@@ -197,6 +231,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   }, [isEditing]);
 
   const addFiles = useCallback((files: File[]) => {
+    recoveredDraftRef.current = null;
     const countValidation = validateFileCount(
       files,
       selectedFiles.length,
@@ -280,6 +315,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         return;
       }
       onSubmit(inputText.trim(), selectedFiles.length > 0 ? selectedFiles : undefined);
+      recoveredDraftRef.current = null;
       setInputText("");
       setSelectedFiles([]);
       controlRef.current?.setInputText("");
@@ -307,6 +343,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleRemoveFile = (index: number) => {
+    recoveredDraftRef.current = null;
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
@@ -332,7 +369,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    // Escape to cancel streaming or exit edit mode (no visible cancel button anymore)
+    // Escape to cancel streaming or exit edit mode
     if (event.key === 'Escape') {
       if (isEditing) {
         event.preventDefault();
@@ -345,6 +382,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleVoiceTranscript = (transcript: string) => {
+    recoveredDraftRef.current = null;
     const newText = inputText ? `${inputText} ${transcript}` : transcript;
     setInputText(newText);
     controlRef.current?.setInputText(newText);
@@ -367,7 +405,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           charactersRemainingMessage={() => ``}
           disabled={disabled}
           history={true}
-          onChange={(_, data) => setInputText(data.value)}
+          onChange={(_, data) => {
+            recoveredDraftRef.current = null;
+            setInputText(data.value);
+          }}
           onSubmit={handleSubmit}
           placeholderValue={placeholder}
         >
@@ -401,6 +442,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 disabled={disabled}
               />
             </div>
+            {isStreaming && onCancelStream && (
+              <Tooltip content="Arrêter la réponse" relationship="label" withArrow>
+                <Button
+                  appearance="subtle"
+                  icon={<Stop24Regular />}
+                  onClick={handleCancelStream}
+                  aria-label="Arrêter la réponse"
+                  className={styles.cancelButton}
+                />
+              </Tooltip>
+            )}
             {(onNewChat || onToggleSidebar) && (
               <div className={`${styles.actionGroup} ${styles.conversationActions}`} role="group" aria-label="Conversations">
                 {onNewChat && (

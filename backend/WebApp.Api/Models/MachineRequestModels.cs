@@ -74,11 +74,18 @@ public sealed record MachineRequestRecord(
     Guid? TargetMachineId = null,
     bool IsArchived = false,
     DateTimeOffset? ArchivedAtUtc = null,
-    Guid? ArchivedByUserId = null);
+    Guid? ArchivedByUserId = null,
+    MachineRequestTermsAcceptance? TermsAcceptance = null);
 
 public sealed record MachineRequestDraft(
     MachineRequestClient Client,
-    MachineRequestMachine Machine);
+    MachineRequestMachine Machine,
+    MachineRequestTermsAcceptance? TermsAcceptance = null);
+
+public sealed record MachineRequestTermsAcceptance(
+    bool Accepted,
+    DateTimeOffset AcceptedAtUtc,
+    string Version);
 
 public sealed record MachineRequestDocumentUpload(
     string OriginalName,

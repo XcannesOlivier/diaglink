@@ -119,13 +119,22 @@ describe('StripeCompanyPanel', () => {
   });
 
   it('laisse uniquement les détails techniques et réparations repliés par défaut', async () => {
-    request.mockResolvedValue({ kind: 'success', data: { ...data, stripeCustomerId: 'cus_test' } });
+    request.mockResolvedValue({ kind: 'success', data: { ...data, stripeCustomerId: 'cus_test', subscriptionStatus: 'active', latestInvoiceId: 'in_test', latestInvoiceStatus: 'paid' } });
     await render();
     const sections = [...container.querySelectorAll('details')].filter(details => ['Détails techniques', 'Outils de réparation'].includes(details.querySelector('summary')?.textContent ?? ''));
     expect(sections).toHaveLength(2);
     expect(sections.every(details => !details.open)).toBe(true);
     expect(sections[1].classList.contains(styles.repairTools)).toBe(false);
     expect(container.textContent).toContain('cus_test');
+    expect(container.textContent).toContain('Actif (active)');
+    expect(container.textContent).toContain('Payée (paid)');
+  });
+
+  it('affiche un secours explicite pour les statuts Stripe inconnus', async () => {
+    request.mockResolvedValue({ kind: 'success', data: { ...data, subscriptionStatus: 'future_status', latestInvoiceStatus: 'future_invoice_status' } });
+    await render();
+    expect(container.textContent).toContain('Statut inconnu (future_status)');
+    expect(container.textContent).toContain('Statut inconnu (future_invoice_status)');
   });
 
   it('rattache les ajouts à leur machine et garde les recharges globales', async () => {

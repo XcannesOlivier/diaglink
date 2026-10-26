@@ -20,6 +20,9 @@ namespace WebApp.Api.Tests;
 [TestClass]
 public class MachineRequestPublicEndpointsTests
 {
+    private static readonly DateTimeOffset TermsAcceptedAt =
+        new(2026, 10, 25, 9, 30, 0, TimeSpan.Zero);
+
     [TestMethod]
     public async Task CreateAsync_AcceptsMultiplePdfFilesAndReturnsNoBlobDetails()
     {
@@ -69,6 +72,50 @@ public class MachineRequestPublicEndpointsTests
 
         Assert.AreEqual(StatusCodes.Status400BadRequest, ((IStatusCodeHttpResult)missingField).StatusCode);
         Assert.AreEqual(StatusCodes.Status400BadRequest, ((IStatusCodeHttpResult)missingPdf).StatusCode);
+    }
+
+    [TestMethod]
+    public async Task CreateAsync_RejectsMissingFalseOrOutdatedTermsAcceptanceWithoutStoringDocuments()
+    {
+        foreach (var invalidFields in new Action<Dictionary<string, string>>[]
+        {
+            fields => fields.Remove("termsAccepted"),
+            fields => fields["termsAccepted"] = "false",
+            fields => fields.Remove("termsVersion"),
+            fields => fields["termsVersion"] = "2026-08",
+        })
+        {
+            var blobs = new InMemoryBlobClient();
+            var fields = ValidFields();
+            invalidFields(fields);
+
+            var submission = await SubmitDetailedAsync(blobs, fields, true,
+                MachineRequestPaymentStatus.Authorized, 400, 9990, Pdf("manual.pdf", 1));
+
+            Assert.AreEqual(StatusCodes.Status400BadRequest,
+                ((IStatusCodeHttpResult)submission.Result).StatusCode);
+            Assert.HasCount(0, blobs.Names);
+            var payment = await submission.Database.MachineRequestPayments.AsNoTracking()
+                .SingleAsync(item => item.Id == submission.PaymentId);
+            Assert.IsNull(payment.MachineRequestId);
+        }
+    }
+
+    [TestMethod]
+    public async Task CreateAsync_StoresServerTimestampAndCurrentTermsVersion()
+    {
+        var blobs = new InMemoryBlobClient();
+        var submission = await SubmitDetailedAsync(blobs, ValidFields(), true,
+            MachineRequestPaymentStatus.Authorized, 400, 9990, Pdf("manual.pdf", 1));
+        var response = (MachineRequestCreatedResponse)((IValueHttpResult)submission.Result).Value!;
+
+        var record = await new MachineRequestStorageService(blobs).GetAsync(response.RequestId);
+
+        Assert.IsNotNull(record?.TermsAcceptance);
+        Assert.IsTrue(record.TermsAcceptance.Accepted);
+        Assert.AreEqual(TermsAcceptedAt, record.TermsAcceptance.AcceptedAtUtc);
+        Assert.AreEqual(MachineRequestPublicEndpoints.CurrentTermsVersion,
+            record.TermsAcceptance.Version);
     }
 
     [TestMethod]
@@ -157,13 +204,18 @@ public class MachineRequestPublicEndpointsTests
         var linked = await first.Database.MachineRequestPayments.AsNoTracking().SingleAsync(item => item.Id == first.PaymentId);
         Assert.AreEqual(firstResponse.RequestId, linked.MachineRequestId);
 
-        var retry = await SubmitDetailedAsync(blobs, ValidFields(), false,
+        var retryFields = ValidFields();
+        retryFields.Remove("termsAccepted");
+        retryFields.Remove("termsVersion");
+        var retry = await SubmitDetailedAsync(blobs, retryFields, false,
             MachineRequestPaymentStatus.Authorized, 400, 9990, first.Database, first.PaymentId, null,
             Pdf("manual.pdf", 400));
         var retryResponse = (MachineRequestCreatedResponse)((IValueHttpResult)retry.Result).Value!;
         Assert.AreEqual(StatusCodes.Status200OK, ((IStatusCodeHttpResult)retry.Result).StatusCode);
         Assert.AreEqual(firstResponse.RequestId, retryResponse.RequestId);
         Assert.AreEqual(1, blobs.Names.Count(name => name.EndsWith("/request.json", StringComparison.Ordinal)));
+        var stored = await new MachineRequestStorageService(blobs).GetAsync(firstResponse.RequestId);
+        Assert.AreEqual(TermsAcceptedAt, stored?.TermsAcceptance?.AcceptedAtUtc);
     }
 
     [TestMethod]
@@ -267,6 +319,7 @@ public class MachineRequestPublicEndpointsTests
             new MachineRequestStorageService(blobs),
             paymentService,
             new PdfPigPageCounter(),
+            new FixedTimeProvider(TermsAcceptedAt),
             CancellationToken.None);
         return (result, db, paymentId);
     }
@@ -280,7 +333,7 @@ public class MachineRequestPublicEndpointsTests
             .UseSqlite(connectionString).Options);
         return await MachineRequestPublicEndpoints.CreateAsync(context, new MachineRequestStorageService(blobs),
             new MachineRequestPaymentService(new MachineRequestPaymentStore(db), gateway),
-            new PdfPigPageCounter(), CancellationToken.None);
+            new PdfPigPageCounter(), new FixedTimeProvider(TermsAcceptedAt), CancellationToken.None);
     }
 
     private static DefaultHttpContext CreateHttpContext(Dictionary<string, string> fields, params IFormFile[] files)
@@ -374,6 +427,8 @@ public class MachineRequestPublicEndpointsTests
         ["machineName"] = "Compresseur",
         ["manufacturer"] = "Atlas Copco",
         ["model"] = "GA90",
+        ["termsAccepted"] = "true",
+        ["termsVersion"] = MachineRequestPublicEndpoints.CurrentTermsVersion,
     };
 
     private static IFormFile Pdf(string name, int pages)
@@ -487,5 +542,10 @@ public class MachineRequestPublicEndpointsTests
             throw new NotSupportedException();
         public Task<MachineRequestPaymentProof> CancelAsync(WebApp.Api.Services.MachineRequestPayment payment, CancellationToken ct) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 }

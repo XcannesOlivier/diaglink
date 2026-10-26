@@ -29,6 +29,7 @@ import { isSuperAdmin, isCompanyAdmin } from '../../utils/roles';
 import type { CurrentUser, DiagLinkRole } from '../../types/currentUser';
 import type { CompanyDto, CompanyUserDto } from '../../types/company';
 import type { UserMachineAccessDto } from '../../types/machine';
+import { companyStatusLabel, userStatusLabel } from '../../utils/statusLabels';
 
 const ROLE_LABELS: Record<DiagLinkRole, string> = {
   technician: 'Technicien',
@@ -832,12 +833,15 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                     className={styles.companyRow}
                     onClick={() => setSelectedCompany(company)}
                     onKeyDown={event => {
-                      if (event.key === 'Enter') setSelectedCompany(company);
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedCompany(company);
+                      }
                     }}
                   >
                     <Text>{company.name}</Text>
                     <Text className={styles.companyUserCount}>{userCount}</Text>
-                    <Text className={styles.companyStatus}>{company.status}</Text>
+                    <Text className={styles.companyStatus}>{companyStatusLabel(company.status)}</Text>
                   </div>
                 );
               })}
@@ -881,17 +885,23 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                       ref={expandedUserId === user.id ? expandedRowRef : undefined}
                       role="button"
                       tabIndex={0}
+                      aria-expanded={expandedUserId === user.id}
+                      aria-controls={`super-admin-user-details-${user.id}`}
                       className={`${styles.superAdminUserRow} ${styles.rowClickable} ${expandedUserId === user.id ? styles.rowSelected : ''}`}
                       onClick={() => toggleExpandedUser(user)}
                       onKeyDown={event => {
-                        if (event.key === 'Enter') toggleExpandedUser(user);
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          toggleExpandedUser(user);
+                        }
                       }}
                     >
                       <Text>{[user.firstName, user.lastName].filter(Boolean).join(' ') || '—'}</Text>
                       <Text>{user.email ?? '—'}</Text>
                       <Text>{user.phoneNumber ?? '—'}</Text>
                       <Text>{ROLE_LABELS[user.role as DiagLinkRole] ?? user.role ?? '—'}</Text>
-                      <Text className={styles.superAdminUserStatus}>{user.status ?? '—'}</Text>
+                      <Text className={styles.superAdminUserStatus}>{userStatusLabel(user.status)}</Text>
                       <div className={styles.actionsCell}>
                         <Button
                           appearance="subtle"
@@ -906,7 +916,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                       </div>
                     </div>
                     {expandedUserId === user.id && (
-                      <div ref={expandedPanelRef} className={styles.expandedPanel}>
+                      <div id={`super-admin-user-details-${user.id}`} ref={expandedPanelRef} className={styles.expandedPanel}>
                         <div className={`${styles.expandedPanelColumn} ${styles.expandedPanelMachinesColumn}`}>
                           {user.role === 'technician' && (
                             <>
@@ -938,7 +948,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                         </div>
                         <div className={styles.expandedPanelColumn}>
                           <Text weight="semibold">Gestion du compte</Text>
-                          <Text>Statut : {user.status ?? '—'}</Text>
+                          <Text>Statut : {userStatusLabel(user.status)}</Text>
                           <Button appearance="subtle" icon={<EditRegular />} className={styles.editActionButton} onClick={() => setEditTarget(user)}>
                             Modifier l’utilisateur
                           </Button>
@@ -1173,17 +1183,23 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                 ref={expandedUserId === user.id ? expandedRowRef : undefined}
                 role="button"
                 tabIndex={0}
+                aria-expanded={expandedUserId === user.id}
+                aria-controls={`company-user-details-${user.id}`}
                 className={`${styles.row} ${styles.rowClickable} ${expandedUserId === user.id ? styles.rowSelected : ''}`}
                 onClick={() => toggleExpandedUser(user)}
                 onKeyDown={event => {
-                  if (event.key === 'Enter') toggleExpandedUser(user);
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    toggleExpandedUser(user);
+                  }
                 }}
               >
                 <Text>{[user.firstName, user.lastName].filter(Boolean).join(' ') || '—'}</Text>
                 <Text>{user.email ?? '—'}</Text>
                 <Text>{user.phoneNumber ?? '—'}</Text>
                 <Text>{ROLE_LABELS[user.role as DiagLinkRole] ?? user.role ?? '—'}</Text>
-                <Text>{user.status ?? '—'}</Text>
+                <Text>{userStatusLabel(user.status)}</Text>
                 <div className={styles.actionsCell}>
                   <Button
                     appearance="subtle"
@@ -1198,7 +1214,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                 </div>
               </div>
               {expandedUserId === user.id && (
-                <div ref={expandedPanelRef} className={styles.expandedPanel}>
+                <div id={`company-user-details-${user.id}`} ref={expandedPanelRef} className={styles.expandedPanel}>
                   <div className={`${styles.expandedPanelColumn} ${styles.expandedPanelMachinesColumn}`}>
                     {user.role === 'technician' && (
                       <>
@@ -1239,7 +1255,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                   </div>
                   <div className={styles.expandedPanelColumn}>
                     <Text weight="semibold">Gestion du compte</Text>
-                    <Text>Statut : {user.status ?? '—'}</Text>
+                    <Text>Statut : {userStatusLabel(user.status)}</Text>
                     <Button appearance="subtle" icon={<EditRegular />} className={styles.editActionButton} onClick={() => setEditTarget(user)}>
                       Modifier l’utilisateur
                     </Button>

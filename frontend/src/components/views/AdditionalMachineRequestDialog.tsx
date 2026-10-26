@@ -133,8 +133,8 @@ export function AdditionalMachineRequestDialog({ open, onOpenChange, getAccessTo
           <Field label="Numéro de série ou référence"><Input {...field('serialNumber')} /></Field>
           <Field className={styles.full} label="Description"><Textarea {...field('description')} /></Field>
         </div>
-        <Field label="Documents PDF" required><div className={styles.dropzone} role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={event => event.key === 'Enter' && inputRef.current?.click()} onDragOver={event => event.preventDefault()} onDrop={drop}>
-          <ArrowUpload24Regular /><Text block weight="semibold">Déposez vos PDF ici ou cliquez pour les sélectionner</Text><Text block size={200}>10 fichiers maximum, 50 Mo par fichier et 200 Mo au total</Text>
+        <Field label="Documents PDF" required><div className={styles.dropzone} role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); inputRef.current?.click(); } }} onDragOver={event => event.preventDefault()} onDrop={drop}>
+          <ArrowUpload24Regular /><Text block weight="semibold">Déposez vos PDF ici ou cliquez pour les sélectionner</Text><Text block size={200}>10 fichiers maximum, 200 Mio par fichier et 200 Mio au total</Text>
         </div><input ref={inputRef} className={styles.hidden} type="file" accept=".pdf,application/pdf" multiple onChange={selectFiles} /></Field>
         {reading && <Spinner size="tiny" label="Lecture des PDF" />}
         {pdfs.length > 0 && <div className={styles.files}>{pdfs.map(pdf => <div className={styles.file} key={pdf.id}><Text>{pdf.file.name} — {pdf.pageCount} page{pdf.pageCount > 1 ? 's' : ''} — {formatFileSize(pdf.file.size)}</Text><Button appearance="subtle" onClick={() => setPdfs(current => current.filter(item => item.id !== pdf.id))}>Retirer</Button></div>)}</div>}

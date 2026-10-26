@@ -41,6 +41,7 @@ describe('Stripe MVP administration', () => {
   it('shows only incomplete historical additions as repair actions', async () => {
     mocks.operations.mockResolvedValue({ kind: 'success', data: [op] });
     await render(); expect(mocks.account).toHaveBeenCalledWith(token, 'c1'); expect(mocks.add).not.toHaveBeenCalled();
+    expect(container.querySelector('option[value="c1"]')?.textContent).toBe('Entreprise test (Active)');
     expect(container.textContent).not.toContain('Lancer l’ajout Stripe');
     const repairs = [...container.querySelectorAll('details')].find(details => details.querySelector('summary')?.textContent === 'Outils de réparation (1)')!;
     expect(container.textContent).not.toContain('État de facturation');
@@ -53,12 +54,12 @@ describe('Stripe MVP administration', () => {
     mocks.add.mockResolvedValue({ kind: 'success', data: { operationId: 'op1', status: 'AwaitingPayment' } });
     await click('Reprendre l’opération');
     expect(mocks.add).toHaveBeenCalledExactlyOnceWith(token, 'c1', 'm1');
-    expect(container.textContent).toContain('AwaitingPayment'); expect(container.textContent).toContain('19.95 €');
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('Résultat : En attente de paiement'); expect(container.textContent).toContain('19.95 €');
     expect(container.textContent).not.toContain('period1');
     mocks.operations.mockResolvedValue({ kind: 'success', data: [{ ...op, stage: 'Completed', machineBillingPeriodId: 'period1',
       paymentConfirmedAtUtc: '2026-09-15T12:01:00Z', externalEventId: 'evt_test', completedAtUtc: '2026-09-15T12:01:01Z' }] });
     await click('Actualiser les opérations');
-    expect(mocks.add).toHaveBeenCalledTimes(1); expect(container.textContent).toContain('Completed'); expect(container.textContent).toContain('period1');
+    expect(mocks.add).toHaveBeenCalledTimes(1); expect(container.textContent).toContain('Terminée (Completed)'); expect(container.textContent).toContain('period1');
     expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('Reprendre l’opération'))).toBe(false);
     expect(container.textContent).toContain('Aucun ajout de machine ne nécessite d’intervention.');
     expect(container.querySelector('[aria-label="Opérations nécessitant une intervention"] strong')?.textContent).toBe('Aucune');
@@ -92,6 +93,6 @@ describe('Stripe MVP administration', () => {
     await render();
     expect(container.textContent).not.toContain('Lancer l’ajout Stripe');
     expect([...container.querySelectorAll('button')].some(item => item.textContent === 'Reprendre l’opération')).toBe(false);
-    expect(container.textContent).toContain('ReconciliationRequired'); expect(mocks.add).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Réconciliation requise (ReconciliationRequired)'); expect(mocks.add).not.toHaveBeenCalled();
   });
 });

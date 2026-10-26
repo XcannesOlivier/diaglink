@@ -4,6 +4,7 @@ import { useApiResource } from '../../hooks/useApiResource';
 import { getCompanies } from '../../services/companyService';
 import { StripeCompanyPanel } from './StripeCompanyPanel';
 import type { AdminAccordionControl } from './adminAccordion';
+import { companyStatusLabel } from '../../utils/statusLabels';
 
 export function StripeAdminPanel({ getAccessToken, onDiagLinkSessionExpired, accordion, selectedCompanyId, onSelectedCompanyChange, refreshRevision=0, onRefreshComplete, onRefreshRequest }: {
   getAccessToken: () => Promise<string | null>; onDiagLinkSessionExpired?: () => void; accordion?: AdminAccordionControl;
@@ -21,7 +22,7 @@ export function StripeAdminPanel({ getAccessToken, onDiagLinkSessionExpired, acc
     {state.kind === 'success' && <>
       <label><span className={styles.visuallyHidden}>Entreprise</span><select aria-label="Entreprise" value={selected} onChange={e => setSelected(e.target.value)}>
         <option value="">Sélectionner une entreprise</option>
-        {state.data.map(c => <option key={c.id} value={c.id}>{c.name} ({c.status})</option>)}
+        {state.data.map(c => <option key={c.id} value={c.id}>{c.name} ({companyStatusLabel(c.status)})</option>)}
       </select></label>
       {selected && state.data.some(c => c.id === selected) && <StripeCompanyPanel key={selected} companyId={selected}
         getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} accordion={accordion}

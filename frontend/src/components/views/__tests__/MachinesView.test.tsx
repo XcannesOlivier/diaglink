@@ -96,6 +96,63 @@ describe('MachinesView', () => {
     expect(container.textContent).not.toContain('Demander l’ajout d’une machine');
   });
 
+  it('active les lignes entreprise et machine au clic, avec Entrée et avec Espace, sauf si la machine est indisponible', async () => {
+    getCompaniesMock.mockResolvedValue({ kind: 'success', data: [{ id: 'c1', name: 'Entreprise A', status: 'active' }] });
+    getMachinesMock.mockResolvedValue({ kind: 'success', data: [
+      { id: 'm1', companyId: 'c1', name: 'Machine clic', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true },
+      { id: 'm2', companyId: 'c1', name: 'Machine entrée', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true },
+      { id: 'm3', companyId: 'c1', name: 'Machine espace', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true },
+      { id: 'm4', companyId: 'c1', name: 'Machine indisponible', reference: null, status: 'inactive', hasAssistantConfigured: true, isAccessible: false },
+    ] });
+    const container = document.createElement('div'); document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<MachinesView currentUser={{ userId: 'sa', companyId: 'root', role: 'diaglink_super_admin' }} getAccessToken={async () => 'token'} />));
+
+    const companyRow = () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Entreprise A'))!;
+    const back = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Retour aux entreprises'))!;
+    await act(async () => companyRow().click());
+    expect(back()).toBeTruthy();
+    await act(async () => back().click());
+
+    const companyEnter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => companyRow().dispatchEvent(companyEnter));
+    expect(companyEnter.defaultPrevented).toBe(true);
+    await act(async () => back().click());
+
+    const companySpace = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => companyRow().dispatchEvent(companySpace));
+    expect(companySpace.defaultPrevented).toBe(true);
+
+    const machineRows = [...container.querySelectorAll<HTMLElement>('[role="button"]')];
+    const byName = (name: string) => machineRows.find(item => item.textContent?.includes(name))!;
+    await act(async () => byName('Machine clic').click());
+    expect(byName('Machine clic').getAttribute('aria-expanded')).toBe('true');
+
+    const machineEnter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => byName('Machine entrée').dispatchEvent(machineEnter));
+    expect(machineEnter.defaultPrevented).toBe(true);
+    expect(byName('Machine entrée').getAttribute('aria-expanded')).toBe('true');
+
+    const machineSpace = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => byName('Machine espace').dispatchEvent(machineSpace));
+    expect(machineSpace.defaultPrevented).toBe(true);
+    expect(byName('Machine espace').getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(byName('Machine espace').getAttribute('aria-controls')!)).not.toBeNull();
+
+    const unavailable = byName('Machine indisponible');
+    await act(async () => unavailable.click());
+    for (const key of ['Enter', ' ']) {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      await act(async () => unavailable.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(true);
+    }
+    expect(unavailable.getAttribute('aria-disabled')).toBe('true');
+    expect(unavailable.getAttribute('aria-expanded')).toBe('false');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it('shows the document request only for a company admin and preserves the Super Admin PDF action', async () => {
     const machines: MachineDto[] = [{ id: 'm1', companyId: 'c1', name: 'Presse P1', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true }];
     getMachinesMock.mockResolvedValue({ kind: 'success', data: machines });
@@ -129,7 +186,7 @@ describe('MachinesView', () => {
       const container=document.createElement('div');document.body.appendChild(container);const root=createRoot(container);
       await act(async()=>root.render(<MachinesView currentUser={{userId:'u1',companyId:'c1',role}} getAccessToken={async()=> 'token'}/>));
       await act(async()=>container.querySelector('[role="button"]')?.dispatchEvent(new MouseEvent('click',{bubbles:true})));
-      expect(container.textContent).not.toContain('Budget IA inclus disponible.');expect(container.textContent).toContain('Statutactive');
+      expect(container.textContent).not.toContain('Budget IA inclus disponible.');expect(container.textContent).toContain('StatutActive');
       expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Utiliser cette machine')).toBe(true);
       expect(container.textContent).not.toContain('Ajouter des PDF');
       expect(container.textContent.includes('Demander l’ajout de documents')).toBe(role==='company_admin');
@@ -141,7 +198,7 @@ describe('MachinesView', () => {
     await act(async()=>root.render(<MachinesView currentUser={{userId:'sa',companyId:'root',role:'diaglink_super_admin'}} getAccessToken={async()=> 'token'}/>));
     await act(async()=>[...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item=>item.textContent?.includes('Entreprise A'))!.click());
     await act(async()=>[...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item=>item.textContent?.includes('Compresseur Test Alpha'))!.click());
-    expect(container.textContent).not.toContain('Budget IA inclus disponible.');expect(container.textContent).toContain('Statutactive');
+    expect(container.textContent).not.toContain('Budget IA inclus disponible.');expect(container.textContent).toContain('StatutActive');
     expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Utiliser cette machine')).toBe(true);
     expect(container.textContent).toContain('Ajouter des PDF');expect(container.textContent).not.toContain('Demander l’ajout de documents');
     await act(async()=>root.unmount());container.remove();

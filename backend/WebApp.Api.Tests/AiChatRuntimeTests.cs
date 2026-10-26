@@ -359,8 +359,7 @@ public sealed class ClaudeDirectChatRuntimeTests
         var request = new ClaudeDirectChatRequest(
             new("project", "toolbox", "1", "mcp", "vector", "prefix", "machine"),
             "prompt",
-            [],
-            new(false, string.Empty));
+            []);
         var factory = new RequestFactoryStub(request);
         var service = new ChatServiceStub(result);
         var runtime = new ClaudeDirectChatRuntime(factory, service, Options.Create(new ClaudeDirectChatOptions

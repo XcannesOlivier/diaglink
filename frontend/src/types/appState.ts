@@ -56,6 +56,7 @@ export interface AppState {
     currentConversationId: string | null;
     error: AppError | null;
     streamingMessageId?: string;
+    lastStreamEndReason?: 'completed' | 'cancelled';
     recoveredInput?: string;
     recoveredAttachments?: IFileAttachment[];
     editSnapshot?: IChatItem[]; // messages removed during edit, for undo
@@ -119,7 +120,7 @@ export type AppAction =
   | { type: 'CHAT_ADD_ASSISTANT_MESSAGE'; messageId: string }
   | { type: 'CHAT_LOAD_CONVERSATION'; conversationId: string; messages: IChatItem[] }
   | { type: 'CHAT_STREAM_RETRY'; messageId: string; attempt: number; maxRetries: number }
-  | { type: 'CHAT_RECOVER_MESSAGE'; messageText: string; error: AppError; retryCount: number }
+  | { type: 'CHAT_RECOVER_MESSAGE'; messageText: string; attachments?: IFileAttachment[]; error: AppError; retryCount: number }
   | { type: 'CHAT_CONSUMED_RECOVERED_INPUT' }
   | { type: 'CHAT_QUEUE_MESSAGE'; text: string; files?: File[] }
   | { type: 'CHAT_DEQUEUE_MESSAGE'; index: number }
@@ -162,6 +163,7 @@ export const initialAppState: AppState = {
     currentConversationId: null,
     error: null,
     streamingMessageId: undefined,
+    lastStreamEndReason: undefined,
     recoveredInput: undefined,
     recoveredAttachments: undefined,
     editSnapshot: undefined,

@@ -196,9 +196,6 @@ builder.Services
 builder.Services.AddHttpClient(ClaudeConversationSummarizer.HttpClientName);
 builder.Services.Configure<ClaudeDirectChatOptions>(
     builder.Configuration.GetSection(ClaudeDirectChatOptions.SectionName));
-builder.Services.Configure<CommercialPolicyOptions>(
-    builder.Configuration.GetSection(CommercialPolicyOptions.SectionName));
-builder.Services.AddSingleton<ICommercialPolicyProvider, GlobalCommercialPolicyProvider>();
 builder.Services.AddSingleton<Azure.Core.TokenCredential>(_ =>
 {
     var managedIdentityClientId = builder.Configuration["MANAGED_IDENTITY_CLIENT_ID"];

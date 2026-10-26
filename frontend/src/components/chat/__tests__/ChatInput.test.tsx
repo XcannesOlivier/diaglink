@@ -6,12 +6,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInput } from '../ChatInput';
 
 vi.mock('@fluentui-copilot/react-copilot', () => ({
-  ChatInput: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  ChatInput: ({ children, onSubmit }: { children?: React.ReactNode; onSubmit?: () => void }) => (
+    <div>
+      {children}
+      <button type="button" data-testid="submit-chat" onClick={onSubmit}>Envoyer</button>
+    </div>
+  ),
   ImperativeControlPlugin: () => null,
 }));
 vi.mock('../FilePreview', () => ({
   FilePreview: ({ files }: { files: File[] }) => (
-    <div data-testid="selected-files">{files.map(file => file.name).join(',')}</div>
+    <div
+      data-testid="selected-files"
+      data-file-details={JSON.stringify(files.map(file => ({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+      })))}
+    >{files.map(file => file.name).join(',')}</div>
   ),
 }));
 vi.mock('../MachineDocuments', () => ({
@@ -33,6 +45,8 @@ describe('ChatInput machine actions', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   const createFile = (name: string, type: string, size = 1024) => {
@@ -85,6 +99,54 @@ describe('ChatInput machine actions', () => {
     expect(menuButton).not.toBeNull();
     await act(async () => menuButton!.click());
     expect(onOpenMobileMenu).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['desktop', false],
+    ['mobile', true],
+  ])('shows the stop-response button only while streaming on %s', async (_viewport, mobile) => {
+    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+      matches: mobile && query === '(max-width: 1000px)',
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() { return true; },
+    }));
+    const onCancelStream = vi.fn();
+
+    await act(async () => root.render(
+      <ChatInput onSubmit={vi.fn()} isStreaming onCancelStream={onCancelStream} />,
+    ));
+
+    const stopButton = container.querySelector<HTMLButtonElement>('[aria-label="Arrêter la réponse"]');
+    expect(stopButton).not.toBeNull();
+    await act(async () => stopButton!.click());
+    expect(onCancelStream).toHaveBeenCalledOnce();
+
+    await act(async () => root.render(
+      <ChatInput onSubmit={vi.fn()} isStreaming={false} onCancelStream={onCancelStream} />,
+    ));
+    expect(container.querySelector('[aria-label="Arrêter la réponse"]')).toBeNull();
+  });
+
+  it('keeps Escape wired to the existing stream cancellation callback', async () => {
+    const onCancelStream = vi.fn();
+    await act(async () => root.render(
+      <ChatInput onSubmit={vi.fn()} isStreaming onCancelStream={onCancelStream} />,
+    ));
+
+    await act(async () => {
+      container.querySelector<HTMLInputElement>('input[type="file"]')?.parentElement?.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+
+    expect(onCancelStream).toHaveBeenCalledOnce();
   });
 
   it('groups composition and conversation actions while retaining their callbacks', async () => {
@@ -179,6 +241,119 @@ describe('ChatInput machine actions', () => {
     await selectFiles([createFile('sixth.png', 'image/png')]);
 
     expect(selectedFileNames()).toBe('1.png,2.png,3.png,4.png,5.png');
+  });
+
+  it.each([
+    ['desktop', false, [
+      { fileName: 'photo.png', fileSizeBytes: 3, dataUri: 'data:image/png;base64,AQID' },
+    ]],
+    ['mobile with five ordered photos', true, [
+      { fileName: '01.png', fileSizeBytes: 1, dataUri: 'data:image/png;base64,AQ==' },
+      { fileName: '02.jpg', fileSizeBytes: 2, dataUri: 'data:image/jpeg;base64,AQI=' },
+      { fileName: '03.jpeg', fileSizeBytes: 3, dataUri: 'data:image/jpeg;base64,AQID' },
+      { fileName: '04.png', fileSizeBytes: 4, dataUri: 'data:image/png;base64,AQIDBA==' },
+      { fileName: '05.jpg', fileSizeBytes: 5, dataUri: 'data:image/jpeg;base64,AQIDBAU=' },
+    ]],
+  ])('restores 402 text and photos on %s before consuming recovery', async (_scenario, mobile, attachments) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const dataUri = String(input);
+      const [header, encoded] = dataUri.split(',', 2);
+      const mimeType = header.match(/^data:([^;]+)/)?.[1] ?? 'application/octet-stream';
+      const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
+      return { blob: async () => new Blob([bytes], { type: mimeType }) } as Response;
+    }));
+    vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+      matches: mobile && query === '(max-width: 1000px)',
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() { return true; },
+    }));
+    const onSubmit = vi.fn();
+    const onRecoveredInputConsumed = vi.fn();
+
+    await act(async () => root.render(
+      <ChatInput
+        onSubmit={onSubmit}
+        recoveredInput="Question restaurÃ©e"
+        recoveredAttachments={attachments}
+        onRecoveredInputConsumed={onRecoveredInputConsumed}
+      />,
+    ));
+
+    await vi.waitFor(() => expect(selectedFileNames())
+      .toBe(attachments.map(attachment => attachment.fileName).join(',')));
+    const details = JSON.parse(
+      container.querySelector('[data-testid="selected-files"]')?.getAttribute('data-file-details') ?? '[]',
+    );
+    expect(details).toEqual(attachments.map(attachment => ({
+      name: attachment.fileName,
+      type: attachment.dataUri.split(';')[0].slice(5),
+      size: attachment.fileSizeBytes,
+    })));
+    expect(onRecoveredInputConsumed).toHaveBeenCalledOnce();
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="submit-chat"]')?.click());
+    expect(onSubmit).toHaveBeenCalledWith(
+      'Question restaurÃ©e',
+      expect.arrayContaining(attachments.map(attachment => expect.objectContaining({ name: attachment.fileName }))),
+    );
+  });
+
+  it('ignores an unfinished recovery after another conversation is loaded', async () => {
+    let resolveFetch!: (response: Response) => void;
+    const pendingFetch = new Promise<Response>(resolve => { resolveFetch = resolve; });
+    vi.stubGlobal('fetch', vi.fn(() => pendingFetch));
+    const onRecoveredInputConsumed = vi.fn();
+    const attachment = {
+      fileName: 'conversation-a.png',
+      fileSizeBytes: 1,
+      dataUri: 'data:image/png;base64,AQ==',
+    };
+
+    await act(async () => root.render(
+      <ChatInput
+        onSubmit={vi.fn()}
+        currentConversationId="conversation-a"
+        recoveredInput="Question from A"
+        recoveredAttachments={[attachment]}
+        onRecoveredInputConsumed={onRecoveredInputConsumed}
+      />,
+    ));
+
+    await act(async () => root.render(
+      <ChatInput
+        onSubmit={vi.fn()}
+        currentConversationId="conversation-b"
+        onRecoveredInputConsumed={onRecoveredInputConsumed}
+      />,
+    ));
+    await act(async () => resolveFetch({
+      blob: async () => new Blob([new Uint8Array([1])], { type: 'image/png' }),
+    } as Response));
+
+    expect(selectedFileNames()).toBe('');
+    expect(onRecoveredInputConsumed).not.toHaveBeenCalled();
+  });
+
+  it('keeps an ordinary selected file when the conversation changes', async () => {
+    await act(async () => root.render(
+      <ChatInput onSubmit={vi.fn()} currentConversationId="conversation-a" />,
+    ));
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const ordinaryFile = createFile('ordinary-draft.png', 'image/png');
+    Object.defineProperty(input, 'files', { configurable: true, value: [ordinaryFile] });
+    await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+    expect(selectedFileNames()).toBe('ordinary-draft.png');
+
+    await act(async () => root.render(
+      <ChatInput onSubmit={vi.fn()} currentConversationId="conversation-b" />,
+    ));
+
+    expect(selectedFileNames()).toBe('ordinary-draft.png');
   });
 
   it('applies the ClaudeDirect rule to drag and drop while retaining valid files', async () => {

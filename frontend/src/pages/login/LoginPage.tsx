@@ -17,12 +17,14 @@ interface LoginPageProps {
   showCodeStep: boolean;
   code: string;
   setCode: (code: string) => void;
+  codeCheckMessage: string | null;
+  isVerifyingCode: boolean;
   handleContinue: () => Promise<void>;
   handleVerifyCode: (code?: string) => Promise<boolean>;
   handleChangeEmail: () => void;
 }
 
-export function LoginPage({ isCheckingSession, email, setEmail, emailCheckMessage, isCheckingEmail, showCodeStep, code, setCode, handleContinue, handleVerifyCode, handleChangeEmail }: LoginPageProps) {
+export function LoginPage({ isCheckingSession, email, setEmail, emailCheckMessage, isCheckingEmail, showCodeStep, code, setCode, codeCheckMessage, isVerifyingCode, handleContinue, handleVerifyCode, handleChangeEmail }: LoginPageProps) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [installDialog, setInstallDialog] = useState<ShortcutPlatform | null>(() =>
@@ -51,21 +53,23 @@ export function LoginPage({ isCheckingSession, email, setEmail, emailCheckMessag
         {isCheckingSession ? (
           <Spinner size="medium" label="Vérification de la session..." />
         ) : !showCodeStep ? (
-          <>
+          <form onSubmit={event => { event.preventDefault(); void handleContinue(); }}>
             <div className={authStyles.fieldGroup}>
-              <label className={authStyles.fieldLabel}>Adresse e-mail</label>
-              <Input type="email" name="email" autoComplete="email" inputMode="email" size="large" value={email} onChange={(_, data) => setEmail(data.value)} className={authStyles.fullWidthInput} />
-              {emailCheckMessage && <p className={authStyles.fieldMessage}>{emailCheckMessage}</p>}
+              <label htmlFor="diaglink-login-email" className={authStyles.fieldLabel}>Adresse e-mail</label>
+              <Input id="diaglink-login-email" type="email" name="email" autoComplete="email" inputMode="email" required size="large" value={email} onChange={(_, data) => setEmail(data.value)} aria-invalid={Boolean(emailCheckMessage)} aria-describedby={emailCheckMessage ? 'diaglink-login-email-message' : undefined} className={authStyles.fullWidthInput} />
+              {emailCheckMessage && <p id="diaglink-login-email-message" role="alert" className={authStyles.fieldMessage}>{emailCheckMessage}</p>}
             </div>
-            <Button appearance="primary" size="large" disabled={!email.trim() || isCheckingEmail} onClick={() => void handleContinue()} className={authStyles.primaryButton}>Continuer</Button>
-          </>
+            <Button type="submit" appearance="primary" size="large" disabled={!email.trim() || isCheckingEmail} className={authStyles.primaryButton}>
+              {isCheckingEmail ? <><Spinner size="tiny" /> Envoi du code...</> : 'Continuer'}
+            </Button>
+          </form>
         ) : (
-          <>
+          <form onSubmit={event => { event.preventDefault(); void verifyAndNavigate(); }}>
             <p className={authStyles.otpIntro}>Un code de connexion a été envoyé à<br /><strong>{email}</strong></p>
             <div className={authStyles.fieldGroup}>
-              <label className={authStyles.fieldLabel}>Code de connexion</label>
+              <label htmlFor="diaglink-login-code" className={authStyles.fieldLabel}>Code de connexion</label>
               <Input
-                type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} size="large" value={code}
+                id="diaglink-login-code" name="one-time-code" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} size="large" value={code}
                 onChange={(_, data) => {
                   const newCode = data.value.replace(/\D/g, '').slice(0, 6);
                   setCode(newCode);
@@ -76,12 +80,18 @@ export function LoginPage({ isCheckingSession, email, setEmail, emailCheckMessag
                     void verifyAndNavigate(newCode);
                   }
                 }}
+                disabled={isVerifyingCode}
+                aria-invalid={Boolean(codeCheckMessage)}
+                aria-describedby={codeCheckMessage ? 'diaglink-login-code-message' : undefined}
                 className={authStyles.fullWidthInput}
               />
+              {codeCheckMessage && <p id="diaglink-login-code-message" role="alert" className={authStyles.fieldMessage}>{codeCheckMessage}</p>}
             </div>
-            <Button appearance="primary" size="large" onClick={() => void verifyAndNavigate()} disabled={code.length !== 6} className={authStyles.primaryButton}>Se connecter</Button>
-            <Button appearance="transparent" size="small" onClick={handleChangeEmail} className={authStyles.changeEmailButton}>Changer d'adresse e-mail</Button>
-          </>
+            <Button type="submit" appearance="primary" size="large" disabled={code.length !== 6 || isVerifyingCode} className={authStyles.primaryButton}>
+              {isVerifyingCode ? <><Spinner size="tiny" /> Vérification...</> : 'Se connecter'}
+            </Button>
+            <Button type="button" appearance="transparent" size="small" onClick={handleChangeEmail} disabled={isVerifyingCode} className={authStyles.changeEmailButton}>Changer d'adresse e-mail</Button>
+          </form>
         )}
 
         <p className={authStyles.secureNote}>Connexion sécurisée</p>

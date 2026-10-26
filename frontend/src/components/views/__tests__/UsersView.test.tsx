@@ -116,7 +116,58 @@ describe('UsersView (company_admin)', () => {
     });
   });
 
-  it("affiche les utilisateurs renvoyés par l'API avec le rôle traduit", async () => {
+  it('active les lignes super-admin au clic, avec Entrée et avec Espace sans doubler le bouton Gérer', async () => {
+    getCompaniesMock.mockResolvedValue({ kind: 'success', data: [{ id: 'c1', name: 'Acme', status: 'active' }] });
+    getUsersByCompanyMock.mockResolvedValue({ kind: 'success', data: [
+      { id: 'u1', email: 'clic@acme.test', role: 'technician', status: 'active' },
+      { id: 'u2', email: 'entree@acme.test', role: 'technician', status: 'active' },
+      { id: 'u3', email: 'espace@acme.test', role: 'technician', status: 'active' },
+    ] });
+    getUserMachineAccessForCompanyMock.mockResolvedValue({ kind: 'success', data: [] });
+    const container = await renderView('diaglink_super_admin');
+    const companyRow = () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Acme'))!;
+    const back = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Retour aux entreprises'))!;
+
+    await act(async () => companyRow().click());
+    expect(back()).toBeTruthy();
+    await act(async () => back().click());
+
+    const companyEnter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => companyRow().dispatchEvent(companyEnter));
+    expect(companyEnter.defaultPrevented).toBe(true);
+    await act(async () => back().click());
+
+    const companySpace = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => companyRow().dispatchEvent(companySpace));
+    expect(companySpace.defaultPrevented).toBe(true);
+
+    const userRow = (email: string) => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes(email))!;
+    await act(async () => userRow('clic@acme.test').click());
+    expect(userRow('clic@acme.test').getAttribute('aria-expanded')).toBe('true');
+
+    const userEnter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => userRow('entree@acme.test').dispatchEvent(userEnter));
+    expect(userEnter.defaultPrevented).toBe(true);
+    expect(userRow('entree@acme.test').getAttribute('aria-expanded')).toBe('true');
+
+    const userSpace = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => userRow('espace@acme.test').dispatchEvent(userSpace));
+    expect(userSpace.defaultPrevented).toBe(true);
+    const expandedRow = userRow('espace@acme.test');
+    expect(expandedRow.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(expandedRow.getAttribute('aria-controls')!)).not.toBeNull();
+
+    const manage = [...expandedRow.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Gérer')!;
+    const nestedEnter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => {
+      manage.dispatchEvent(nestedEnter);
+      manage.click();
+    });
+    expect(nestedEnter.defaultPrevented).toBe(false);
+    expect(userRow('espace@acme.test').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it("affiche les utilisateurs renvoyés par l'API avec le rôle et le statut traduits", async () => {
     getCompanyUsersMock.mockResolvedValue({
       kind: 'success',
       data: [{ id: 'u1', email: 'tech@acme.test', role: 'technician', status: 'active' }],
@@ -126,7 +177,30 @@ describe('UsersView (company_admin)', () => {
 
     expect(container.textContent).toContain('tech@acme.test');
     expect(container.textContent).toContain('Technicien');
+    expect(container.textContent).toContain('Actif');
+    expect(container.textContent).not.toContain('active');
     expect(getCompanyUsersMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('traduit le statut sans modifier le choix entre désactivation et réactivation', async () => {
+    getUserMachineAccessMock.mockResolvedValue({ kind: 'success', data: [] });
+    getCompanyUsersMock.mockResolvedValue({
+      kind: 'success',
+      data: [
+        { id: 'u1', email: 'active@acme.test', role: 'technician', status: 'active' },
+        { id: 'u2', email: 'inactive@acme.test', role: 'technician', status: 'inactive' },
+      ],
+    });
+    const container = await renderView();
+    const rows = Array.from(container.querySelectorAll('[role="button"]'));
+
+    await act(async () => (rows.find(row => row.textContent?.includes('active@acme.test')) as HTMLElement).click());
+    expect(container.textContent).toContain('Statut : Actif');
+    expect(Array.from(container.querySelectorAll('button')).some(button => button.textContent === "Désactiver l'accès")).toBe(true);
+
+    await act(async () => (rows.find(row => row.textContent?.includes('inactive@acme.test')) as HTMLElement).click());
+    expect(container.textContent).toContain('Statut : Inactif');
+    expect(Array.from(container.querySelectorAll('button')).some(button => button.textContent === "Réactiver l'accès")).toBe(true);
   });
 
   it("masque l'administrateur connecté par son identifiant et conserve les autres utilisateurs", async () => {
@@ -338,6 +412,40 @@ describe('UsersView (company_admin)', () => {
     expect(checkboxes).toHaveLength(2);
     expect(checkboxes[0].checked).toBe(true);
     expect(checkboxes[1].checked).toBe(false);
+  });
+
+  it('active une ligne utilisateur entreprise avec Entrée et Espace sans traiter les touches des contrôles enfants', async () => {
+    getCompanyUsersMock.mockResolvedValue({
+      kind: 'success',
+      data: [
+        { id: 'u1', email: 'entree@acme.test', role: 'technician', status: 'active' },
+        { id: 'u2', email: 'espace@acme.test', role: 'technician', status: 'active' },
+      ],
+    });
+    getUserMachineAccessMock.mockResolvedValue({ kind: 'success', data: [] });
+    const container = await renderView();
+    const row = (email: string) => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes(email))!;
+
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => row('entree@acme.test').dispatchEvent(enter));
+    expect(enter.defaultPrevented).toBe(true);
+    expect(row('entree@acme.test').getAttribute('aria-expanded')).toBe('true');
+
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => row('espace@acme.test').dispatchEvent(space));
+    expect(space.defaultPrevented).toBe(true);
+    const expandedRow = row('espace@acme.test');
+    expect(expandedRow.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(expandedRow.getAttribute('aria-controls')!)).not.toBeNull();
+
+    const manage = [...expandedRow.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Gérer')!;
+    const nestedSpace = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => {
+      manage.dispatchEvent(nestedSpace);
+      manage.click();
+    });
+    expect(nestedSpace.defaultPrevented).toBe(false);
+    expect(row('espace@acme.test').getAttribute('aria-expanded')).toBe('false');
   });
 
   it("modifier la sélection puis Enregistrer appelle replaceUserMachineAccess avec la liste complète", async () => {

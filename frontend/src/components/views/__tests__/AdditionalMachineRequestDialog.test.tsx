@@ -22,6 +22,31 @@ describe('AdditionalMachineRequestDialog', () => {
     vi.stubGlobal('crypto', { randomUUID: vi.fn(() => 'stable-uuid') });
   });
 
+  it('ouvre le sélecteur PDF au clic, avec Entrée et avec Espace sans double activation', async () => {
+    const container = document.createElement('div'); document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<AdditionalMachineRequestDialog open onOpenChange={vi.fn()} getAccessToken={async () => 'token'} />));
+    const dropzone = document.body.querySelector<HTMLElement>('[role="button"]')!;
+    const fileInput = document.body.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const clickSpy = vi.spyOn(fileInput, 'click').mockImplementation(() => undefined);
+
+    await act(async () => dropzone.click());
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => dropzone.dispatchEvent(enter));
+    expect(enter.defaultPrevented).toBe(true);
+    expect(clickSpy).toHaveBeenCalledTimes(2);
+
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => dropzone.dispatchEvent(space));
+    expect(space.defaultPrevented).toBe(true);
+    expect(clickSpy).toHaveBeenCalledTimes(3);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it('keeps machine data client-side, opens the named checkout and trusts server polling only', async () => {
     const popup = { location: { href: '' }, closed: false, close: vi.fn(), postMessage: vi.fn() };
     vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window);

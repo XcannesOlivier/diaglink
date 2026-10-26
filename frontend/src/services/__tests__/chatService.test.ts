@@ -22,6 +22,49 @@ describe('ChatService', () => {
     chatService = new ChatService('/api', mockGetAccessToken, mockDispatch);
   });
 
+  it.each([
+    ['one photo', [new File(['one'], 'photo.png', { type: 'image/png' })]],
+    ['five photos', [
+      new File(['1'], '01.png', { type: 'image/png' }),
+      new File(['22'], '02.jpg', { type: 'image/jpeg' }),
+      new File(['333'], '03.jpeg', { type: 'image/jpeg' }),
+      new File(['4444'], '04.png', { type: 'image/png' }),
+      new File(['55555'], '05.jpg', { type: 'image/jpeg' }),
+    ]],
+  ])('restores the text and attachment metadata after HTTP 402 with %s', async (_scenario, files) => {
+    const backendMessage = 'CrÃ©dit IA Ã©puisÃ©.';
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ status: 'AiCreditExhausted', message: backendMessage }),
+      { status: 402, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(chatService.sendMessage('Question avec photos', 'conversation', files))
+      .rejects.toMatchObject({ code: 'AiCreditExhausted' });
+
+    const recovery = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls
+      .map(call => call[0] as AppAction)
+      .find((action): action is Extract<AppAction, { type: 'CHAT_RECOVER_MESSAGE' }> =>
+        action.type === 'CHAT_RECOVER_MESSAGE');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(recovery).toMatchObject({
+      type: 'CHAT_RECOVER_MESSAGE',
+      messageText: 'Question avec photos',
+      retryCount: 0,
+      attachments: files.map(file => ({
+        fileName: file.name,
+        fileSizeBytes: file.size,
+      })),
+    });
+    expect(recovery?.attachments?.map(attachment => attachment.fileName))
+      .toEqual(files.map(file => file.name));
+    expect(recovery?.attachments?.every(attachment => attachment.dataUri?.startsWith('data:image/')))
+      .toBe(true);
+    expect((mockDispatch as ReturnType<typeof vi.fn>).mock.calls
+      .map(call => call[0] as AppAction)
+      .some(action => action.type === 'CHAT_STREAM_RETRY')).toBe(false);
+  });
+
   describe('listConversations', () => {
     it('does not retry an exhausted-credit message and history remains readable', async () => {
       const backendMessage = 'Crédit IA épuisé. Rechargez le portefeuille de votre entreprise pour continuer. L’historique reste accessible.';
@@ -203,8 +246,8 @@ describe('ChatService', () => {
             { id: 22, pdfPage: 75, displayPage: '73', label: 'p. 73', startIndex: 20, endIndex: 25, displayOrder: 1 },
             { id: 21, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: 8, endIndex: 13, displayOrder: 0, documentId: 'private' },
           ], suggestions: ['Où est le relais ?'], webCitations: [
-            { type: 'uri_citation', label: 'Fiche fournisseur', url: 'https://supplier.example/2544-9024', quote: 'Référence exacte' },
-            { type: 'uri_citation', label: 'URL invalide', url: 'ftp://supplier.example/part' },
+            { type: 'uri_citation', label: 'Documentation constructeur', url: 'https://manufacturer.example/manuals/2544-9024', quote: 'Caractéristiques techniques' },
+            { type: 'uri_citation', label: 'URL invalide', url: 'ftp://manufacturer.example/manual' },
           ] },
           { role: 'assistant', content: 'Ancien message' },
         ]),
@@ -219,9 +262,9 @@ describe('ChatService', () => {
       expect(result[0].suggestions).toEqual(['Où est le relais ?']);
       expect(result[0].webCitations).toEqual([{
         type: 'uri_citation',
-        label: 'Fiche fournisseur',
-        url: 'https://supplier.example/2544-9024',
-        quote: 'Référence exacte',
+        label: 'Documentation constructeur',
+        url: 'https://manufacturer.example/manuals/2544-9024',
+        quote: 'Caractéristiques techniques',
       }]);
       expect(result[1].visuals).toBeUndefined();
       expect(result[1].sources).toEqual([]);
@@ -308,6 +351,205 @@ describe('ChatService', () => {
     )).rejects.toBeDefined();
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([400, 401, 403, 404, 409, 500])(
+    'hides an English HTTP %i detail and never retries the chat request',
+    async status => {
+      const technicalMessage = `Internal request failed with status ${status}`;
+      const fetchMock = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ message: technicalMessage }),
+        { status, headers: { 'Content-Type': 'application/json' } },
+      ));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await chatService.sendMessage('Question', 'conversation').catch(() => undefined);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls
+        .map(call => call[0] as AppAction);
+      expect(actions.some(action => action.type === 'CHAT_STREAM_RETRY')).toBe(false);
+      const visibleErrors = actions
+        .filter((action): action is Extract<AppAction, { type: 'CHAT_ERROR' }> => action.type === 'CHAT_ERROR')
+        .map(action => action.error.message);
+      expect(visibleErrors.length).toBeGreaterThan(0);
+      expect(visibleErrors.join(' ')).not.toContain(technicalMessage);
+    },
+  );
+
+  it('hides an English SSE error without retrying or completing the interrupted response', async () => {
+    const technicalMessage = 'The Claude Messages API request failed.';
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      `data: {"type":"error","message":"${technicalMessage}"}\n\n`,
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await chatService.sendMessage('Question', 'conversation');
+
+    const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls
+      .map(call => call[0] as AppAction);
+    const visibleErrors = actions
+      .filter((action): action is Extract<AppAction, { type: 'CHAT_ERROR' }> => action.type === 'CHAT_ERROR')
+      .map(action => action.error.message);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(visibleErrors).toContainEqual(expect.stringContaining('La réponse a été interrompue'));
+    expect(visibleErrors.join(' ')).not.toContain(technicalMessage);
+    expect(actions.some(action => action.type === 'CHAT_STREAM_RETRY')).toBe(false);
+    expect(actions.some(action => action.type === 'CHAT_STREAM_COMPLETE')).toBe(false);
+  });
+
+  it('does not retry an ambiguous network failure before a response is received', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await chatService.sendMessage('Question', 'conversation');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls
+      .map(call => call[0] as AppAction);
+    expect(actions.some(action => action.type === 'CHAT_STREAM_RETRY')).toBe(false);
+    expect(actions.some(action => action.type === 'CHAT_RECOVER_MESSAGE')).toBe(false);
+    expect(actions).toContainEqual(expect.objectContaining({
+      type: 'CHAT_ERROR',
+      error: expect.objectContaining({
+        message: expect.stringContaining('Le traitement a peut-être déjà eu lieu côté serveur'),
+      }),
+    }));
+  });
+
+  it('keeps the received conversation id and attachments without retrying before the first text', async () => {
+    const encoder = new TextEncoder();
+    let readCount = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        readCount++;
+        if (readCount === 1) {
+          controller.enqueue(encoder.encode(
+            'data: {"type":"conversationId","conversationId":"new-conversation"}\n\n',
+          ));
+          return;
+        }
+        controller.error(new Error('stream failed before first text'));
+      },
+    }, { highWaterMark: 0 });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(stream, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await chatService.sendMessage(
+      'Inspecte cette image',
+      null,
+      [new File(['png'], 'photo.png', { type: 'image/png' })],
+      'machine',
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls
+      .map(call => call[0] as AppAction);
+    expect(actions).toContainEqual(expect.objectContaining({
+      type: 'CHAT_START_STREAM',
+      conversationId: 'new-conversation',
+    }));
+    expect(actions).toContainEqual(expect.objectContaining({
+      type: 'CHAT_SEND_MESSAGE',
+      message: expect.objectContaining({
+        attachments: [expect.objectContaining({ fileName: 'photo.png' })],
+      }),
+    }));
+    expect(actions.some(action => action.type === 'CHAT_STREAM_RETRY')).toBe(false);
+    expect(actions.some(action => action.type === 'CHAT_RECOVER_MESSAGE')).toBe(false);
+    expect(actions.some(action => action.type === 'CHAT_STREAM_COMPLETE')).toBe(false);
+    expect(actions).toContainEqual(expect.objectContaining({
+      type: 'CHAT_ERROR',
+      error: expect.objectContaining({
+        message: expect.stringContaining('Consultez l’historique de la conversation'),
+      }),
+    }));
+  });
+
+  it('sends an existing conversation exactly once and keeps its request contract', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      'data: {"type":"done"}\n',
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await chatService.sendMessage('Question suivante', 'existing-conversation', [], 'ignored-machine');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(request.body as string)).toMatchObject({
+      message: 'Question suivante',
+      conversationId: 'existing-conversation',
+    });
+    expect(JSON.parse(request.body as string)).not.toHaveProperty('machineId');
+  });
+
+  it.each([
+    ['identical text fragments', ['ha', 'ha'], 'haha'],
+    ['different text fragments', ['Bon', 'jour'], 'Bonjour'],
+    ['identical numeric fragments', ['12', '12'], '1212'],
+    ['identical error-code fragments', ['E1', 'E1'], 'E1E1'],
+    ['repeated Markdown characters', ['**', '**'], '****'],
+    ['repeated technical references', ['DX10-', 'DX10-'], 'DX10-DX10-'],
+    ['accents and Unicode characters', ['é', 'é', '界', '界'], 'éé界界'],
+  ])('preserves %s', async (_scenario, fragments, expected) => {
+    const stream = [
+      ...fragments.map(content => `data: ${JSON.stringify({ type: 'chunk', content })}\n`),
+      'data: {"type":"done"}\n',
+    ].join('');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(stream, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await chatService.sendMessage('Question', 'conversation');
+
+    const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls
+      .map(call => call[0] as AppAction);
+    const receivedFragments = actions
+      .filter((action): action is Extract<AppAction, { type: 'CHAT_STREAM_CHUNK' }> =>
+        action.type === 'CHAT_STREAM_CHUNK')
+      .map(action => action.content);
+    expect(receivedFragments).toEqual(fragments);
+    expect(receivedFragments.join('')).toBe(expected);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves identical text around citations and illustrations in event order', async () => {
+    const stream = [
+      'data: {"type":"chunk","content":"ha"}\n',
+      'data: {"type":"annotations","annotations":[{"type":"uri_citation","label":"Manuel","url":"https://manufacturer.example/manual"}]}\n',
+      'data: {"type":"chunk","content":"ha"}\n',
+      'data: {"type":"visuals","visuals":[{"id":1,"documentId":"manual","page":12,"assetType":"full","tile":null,"name":"page.png","displayOrder":0}]}\n',
+      'data: {"type":"chunk","content":"ha"}\n',
+      'data: {"type":"done"}\n',
+    ].join('');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(stream, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await chatService.sendMessage('Question', 'conversation');
+
+    const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls
+      .map(call => call[0] as AppAction);
+    const streamedActions = actions.filter(action => [
+      'CHAT_STREAM_CHUNK',
+      'CHAT_STREAM_ANNOTATIONS',
+      'CHAT_STREAM_VISUALS',
+      'CHAT_STREAM_COMPLETE',
+    ].includes(action.type));
+    expect(streamedActions.map(action => action.type)).toEqual([
+      'CHAT_STREAM_CHUNK',
+      'CHAT_STREAM_ANNOTATIONS',
+      'CHAT_STREAM_CHUNK',
+      'CHAT_STREAM_VISUALS',
+      'CHAT_STREAM_CHUNK',
+      'CHAT_STREAM_COMPLETE',
+    ]);
+    expect(streamedActions
+      .filter((action): action is Extract<AppAction, { type: 'CHAT_STREAM_CHUNK' }> =>
+        action.type === 'CHAT_STREAM_CHUNK')
+      .map(action => action.content)
+      .join('')).toBe('hahaha');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('dispatches a sanitized visuals SSE event for the streamed assistant message', async () => {
@@ -428,5 +670,87 @@ describe('ChatService', () => {
 
     expect(actions.some(action => action.type === 'CHAT_STREAM_RETRY')).toBe(false);
     expect(actions.some(action => action.type === 'CHAT_RECOVER_MESSAGE')).toBe(false);
+    expect(actions.some(action => action.type === 'CHAT_STREAM_COMPLETE')).toBe(false);
+    expect(actions).toContainEqual(expect.objectContaining({
+      type: 'CHAT_ERROR',
+      error: expect.objectContaining({
+        message: expect.stringContaining('Le traitement a peut-être déjà eu lieu côté serveur'),
+      }),
+    }));
+  });
+
+  it('cancels an active request without retrying it', async () => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(new DOMException('Aborted', 'AbortError'));
+      });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const sending = chatService.sendMessage('Question', 'conversation');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    chatService.cancelStream();
+    await sending;
+
+    const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls
+      .map(call => call[0] as AppAction);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(actions).toContainEqual({ type: 'CHAT_CANCEL_STREAM' });
+    expect(actions.some(action => action.type === 'CHAT_STREAM_RETRY')).toBe(false);
+  });
+
+  it('keeps streamed conversation data and attachments when cancellation follows partial content', async () => {
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+        controller.enqueue(encoder.encode([
+          'data: {"type":"conversationId","conversationId":"conversation-partial"}\n',
+          'data: {"type":"chunk","content":"Réponse partielle"}\n',
+          'data: {"type":"annotations","annotations":[{"type":"uri_citation","label":"Manuel","url":"https://example.test/manual"}]}\n',
+          'data: {"type":"visuals","visuals":[{"id":7,"documentId":"manual","page":12,"assetType":"full","tile":null,"name":"page.png","displayOrder":0}]}\n',
+        ].join('')));
+      },
+    });
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      init?.signal?.addEventListener('abort', () => {
+        streamController.error(new DOMException('Aborted', 'AbortError'));
+      });
+      return Promise.resolve(new Response(stream, { status: 200 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const sending = chatService.sendMessage(
+      'Inspecte cette image',
+      null,
+      [new File(['png'], 'photo.png', { type: 'image/png' })],
+      'machine',
+    );
+    await vi.waitFor(() => expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'CHAT_STREAM_CHUNK',
+      content: 'Réponse partielle',
+    })));
+    chatService.cancelStream();
+    await sending;
+
+    const actions = (mockDispatch as ReturnType<typeof vi.fn>).mock.calls
+      .map(call => call[0] as AppAction);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'CHAT_START_STREAM', conversationId: 'conversation-partial' }),
+      expect.objectContaining({ type: 'CHAT_STREAM_CHUNK', content: 'Réponse partielle' }),
+      expect.objectContaining({ type: 'CHAT_STREAM_ANNOTATIONS' }),
+      expect.objectContaining({ type: 'CHAT_STREAM_VISUALS', visuals: [expect.objectContaining({ id: 7 })] }),
+      expect.objectContaining({
+        type: 'CHAT_SEND_MESSAGE',
+        message: expect.objectContaining({
+          attachments: [expect.objectContaining({ fileName: 'photo.png' })],
+        }),
+      }),
+      { type: 'CHAT_CANCEL_STREAM' },
+    ]));
+    expect(actions.some(action => action.type === 'CHAT_STREAM_RETRY')).toBe(false);
+    expect(actions.some(action => action.type === 'CHAT_STREAM_COMPLETE')).toBe(false);
   });
 });

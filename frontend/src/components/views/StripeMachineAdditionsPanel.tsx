@@ -4,6 +4,7 @@ import { Button } from '@fluentui/react-components';
 import { addStripeMachine, getStripeAdditions, type StripeAdditionSummary, type StripeCompanySummary } from '../../services/stripeAdminService';
 import styles from './CompanyFinancePanel.module.css';
 import type { MachineFinanceIntervention } from './financeInterventions';
+import { diagnosticStatusLabel, machineAdditionResultLabel, machineAdditionStageLabel } from '../../utils/statusLabels';
 
 interface Props {
   companyId: string; account: StripeCompanySummary; getAccessToken: () => Promise<string | null>;
@@ -44,7 +45,7 @@ export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken
     inFlight.current = false;
     if (current !== generation.current) return;
     setBusy(false);
-    if (result.kind === 'success') setMessage(`Résultat : ${result.data.status}`);
+    if (result.kind === 'success') setMessage(`Résultat : ${machineAdditionResultLabel(result.data.status)}`);
     else {
       setMessage(result.kind === 'conflict' || result.kind === 'validation-error' ? result.message : 'Ajout non confirmé. Actualisez puis reprenez la même machine.');
       if (result.kind === 'unauthorized' && result.diagLinkSessionExpired) onDiagLinkSessionExpired?.();
@@ -68,8 +69,8 @@ export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken
     {!loaded && !loadError && <p>Chargement des opérations…</p>}
     {loaded && operations.length === 0 && <p>Aucune opération StripeMachineAddition.</p>}
     {operations.map(op => <article key={op.id} className={styles.rechargeDiagnostic}>
-        <strong>{op.machineName} — {op.stage}</strong>
-        {op.reconciliationRequired && <p role="alert">ReconciliationRequired : cycle terminé, vérification manuelle nécessaire.</p>}
+        <strong>{op.machineName} — {diagnosticStatusLabel(op.stage, machineAdditionStageLabel)}</strong>
+        {op.reconciliationRequired && <p role="alert">Réconciliation requise (ReconciliationRequired) : cycle terminé, vérification manuelle nécessaire.</p>}
         <dl>
           <dt>Opération / machine</dt><dd>{op.id} / {op.machineId}</dd>
           <dt>Facture Stripe</dt><dd>{op.stripeInvoiceId ?? '—'}</dd>
@@ -87,7 +88,7 @@ export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken
   const repairTools = <section aria-label="Réparation des ajouts de machines"><h4>Ajouts de machines à examiner</h4>
     {loaded && pendingOperations.length === 0 && <p>Aucun ajout de machine ne nécessite d’intervention.</p>}
     {pendingOperations.map(operation => <article key={operation.id} className={styles.repairItem}>
-      <p><strong>{operation.machineName}</strong> · {operation.reconciliationRequired ? 'Réconciliation requise' : operation.stage}</p>
+      <p><strong>{operation.machineName}</strong> · {operation.reconciliationRequired ? 'Réconciliation requise' : machineAdditionStageLabel(operation.stage)}</p>
       {operation.reconciliationRequired
         ? <p>Le cycle est terminé. Vérifiez les données enregistrées et l’historique Stripe avant toute intervention.</p>
         : <Button disabled={busy || !account.testActionsEnabled} onClick={() => void run(operation.machineId)}>Reprendre l’opération</Button>}

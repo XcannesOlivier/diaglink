@@ -14,6 +14,7 @@ import { MachineCreditStatus } from './MachineCreditStatus';
 import { AdditionalMachineRequestDialog } from './AdditionalMachineRequestDialog';
 import { AdditionalDocumentsRequestDialog } from './AdditionalDocumentsRequestDialog';
 import { DialogCloseButton } from '../core/DialogCloseButton';
+import { companyStatusLabel, machineStatusLabel } from '../../utils/statusLabels';
 
 const useStyles = makeStyles({
   layout: {
@@ -394,12 +395,15 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
                   className={styles.companyRow}
                   onClick={() => setSelectedCompany(company)}
                   onKeyDown={event => {
-                    if (event.key === 'Enter') setSelectedCompany(company);
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedCompany(company);
+                    }
                   }}
                 >
                   <Text>{company.name}</Text>
                   <Text className={styles.companyMachineCount}>{machineCount}</Text>
-                  <Badge appearance="tint" className={styles.companyStatus}>{company.status}</Badge>
+                  <Badge appearance="tint" className={styles.companyStatus}>{companyStatusLabel(company.status)}</Badge>
                 </div>
               );
             })}
@@ -448,27 +452,32 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
                     role="button"
                     tabIndex={0}
                     aria-disabled={!machine.isAccessible}
+                    aria-expanded={selectedMachine?.id === machine.id}
+                    aria-controls={`machine-details-${machine.id}`}
                     className={`${selectedCompany ? styles.machineRow : styles.row} ${!machine.isAccessible ? styles.rowUnavailable : ''} ${selectedMachine?.id === machine.id ? styles.rowSelected : ''}`}
                     onClick={() => machine.isAccessible && setSelectedMachine(machine)}
                     onKeyDown={event => {
-                      if (event.key === 'Enter' && machine.isAccessible) setSelectedMachine(machine);
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        if (machine.isAccessible) setSelectedMachine(machine);
+                      }
                     }}
                   >
                     <Text>{machine.name}</Text>
                     <Badge appearance="tint" className={selectedCompany ? styles.machineStatus : undefined}>
-                      {machine.isAccessible ? machine.status : 'Indisponible'}
+                      {machine.isAccessible ? machineStatusLabel(machine.status) : 'Indisponible'}
                     </Badge>
                   </div>
                 ))}
               </div>
 
               {selectedMachine && (
-                <div ref={machineDetailRef} className={styles.detail}>
+                <div id={`machine-details-${selectedMachine.id}`} ref={machineDetailRef} className={styles.detail}>
                   <Text weight="semibold">{selectedMachine.name}</Text>
                   <MachineCreditStatus machineId={selectedMachine.id} getAccessToken={getAccessToken} />
                   <div className={styles.detailRow}>
                     <Text className={styles.detailLabel}>Statut</Text>
-                    <Text>{selectedMachine.status}</Text>
+                    <Text>{machineStatusLabel(selectedMachine.status)}</Text>
                   </div>
                   {/* Section 10: launches the agent chat scoped to this machine, gated on the machine
                       having a configured assistant (never lets the user start a chat that would 409). */}

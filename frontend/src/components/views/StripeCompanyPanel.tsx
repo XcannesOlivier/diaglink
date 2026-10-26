@@ -8,6 +8,7 @@ import { AdminFinanceOverview } from './AdminFinanceOverview';
 import { getAdminAccordionProps, type AdminAccordionControl } from './adminAccordion';
 import type { GlobalFinanceIntervention, MachineFinanceIntervention } from './financeInterventions';
 import styles from './CompanyFinancePanel.module.css';
+import { diagnosticStatusLabel, invoiceStatusLabel, subscriptionStatusLabel } from '../../utils/statusLabels';
 
 interface Props {
   companyId: string;
@@ -98,9 +99,9 @@ export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessio
         <dt>BillingAccount</dt><dd>{data.billingAccountId ?? '—'}</dd>
         <dt>StripeCustomerId</dt><dd>{data.stripeCustomerId ?? '—'}</dd>
         <dt>StripeSubscriptionId</dt><dd>{data.stripeSubscriptionId ?? '—'}</dd>
-        <dt>SubscriptionStatus</dt><dd>{data.subscriptionStatus ?? '—'}</dd>
+        <dt>SubscriptionStatus</dt><dd>{diagnosticStatusLabel(data.subscriptionStatus, subscriptionStatusLabel)}</dd>
         <dt>Résiliation à échéance</dt><dd>{data.cancelAtPeriodEnd?'Oui':'Non'}</dd>
-        <dt>Dernière facture</dt><dd>{data.latestInvoiceId ?? '—'} · {data.latestInvoiceStatus ?? '—'}</dd>
+        <dt>Dernière facture</dt><dd>{data.latestInvoiceId ?? '—'} · {diagnosticStatusLabel(data.latestInvoiceStatus, invoiceStatusLabel)}</dd>
         <dt>Montant restant dû</dt><dd>{((data.amountRemainingCents ?? 0)/100).toFixed(2)} EUR</dd>
         <dt>CurrentPeriodStartUtc</dt><dd>{data.currentPeriodStartUtc ?? '—'}</dd>
         <dt>CurrentPeriodEndUtc</dt><dd>{data.currentPeriodEndUtc ?? '—'}</dd>

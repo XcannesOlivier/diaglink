@@ -6,7 +6,8 @@ import { PublicHeader } from '../PublicHeader';
 import { APP_INSTALL_URL, APP_LOGIN_URL } from '../../../config/origins';
 
 function Location() {
-  return <span data-location>{useLocation().pathname}</span>;
+  const location = useLocation();
+  return <span data-location>{location.pathname}{location.hash}</span>;
 }
 
 describe('PublicHeader install shortcut', () => {
@@ -16,19 +17,54 @@ describe('PublicHeader install shortcut', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    vi.stubGlobal('scrollTo', vi.fn());
   });
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
 
   const installButton = () => [...container.querySelectorAll('button')]
     .find(button => button.textContent === 'Installer DiagLink') as HTMLButtonElement;
-  async function render(isAuthenticated: boolean) {
-    await act(async () => root.render(<MemoryRouter><PublicHeader loginTarget={APP_LOGIN_URL}
-      isAuthenticated={isAuthenticated} /><Location /></MemoryRouter>));
+  async function render(isAuthenticated: boolean, initialPath = '/', landingPath?: string) {
+    await act(async () => root.render(<MemoryRouter initialEntries={[initialPath]}><PublicHeader loginTarget={APP_LOGIN_URL}
+      isAuthenticated={isAuthenticated} landingPath={landingPath} /><Location /></MemoryRouter>));
   }
+
+  const homeLink = () => container.querySelector<HTMLAnchorElement>('[aria-label="DiagLink — accueil"]')!;
+
+  it('routes the logo from a secondary page to the landing page and scrolls to the top', async () => {
+    await render(false, '/contact', '/');
+
+    expect(homeLink().getAttribute('href')).toBe('/');
+    await act(async () => homeLink().click());
+
+    expect(container.querySelector('[data-location]')?.textContent).toBe('/');
+    expect(window.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 0, left: 0, behavior: 'auto' });
+  });
+
+  it('scrolls the landing page to the top when its logo is clicked', async () => {
+    await render(false);
+
+    await act(async () => homeLink().click());
+
+    expect(container.querySelector('[data-location]')?.textContent).toBe('/');
+    expect(window.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 0, left: 0, behavior: 'auto' });
+  });
+
+  it('keeps the same home link available when the mobile menu is open', async () => {
+    await render(false, '/confidentialite', '/');
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Ouvrir le menu"]')!.click());
+
+    expect(homeLink().getAttribute('href')).toBe('/');
+    expect(container.querySelector('[aria-label="Navigation mobile"]')).not.toBeNull();
+    await act(async () => homeLink().click());
+
+    expect(container.querySelector('[data-location]')?.textContent).toBe('/');
+    expect(window.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 0, left: 0, behavior: 'auto' });
+  });
 
   it.each([false, true])('opens the login installation route in a new tab when authenticated is %s', async isAuthenticated => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null);

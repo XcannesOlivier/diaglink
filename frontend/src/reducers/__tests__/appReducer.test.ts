@@ -66,6 +66,46 @@ function createMockUser(overrides: Partial<AccountInfo> = {}): AccountInfo {
   };
 }
 
+function populateUserScopedState(state: AppState): void {
+  const attachment = {
+    fileName: 'ancienne-photo.png',
+    fileSizeBytes: 42,
+    dataUri: 'data:image/png;base64,AA==',
+  };
+  state.branding = { companyId: 'company-a', logoVersion: 'v1', logoObjectUrl: 'blob:company-a' };
+  state.chat = {
+    status: 'streaming',
+    messages: [createMockMessage({ id: 'message-a', attachments: [attachment] })],
+    currentConversationId: 'conversation-a',
+    error: null,
+    streamingMessageId: 'assistant-a',
+    recoveredInput: 'Question du compte A',
+    recoveredAttachments: [attachment],
+    editSnapshot: [createMockMessage({ id: 'snapshot-a' })],
+    regenerateText: 'Relancer pour le compte A',
+    pendingMessages: [{
+      text: 'Message en attente du compte A',
+      files: [new File(['photo'], 'photo-a.png', { type: 'image/png' })],
+    }],
+  };
+  state.conversations = {
+    list: [{ id: 'conversation-a', title: 'Conversation A', createdAt: 1, lastActivityAt: 2 }],
+    isLoading: true,
+    sidebarOpen: true,
+    hasMore: true,
+  };
+  state.ui = { chatInputEnabled: false, currentView: 'machines' };
+  state.machine = { selected: { id: 'machine-a', name: 'Machine A', reference: 'A-1' } };
+}
+
+function expectUserScopedStateCleared(state: AppState): void {
+  expect(state.branding).toEqual(initialAppState.branding);
+  expect(state.chat).toEqual(initialAppState.chat);
+  expect(state.conversations).toEqual(initialAppState.conversations);
+  expect(state.ui).toEqual(initialAppState.ui);
+  expect(state.machine).toEqual(initialAppState.machine);
+}
+
 describe('appReducer', () => {
   describe('branding state', () => {
     it('initializes an empty logo slice', () => {
@@ -148,6 +188,39 @@ describe('appReducer', () => {
       expect(result.auth.user).toEqual(user);
       expect(result.auth.error).toBeNull();
     });
+
+    it('clears account data when the Microsoft account changes', () => {
+      const state = createInitialState();
+      state.auth.user = createMockUser({ homeAccountId: 'account-a' });
+      state.auth.currentUser = { userId: 'user-a', companyId: 'company-a', role: 'technician' };
+      populateUserScopedState(state);
+
+      const result = appReducer(state, {
+        type: 'AUTH_INITIALIZED',
+        user: createMockUser({ homeAccountId: 'account-b', username: 'b@example.test' }),
+      });
+
+      expect(result.auth.user?.homeAccountId).toBe('account-b');
+      expect(result.auth.currentUser).toBeNull();
+      expectUserScopedStateCleared(result);
+    });
+
+    it('preserves account data when the same Microsoft account is refreshed', () => {
+      const state = createInitialState();
+      state.auth.user = createMockUser({ homeAccountId: 'account-a' });
+      state.auth.currentUser = { userId: 'user-a', companyId: 'company-a', role: 'technician' };
+      populateUserScopedState(state);
+
+      const result = appReducer(state, {
+        type: 'AUTH_INITIALIZED',
+        user: createMockUser({ homeAccountId: 'account-a', name: 'Nom actualisé' }),
+      });
+
+      expect(result.chat).toBe(state.chat);
+      expect(result.conversations).toBe(state.conversations);
+      expect(result.machine).toBe(state.machine);
+      expect(result.auth.currentUser).toBe(state.auth.currentUser);
+    });
   });
 
   describe('AUTH_TOKEN_EXPIRED', () => {
@@ -159,6 +232,67 @@ describe('appReducer', () => {
       const result = appReducer(state, action);
 
       expect(result.auth.status).toBe('unauthenticated');
+    });
+
+    it('clears all data owned by the expired session', () => {
+      const state = createInitialState();
+      state.auth.status = 'authenticated';
+      state.auth.currentUser = { userId: 'user-a', companyId: 'company-a', role: 'technician' };
+      populateUserScopedState(state);
+
+      const result = appReducer(state, { type: 'AUTH_TOKEN_EXPIRED' });
+
+      expect(result.auth.currentUser).toBeNull();
+      expectUserScopedStateCleared(result);
+    });
+  });
+
+  describe('AUTH_CURRENT_USER lifecycle', () => {
+    it('clears all account data when the current session is cleared', () => {
+      const state = createInitialState();
+      state.auth.currentUser = { userId: 'user-a', companyId: 'company-a', role: 'technician' };
+      populateUserScopedState(state);
+
+      const result = appReducer(state, { type: 'AUTH_CURRENT_USER_CLEARED' });
+
+      expect(result.auth.currentUser).toBeNull();
+      expectUserScopedStateCleared(result);
+    });
+
+    it('clears account A data before loading account B', () => {
+      const state = createInitialState();
+      state.auth.currentUser = { userId: 'user-a', companyId: 'company-a', role: 'technician' };
+      populateUserScopedState(state);
+
+      const result = appReducer(state, {
+        type: 'AUTH_CURRENT_USER_LOADED',
+        currentUser: { userId: 'user-b', companyId: 'company-b', role: 'company_admin' },
+      });
+
+      expect(result.auth.currentUser?.userId).toBe('user-b');
+      expectUserScopedStateCleared(result);
+    });
+
+    it('preserves data when the same user is loaded again', () => {
+      const state = createInitialState();
+      state.auth.currentUser = { userId: 'user-a', companyId: 'company-a', role: 'technician' };
+      populateUserScopedState(state);
+
+      const result = appReducer(state, {
+        type: 'AUTH_CURRENT_USER_LOADED',
+        currentUser: {
+          userId: 'user-a',
+          companyId: 'company-a',
+          role: 'technician',
+          firstName: 'Prénom actualisé',
+        },
+      });
+
+      expect(result.chat).toBe(state.chat);
+      expect(result.conversations).toBe(state.conversations);
+      expect(result.ui).toBe(state.ui);
+      expect(result.machine).toBe(state.machine);
+      expect(result.auth.currentUser?.firstName).toBe('Prénom actualisé');
     });
   });
 
@@ -578,6 +712,7 @@ describe('appReducer', () => {
       const result = appReducer(state, { type: 'CHAT_CANCEL_STREAM' });
 
       expect(result.chat.status).toBe('idle');
+      expect(result.chat.lastStreamEndReason).toBe('cancelled');
     });
 
     it('clears streamingMessageId', () => {
@@ -596,6 +731,28 @@ describe('appReducer', () => {
       const result = appReducer(state, { type: 'CHAT_CANCEL_STREAM' });
 
       expect(result.ui.chatInputEnabled).toBe(true);
+    });
+
+    it('preserves partial content, conversation data, attachments, citations, visuals, and the queue', () => {
+      const state = createInitialState();
+      const attachment = { fileName: 'photo.png', fileSizeBytes: 1024, dataUri: 'data:image/png;base64,AA==' };
+      const annotation: IAnnotation = { type: 'uri_citation', label: 'Manuel', url: 'https://example.test/manual' };
+      const visual = { id: 7, documentId: 'manual', page: 12, assetType: 'full' as const, tile: null, name: 'page.png', displayOrder: 0 };
+      const queuedFile = new File(['queued'], 'queued.png', { type: 'image/png' });
+      state.chat.status = 'streaming';
+      state.chat.currentConversationId = 'conversation-42';
+      state.chat.streamingMessageId = 'assistant-1';
+      state.chat.messages = [
+        createMockMessage({ id: 'user-1', role: 'user', content: 'Question', attachments: [attachment] }),
+        createMockMessage({ id: 'assistant-1', role: 'assistant', content: 'Réponse partielle', annotations: [annotation], visuals: [visual] }),
+      ];
+      state.chat.pendingMessages = [{ text: 'Question suivante', files: [queuedFile] }];
+
+      const result = appReducer(state, { type: 'CHAT_CANCEL_STREAM' });
+
+      expect(result.chat.currentConversationId).toBe('conversation-42');
+      expect(result.chat.messages).toEqual(state.chat.messages);
+      expect(result.chat.pendingMessages).toEqual(state.chat.pendingMessages);
     });
   });
 
@@ -820,7 +977,7 @@ describe('appReducer', () => {
       expect(result.chat.recoveredInput).toBe('failed message');
     });
 
-    it('sets error with retry count message and enables input', () => {
+    it('uses a French recovery message without referring to automatic attempts', () => {
       const state = createInitialState();
       state.chat.messages = [
         createMockMessage({ id: 'user-1', role: 'user' }),
@@ -835,7 +992,8 @@ describe('appReducer', () => {
       });
 
       expect(result.chat.status).toBe('error');
-      expect(result.chat.error?.message).toContain('3 attempts');
+      expect(result.chat.error?.message).toBe("La réponse n'a pas pu être obtenue. Votre message a été restauré.");
+      expect(result.chat.error?.message).not.toContain('attempt');
       expect(result.chat.error?.recoverable).toBe(true);
       expect(result.ui.chatInputEnabled).toBe(true);
       expect(result.chat.streamingMessageId).toBeUndefined();
@@ -864,7 +1022,32 @@ describe('appReducer', () => {
       expect(result.ui.chatInputEnabled).toBe(true);
     });
 
-    it('uses singular "attempt" for retryCount of 1', () => {
+    it('restores exhausted-credit attachments in their original order', () => {
+      const state = createInitialState();
+      const attachments = Array.from({ length: 5 }, (_, index) => ({
+        fileName: `${index + 1}.png`,
+        fileSizeBytes: index + 1,
+        dataUri: `data:image/png;base64,${index + 1}`,
+      }));
+      state.chat.messages = [
+        createMockMessage({ id: 'user-1', role: 'user', attachments }),
+        createMockMessage({ id: 'assistant-1', role: 'assistant' }),
+      ];
+
+      const result = appReducer(state, {
+        type: 'CHAT_RECOVER_MESSAGE',
+        messageText: 'Photos en attente',
+        attachments,
+        error: { code: 'AiCreditExhausted', message: 'CrÃ©dit Ã©puisÃ©', recoverable: false },
+        retryCount: 0,
+      });
+
+      expect(result.chat.messages).toEqual([]);
+      expect(result.chat.recoveredInput).toBe('Photos en attente');
+      expect(result.chat.recoveredAttachments).toEqual(attachments);
+    });
+
+    it('does not expose the obsolete retry count in the recovery message', () => {
       const state = createInitialState();
       state.chat.messages = [
         createMockMessage({ id: 'user-1', role: 'user' }),
@@ -878,8 +1061,8 @@ describe('appReducer', () => {
         retryCount: 1,
       });
 
-      expect(result.chat.error?.message).toContain('1 attempt');
-      expect(result.chat.error?.message).not.toContain('1 attempts');
+      expect(result.chat.error?.message).toBe("La réponse n'a pas pu être obtenue. Votre message a été restauré.");
+      expect(result.chat.error?.message).not.toContain('1');
     });
 
     it('handles empty message array gracefully', () => {
@@ -917,13 +1100,19 @@ describe('appReducer', () => {
   });
 
   describe('CHAT_CONSUMED_RECOVERED_INPUT', () => {
-    it('clears recoveredInput', () => {
+    it('clears recovered text and photos after the input consumed them', () => {
       const state = createInitialState();
       state.chat.recoveredInput = 'restored text';
+      state.chat.recoveredAttachments = [{
+        fileName: 'restored.png',
+        fileSizeBytes: 1,
+        dataUri: 'data:image/png;base64,AQ==',
+      }];
 
       const result = appReducer(state, { type: 'CHAT_CONSUMED_RECOVERED_INPUT' });
 
       expect(result.chat.recoveredInput).toBeUndefined();
+      expect(result.chat.recoveredAttachments).toBeUndefined();
     });
 
     it('does not change other chat state', () => {
@@ -955,6 +1144,20 @@ describe('appReducer', () => {
       const result = appReducer(state, { type: 'CHAT_QUEUE_MESSAGE', text: 'second' });
 
       expect(result.chat.pendingMessages).toEqual([{ text: 'first' }, { text: 'second', files: undefined }]);
+    });
+
+    it('keeps queued photos and their order until they are sent', () => {
+      const state = createInitialState();
+      const files = [
+        new File(['one'], 'queued-1.png', { type: 'image/png' }),
+        new File(['two'], 'queued-2.jpg', { type: 'image/jpeg' }),
+      ];
+
+      const result = appReducer(state, { type: 'CHAT_QUEUE_MESSAGE', text: 'queued', files });
+
+      expect(result.chat.pendingMessages).toEqual([{ text: 'queued', files }]);
+      expect(result.chat.pendingMessages[0].files?.map(file => file.name))
+        .toEqual(['queued-1.png', 'queued-2.jpg']);
     });
   });
 
@@ -1013,6 +1216,27 @@ describe('appReducer', () => {
 
       expect(result.chat.pendingMessages).toEqual([]);
     });
+
+    it('discards recovery and regeneration state from the previous conversation', () => {
+      const state = createInitialState();
+      state.chat.recoveredInput = 'Question from conversation A';
+      state.chat.recoveredAttachments = [{
+        fileName: 'old-photo.png',
+        fileSizeBytes: 10,
+        dataUri: 'data:image/png;base64,AA==',
+      }];
+      state.chat.regenerateText = 'Regenerate in conversation A';
+
+      const result = appReducer(state, {
+        type: 'CHAT_LOAD_CONVERSATION',
+        conversationId: 'conversation-b',
+        messages: [],
+      });
+
+      expect(result.chat.recoveredInput).toBeUndefined();
+      expect(result.chat.recoveredAttachments).toBeUndefined();
+      expect(result.chat.regenerateText).toBeUndefined();
+    });
   });
 
   describe('CHAT_START_STREAM', () => {
@@ -1030,15 +1254,21 @@ describe('appReducer', () => {
   });
 
   describe('CHAT_CLEAR_ERROR', () => {
-    it('clears recoveredInput along with error', () => {
+    it('keeps recovered text and photos available until the input consumes them', () => {
       const state = createInitialState();
       state.chat.error = { code: 'NETWORK', message: 'Error', recoverable: true };
       state.chat.recoveredInput = 'leftover text';
+      state.chat.recoveredAttachments = [{
+        fileName: 'photo.png',
+        fileSizeBytes: 10,
+        dataUri: 'data:image/png;base64,AA==',
+      }];
       state.chat.status = 'error';
 
       const result = appReducer(state, { type: 'CHAT_CLEAR_ERROR' });
 
-      expect(result.chat.recoveredInput).toBeUndefined();
+      expect(result.chat.recoveredInput).toBe('leftover text');
+      expect(result.chat.recoveredAttachments).toEqual(state.chat.recoveredAttachments);
       expect(result.chat.error).toBeNull();
       expect(result.chat.status).toBe('idle');
     });
@@ -1066,6 +1296,7 @@ describe('appReducer', () => {
       expect(msg.retryAttempt).toBeUndefined();
       expect(msg.maxRetries).toBeUndefined();
       expect(msg.more?.usage?.totalTokens).toBe(150);
+      expect(result.chat.lastStreamEndReason).toBe('completed');
     });
   });
 
@@ -1324,6 +1555,7 @@ describe('appReducer', () => {
   describe('CHAT_REGENERATE', () => {
     it('removes last assistant and its preceding user message, stores user text as regenerateText', () => {
       const state = createInitialState();
+      state.chat.lastStreamEndReason = 'completed';
       state.chat.messages = [
         createMockMessage({ id: 'user-1', role: 'user', content: 'What is AI?' }),
         createMockMessage({ id: 'assistant-1', role: 'assistant', content: 'AI is...' }),
@@ -1333,6 +1565,7 @@ describe('appReducer', () => {
 
       expect(result.chat.messages).toHaveLength(0);
       expect(result.chat.regenerateText).toBe('What is AI?');
+      expect(result.chat.lastStreamEndReason).toBeUndefined();
     });
 
     it('sets status to idle and enables input', () => {
@@ -1544,6 +1777,7 @@ describe('appReducer', () => {
           "chat.currentConversationId",
           "chat.editSnapshot",
           "chat.error",
+          "chat.lastStreamEndReason",
           "chat.messages",
           "chat.pendingMessages",
           "chat.recoveredAttachments",

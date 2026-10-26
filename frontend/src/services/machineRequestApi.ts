@@ -21,9 +21,17 @@ export class MachineRequestSubmissionError extends Error {
   }
 }
 
-export function buildMachineRequestFormData(values: StartFormValues, files: File[], paymentRequestId: string) {
+export function buildMachineRequestFormData(
+  values: StartFormValues,
+  files: File[],
+  paymentRequestId: string,
+  termsAccepted: boolean,
+  termsVersion: string,
+) {
   const formData = new FormData();
   formData.append('paymentRequestId', paymentRequestId);
+  formData.append('termsAccepted', String(termsAccepted));
+  formData.append('termsVersion', termsVersion);
   formData.append('firstName', values.firstName);
   formData.append('lastName', values.lastName);
   formData.append('company', values.company);
@@ -49,12 +57,18 @@ function getSafeApiError(payload: unknown) {
   return typeof problem.title === 'string' ? problem.title : null;
 }
 
-export async function submitMachineRequest(values: StartFormValues, files: File[], paymentRequestId: string): Promise<MachineRequestResponse> {
+export async function submitMachineRequest(
+  values: StartFormValues,
+  files: File[],
+  paymentRequestId: string,
+  termsAccepted: boolean,
+  termsVersion: string,
+): Promise<MachineRequestResponse> {
   let response: Response;
   try {
     response = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/public/machine-requests`, {
       method: 'POST',
-      body: buildMachineRequestFormData(values, files, paymentRequestId),
+      body: buildMachineRequestFormData(values, files, paymentRequestId, termsAccepted, termsVersion),
     });
   } catch {
     throw new MachineRequestSubmissionError('Impossible de contacter le service pour le moment. Veuillez réessayer.', true);

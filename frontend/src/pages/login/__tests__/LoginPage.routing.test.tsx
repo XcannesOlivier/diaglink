@@ -28,6 +28,8 @@ describe('LoginPage routing', () => {
             showCodeStep={false}
             code=""
             setCode={() => undefined}
+            codeCheckMessage={null}
+            isVerifyingCode={false}
             handleContinue={async () => undefined}
             handleVerifyCode={async () => false}
             handleChangeEmail={() => undefined}
@@ -63,6 +65,8 @@ describe('LoginPage routing', () => {
             showCodeStep={false}
             code=""
             setCode={() => undefined}
+            codeCheckMessage={null}
+            isVerifyingCode={false}
             handleContinue={async () => undefined}
             handleVerifyCode={async () => false}
             handleChangeEmail={() => undefined}
@@ -102,6 +106,8 @@ describe('LoginPage routing', () => {
             showCodeStep={false}
             code=""
             setCode={() => undefined}
+            codeCheckMessage={null}
+            isVerifyingCode={false}
             handleContinue={async () => undefined}
             handleVerifyCode={async () => false}
             handleChangeEmail={() => undefined}

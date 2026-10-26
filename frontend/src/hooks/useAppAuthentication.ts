@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { useAppState } from './useAppState';
 import { useAuth } from './useAuth';
@@ -14,6 +14,9 @@ export function useAppAuthentication() {
   const [isCheckingEmail, setIsCheckingEmail] = useState(false);
   const [showCodeStep, setShowCodeStep] = useState(false);
   const [code, setCode] = useState('');
+  const [codeCheckMessage, setCodeCheckMessage] = useState<string | null>(null);
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const verifyCodeInFlight = useRef(false);
   const [diagLinkSessionCreated, setDiagLinkSessionCreated] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
 
@@ -93,6 +96,10 @@ export function useAppAuthentication() {
       const codeResponse = await fetch(`${apiUrl}/auth/request-code`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: trimmedEmail }),
       });
+      if (codeResponse.status === 429) {
+        setEmailCheckMessage('Trop de tentatives. Veuillez réessayer plus tard.');
+        return;
+      }
       if (!codeResponse.ok) throw new Error(`HTTP ${codeResponse.status}: ${codeResponse.statusText}`);
       const codeData = await codeResponse.json();
       if (codeData.success) setShowCodeStep(true);
@@ -108,12 +115,19 @@ export function useAppAuthentication() {
   const handleVerifyCode = useCallback(async (codeToVerify?: string): Promise<boolean> => {
     const trimmedEmail = email.trim();
     const trimmedCode = (codeToVerify ?? code).trim();
-    if (!trimmedEmail || trimmedCode.length !== 6) return false;
+    if (!trimmedEmail || trimmedCode.length !== 6 || verifyCodeInFlight.current) return false;
+    verifyCodeInFlight.current = true;
+    setIsVerifyingCode(true);
+    setCodeCheckMessage(null);
     try {
       const apiUrl = import.meta.env.VITE_API_URL || '/api';
       const response = await fetch(`${apiUrl}/auth/verify-code`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: trimmedEmail, code: trimmedCode }),
       });
+      if (response.status === 429) {
+        setCodeCheckMessage('Trop de tentatives. Veuillez réessayer plus tard.');
+        return false;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       const data = await response.json();
       if (data.success && data.sessionToken && data.expiresAtUtc) {
@@ -122,19 +136,28 @@ export function useAppAuthentication() {
         await loadCurrentUser();
         return true;
       }
-      alert('Code incorrect ou expiré');
+      setCodeCheckMessage('Code incorrect ou expiré.');
     } catch (error) {
       console.error('Error verifying login code:', error);
-      alert('Impossible de vérifier le code.');
+      setCodeCheckMessage('Impossible de vérifier le code. Veuillez réessayer.');
+    } finally {
+      verifyCodeInFlight.current = false;
+      setIsVerifyingCode(false);
     }
     return false;
   }, [code, email, loadCurrentUser]);
+
+  const updateCode = useCallback((value: string) => {
+    setCode(value);
+    setCodeCheckMessage(null);
+  }, []);
 
   const handleChangeEmail = useCallback(() => {
     setShowCodeStep(false);
     setCode('');
     setEmailCheckMessage(null);
+    setCodeCheckMessage(null);
   }, []);
 
-  return { isAuthenticated: accounts.length > 0 || diagLinkSessionCreated, isCheckingSession, email, setEmail, emailCheckMessage, isCheckingEmail, showCodeStep, code, setCode, handleContinue, handleVerifyCode, handleChangeEmail, expireDiagLinkSession };
+  return { isAuthenticated: accounts.length > 0 || diagLinkSessionCreated, isCheckingSession, email, setEmail, emailCheckMessage, isCheckingEmail, showCodeStep, code, setCode: updateCode, codeCheckMessage, isVerifyingCode, handleContinue, handleVerifyCode, handleChangeEmail, expireDiagLinkSession };
 }

@@ -196,8 +196,8 @@ export class ChatService {
   /**
    * Send a message and stream the response from the Azure AI Agent.
    * Orchestrates authentication, file conversion, optimistic UI updates, and streaming.
-   * Retries the full stream cycle up to 3 times on retryable errors, then recovers
-   * the message text back to the input if all retries fail.
+   * Sends the chat request exactly once. An interrupted stream is never replayed
+   * automatically because the server may already have started processing it.
    *
    * @param messageText - The user's message text
    * @param currentConversationId - Current conversation ID (null for new conversations)
@@ -262,125 +262,74 @@ export class ChatService {
       machineId
     );
 
-    // Each retry can launch another billable provider response after partial consumption.
-    // Usage events describe individual attempts, not an idempotent total for this UI message.
-    const maxRetries = 3;
-    let lastError: unknown;
-    let hasReceivedVisibleChunk = false;
+    try {
+      this.currentStreamAbort = new AbortController();
+      this.streamCancelled = false;
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        if (attempt > 1) {
-          this.dispatch({
-            type: 'CHAT_STREAM_RETRY',
-            messageId: assistantMessageId,
-            attempt,
-            maxRetries,
-          });
-          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
-        }
+      const response = await this.initiateStream(
+        `${this.apiUrl}/chat/stream`,
+        authHeaders,
+        requestBody,
+        this.currentStreamAbort.signal
+      );
 
-        this.currentStreamAbort = new AbortController();
-        this.streamCancelled = false;
+      await this.processStream(response, assistantMessageId, currentConversationId);
+      this.currentStreamAbort = undefined;
+      this.streamCancelled = false;
+    } catch (error) {
+      this.currentStreamAbort = undefined;
+      this.streamCancelled = false;
 
-        const response = await this.initiateStream(
-          `${this.apiUrl}/chat/stream`,
-          authHeaders,
-          requestBody,
-          this.currentStreamAbort.signal
-        );
-
-        await this.processStream(
-          response,
-          assistantMessageId,
-          currentConversationId,
-          () => {
-            hasReceivedVisibleChunk = true;
-          }
-        );
-        this.currentStreamAbort = undefined;
-        this.streamCancelled = false;
+      // An intentional cancellation is terminal and must never be replayed.
+      if (error instanceof DOMException && error.name === 'AbortError') {
         return;
-       } catch (error) {
-         lastError = error;
-         this.currentStreamAbort = undefined;
-         this.streamCancelled = false;
-
-         // User cancelled
-         if (error instanceof DOMException && error.name === 'AbortError') {
-           return;
-         }
-
-         if (isTokenExpiredError(error)) {
-           this.dispatch({ type: 'AUTH_TOKEN_EXPIRED' });
-           throw error;
-         }
-
-         if (isAppError(error) && error.code === 'AiCreditExhausted') {
-           this.dispatch({
-             type: 'CHAT_RECOVER_MESSAGE',
-             messageText,
-             error,
-             retryCount: 0,
-           });
-           throw error;
-         }
-
-         if (isAppError(error) && error.code === 'AUTH') {
-           this.dispatch({ type: 'CHAT_ERROR', error });
-           throw error;
-         }
-
-         // Never retry a provider request after visible content has already
-         // been streamed to the user. A retry could create another billable call.
-         if (hasReceivedVisibleChunk) {
-           const appError: AppError = isAppError(error)
-             ? error
-             : createAppError(error, getErrorCodeFromMessage(error));
-
-           this.dispatch({
-             type: 'CHAT_ERROR',
-             error: appError,
-           });
-
-           trackException(
-             error instanceof Error ? error : new Error(String(error)),
-             {
-               context: 'sendMessage-after-partial-stream',
-               retryCount: String(attempt - 1),
-             }
-           );
-
-           return;
-         }
-
-        if (attempt === maxRetries) {
-          break;
-        }
       }
 
+      if (isTokenExpiredError(error)) {
+        this.dispatch({ type: 'AUTH_TOKEN_EXPIRED' });
+        throw error;
+      }
+
+      if (isAppError(error) && error.code === 'AiCreditExhausted') {
+        this.dispatch({
+          type: 'CHAT_RECOVER_MESSAGE',
+          messageText,
+          attachments,
+          error,
+          retryCount: 0,
+        });
+        throw error;
+      }
+
+      if (isAppError(error) && error.code === 'AUTH') {
+        this.dispatch({ type: 'CHAT_ERROR', error });
+        throw error;
+      }
+
+      const appError: AppError = isAppError(error)
+        ? error
+        : createAppError(error, getErrorCodeFromMessage(error));
+      const mayHaveBeenProcessed = appError.code === 'NETWORK'
+        || appError.code === 'STREAM'
+        || appError.code === 'UNKNOWN';
+      const displayedError: AppError = mayHaveBeenProcessed
+        ? {
+            ...appError,
+            message: 'La réponse a été interrompue. Le traitement a peut-être déjà eu lieu côté serveur. Consultez l’historique de la conversation avant de renvoyer votre question.',
+          }
+        : appError;
+
+      this.dispatch({ type: 'CHAT_ERROR', error: displayedError });
+      trackException(error instanceof Error ? error : new Error(String(error)), {
+        context: 'sendMessage',
+        retryCount: '0',
+      });
     }
-
-    trackException(lastError instanceof Error ? lastError : new Error(String(lastError)), {
-      context: 'sendMessage',
-      retryCount: String(maxRetries),
-    });
-
-    const appError: AppError = isAppError(lastError)
-      ? lastError
-      : createAppError(lastError, getErrorCodeFromMessage(lastError));
-
-    this.dispatch({
-      type: 'CHAT_RECOVER_MESSAGE',
-      messageText,
-      error: appError,
-      retryCount: maxRetries,
-    });
   }
 
   /**
    * Process Server-Sent Events stream from the API.
-   * Implements duplicate chunk suppression to prevent UI flicker.
+   * Forwards every text delta in order; identical consecutive deltas are valid content.
    *
    * @param response - Fetch Response object with SSE stream
    * @param messageId - ID of the assistant message being streamed
@@ -390,8 +339,7 @@ export class ChatService {
   private async processStream(
     response: Response,
     messageId: string,
-    currentConversationId: string | null,
-    onVisibleChunk?: () => void
+    currentConversationId: string | null
   ): Promise<void> {
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
@@ -406,7 +354,6 @@ export class ChatService {
     }
 
     let newConversationId = currentConversationId;
-    let lastChunkContent: string | undefined;
     let buffer = '';
 
     try {
@@ -451,19 +398,11 @@ export class ChatService {
               break;
 
             case 'chunk':
-              if (event.data.content !== lastChunkContent) {
-                if (event.data.content.length > 0) {
-                  onVisibleChunk?.();
-                }
-
-                this.dispatch({
-                  type: 'CHAT_STREAM_CHUNK',
-                  messageId,
-                  content: event.data.content,
-                });
-
-                lastChunkContent = event.data.content;
-              }
+              this.dispatch({
+                type: 'CHAT_STREAM_CHUNK',
+                messageId,
+                content: event.data.content,
+              });
               break;
 
             case 'annotations':

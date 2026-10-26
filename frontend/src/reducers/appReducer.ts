@@ -1,7 +1,23 @@
-import type { AppState, AppAction } from '../types/appState';
+import { initialAppState, type AppState, type AppAction } from '../types/appState';
 import { resolveView } from '../utils/navigation';
 import { parseTechnicalVisuals } from '../utils/technicalVisuals';
 import { parseTechnicalSources } from '../utils/technicalSources';
+
+const clearUserScopedState = (state: AppState): AppState => ({
+  ...state,
+  branding: { ...initialAppState.branding },
+  chat: {
+    ...initialAppState.chat,
+    messages: [],
+    pendingMessages: [],
+  },
+  conversations: {
+    ...initialAppState.conversations,
+    list: [],
+  },
+  ui: { ...initialAppState.ui },
+  machine: { ...initialAppState.machine },
+});
 
 /**
  * Main application state reducer.
@@ -20,62 +36,65 @@ import { parseTechnicalSources } from '../utils/technicalSources';
 export const appReducer = (state: AppState, action: AppAction): AppState => {
   switch (action.type) {
     // === Authentication Actions ===
-    case 'AUTH_INITIALIZED':
+    case 'AUTH_INITIALIZED': {
+      const accountChanged = state.auth.user !== null &&
+        state.auth.user.homeAccountId !== action.user.homeAccountId;
+      const nextState = accountChanged ? clearUserScopedState(state) : state;
       return {
-        ...state,
+        ...nextState,
         auth: {
           status: 'authenticated',
           user: action.user,
           error: null,
-          currentUser: state.auth.currentUser,
+          currentUser: accountChanged ? null : nextState.auth.currentUser,
         },
       };
+    }
 
-    case 'AUTH_TOKEN_EXPIRED':
+    case 'AUTH_TOKEN_EXPIRED': {
+      const nextState = clearUserScopedState(state);
       return {
-        ...state,
+        ...nextState,
         auth: {
-          ...state.auth,
+          ...nextState.auth,
           status: 'unauthenticated',
           currentUser: null,
         },
-        branding: {
-          companyId: null,
-          logoVersion: null,
-          logoObjectUrl: null,
-        },
       };
+    }
 
     case 'AUTH_CURRENT_USER_LOADED': {
+      const identityChanged = state.auth.currentUser !== null && (
+        state.auth.currentUser.userId !== action.currentUser.userId ||
+        state.auth.currentUser.companyId !== action.currentUser.companyId
+      );
+      const nextState = identityChanged ? clearUserScopedState(state) : state;
       const requestedBranding = action.currentUser.companyBranding;
       const keepCurrentLogo = requestedBranding?.hasLogo === true &&
-        state.branding.companyId === action.currentUser.companyId &&
-        state.branding.logoVersion === requestedBranding.logoVersion;
+        nextState.branding.companyId === action.currentUser.companyId &&
+        nextState.branding.logoVersion === requestedBranding.logoVersion;
       return {
-        ...state,
+        ...nextState,
         auth: {
-          ...state.auth,
+          ...nextState.auth,
           currentUser: action.currentUser,
         },
         branding: keepCurrentLogo
-          ? state.branding
+          ? nextState.branding
           : { companyId: null, logoVersion: null, logoObjectUrl: null },
       };
     }
 
-    case 'AUTH_CURRENT_USER_CLEARED':
+    case 'AUTH_CURRENT_USER_CLEARED': {
+      const nextState = clearUserScopedState(state);
       return {
-        ...state,
+        ...nextState,
         auth: {
-          ...state.auth,
+          ...nextState.auth,
           currentUser: null,
         },
-        branding: {
-          companyId: null,
-          logoVersion: null,
-          logoObjectUrl: null,
-        },
       };
+    }
 
     case 'COMPANY_LOGO_LOADED':
       return {
@@ -105,6 +124,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           ...state.chat,
           status: 'sending',
           messages: [...state.chat.messages, action.message],
+          lastStreamEndReason: undefined,
           editSnapshot: undefined,
         },
       };
@@ -130,7 +150,10 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           error: null,
           pendingMessages: [],
           editSnapshot: undefined,
+          recoveredInput: undefined,
           recoveredAttachments: undefined,
+          regenerateText: undefined,
+          lastStreamEndReason: undefined,
         },
         ui: {
           ...state.ui,
@@ -168,6 +191,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           currentConversationId: action.conversationId || state.chat.currentConversationId,
           streamingMessageId: action.messageId,
           error: null,
+          lastStreamEndReason: undefined,
         },
         ui: {
           ...state.ui,
@@ -332,6 +356,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           ...state.chat,
           status: 'idle',
           streamingMessageId: undefined,
+          lastStreamEndReason: 'completed',
           messages: updatedMessages,
         },
         ui: {
@@ -348,6 +373,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           ...state.chat,
           status: 'idle',
           streamingMessageId: undefined,
+          lastStreamEndReason: 'cancelled',
         },
         ui: {
           ...state.ui,
@@ -364,6 +390,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           status: 'error',
           error: action.error,
           streamingMessageId: undefined,
+          lastStreamEndReason: undefined,
         },
         ui: {
           ...state.ui,
@@ -378,7 +405,6 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           ...state.chat,
           error: null,
           status: 'idle',
-          recoveredInput: undefined, recoveredAttachments: undefined,
         },
         ui: {
           ...state.ui,
@@ -395,6 +421,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           currentConversationId: null,
           error: null,
           streamingMessageId: undefined,
+          lastStreamEndReason: undefined,
           recoveredInput: undefined, recoveredAttachments: undefined,
           pendingMessages: [],
         },
@@ -445,12 +472,14 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           status: 'error',
           messages: recoveredMessages,
           streamingMessageId: undefined,
+          lastStreamEndReason: undefined,
           recoveredInput: action.messageText,
+          recoveredAttachments: action.attachments,
           error: {
             ...action.error,
             message: action.error.code === 'AiCreditExhausted'
               ? action.error.message
-              : `Failed to get a response after ${action.retryCount} ${action.retryCount === 1 ? 'attempt' : 'attempts'}. Your message has been restored.`,
+              : "La réponse n'a pas pu être obtenue. Votre message a été restauré.",
             recoverable: action.error.code === 'AiCreditExhausted'
               ? action.error.recoverable
               : true,
@@ -524,6 +553,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           messages: msgs.slice(0, sliceEnd),
           status: 'idle',
           streamingMessageId: undefined,
+          lastStreamEndReason: undefined,
           regenerateText,
         },
         ui: {
@@ -544,6 +574,7 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           messages: state.chat.messages.slice(0, targetIdx),
           status: 'idle',
           streamingMessageId: undefined,
+          lastStreamEndReason: undefined,
           recoveredInput: action.newText,
           recoveredAttachments: targetMsg.attachments,
           editSnapshot: state.chat.messages.slice(targetIdx),

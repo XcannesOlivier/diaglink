@@ -1,8 +1,9 @@
 import { PDFDocument } from 'pdf-lib';
 
 export const MAX_PDF_COUNT = 10;
-export const MAX_PDF_BYTES = 50 * 1024 * 1024;
+export const MAX_PDF_BYTES = 200 * 1024 * 1024;
 export const MAX_COMBINED_PDF_BYTES = 200 * 1024 * 1024;
+export const COMBINED_PDF_LIMIT_ERROR = 'La taille totale des PDF ne peut pas dépasser 200 Mio.';
 
 export type SelectedPdf = { id: number; file: File; pageCount: number };
 
@@ -26,11 +27,11 @@ export async function inspectPdfFiles(files: File[], current: SelectedPdf[], nex
       continue;
     }
     if (file.size <= 0 || file.size > MAX_PDF_BYTES) {
-      errors.push(`${file.name} : le fichier est vide ou dépasse 50 Mo.`);
+      errors.push(`${file.name} : le fichier est vide ou dépasse 200 Mio.`);
       continue;
     }
     if (combinedBytes + file.size > MAX_COMBINED_PDF_BYTES) {
-      errors.push('La taille totale des PDF ne peut pas dépasser 200 Mo.');
+      errors.push(COMBINED_PDF_LIMIT_ERROR);
       continue;
     }
     try {

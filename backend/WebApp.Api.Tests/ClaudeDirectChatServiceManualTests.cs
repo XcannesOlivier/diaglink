@@ -48,9 +48,7 @@ public sealed class ClaudeDirectChatServiceManualTests
             markerReader,
             promptProvider,
             NullLogger<ClaudeDirectMachineConfigurationResolver>.Instance);
-        var requestFactory = new ClaudeDirectChatRequestFactory(
-            resolver,
-            new GlobalCommercialPolicyProvider(Options.Create(new CommercialPolicyOptions())));
+        var requestFactory = new ClaudeDirectChatRequestFactory(resolver);
         var pageMapResolver = new TechnicalPageMapResolver(
             blobReader,
             NullLogger<TechnicalPageMapResolver>.Instance);
@@ -64,7 +62,7 @@ public sealed class ClaudeDirectChatServiceManualTests
             {
                 FoundryAnthropicEndpoint = "https://diaglink-foundry-prod.services.ai.azure.com/anthropic",
                 Deployment = Environment.GetEnvironmentVariable("CLAUDE_DIRECT_MANUAL_DEPLOYMENT")
-                    ?? "claude-sonnet-5",
+                    ?? "claude-sonnet-5-5",
                 MaxMessageCalls = 4,
                 MaxImageBytes = 5 * 1024 * 1024
             }),

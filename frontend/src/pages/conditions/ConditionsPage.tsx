@@ -6,6 +6,7 @@ import { APP_LOGIN_URL } from '../../config/origins';
 import landingStyles from '../landing/LandingPage.module.css';
 import legalStyles from '../privacy/PrivacyPage.module.css';
 import styles from './ConditionsPage.module.css';
+import { CURRENT_TERMS_UPDATED_LABEL } from './termsVersion';
 
 export function ConditionsContent({ compact = false, showTitle = true }: { compact?: boolean; showTitle?: boolean }) {
   return (
@@ -16,7 +17,7 @@ export function ConditionsContent({ compact = false, showTitle = true }: { compa
               <h1>Conditions générales de service</h1>
             </>}
             <p className={styles.introText}>Les présentes Conditions générales de service régissent la souscription et l’utilisation du service <strong>DiagLink</strong>, exploité par <strong>XCANNES LLC</strong>.</p>
-            <div className={styles.updated}>Dernière mise à jour : septembre 2026</div>
+            <div className={styles.updated}>Dernière mise à jour : {CURRENT_TERMS_UPDATED_LABEL}</div>
           </header>
 
           <section>

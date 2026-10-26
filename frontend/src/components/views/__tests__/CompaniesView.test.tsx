@@ -24,6 +24,7 @@ const mounted: { root: Root; container: HTMLDivElement }[] = [];
 afterEach(async () => {
   for (const { root, container } of mounted.splice(0)) { await act(async () => root.unmount()); container.remove(); }
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 async function fillRequiredForm() {
@@ -51,7 +52,12 @@ async function renderView(): Promise<HTMLDivElement> {
 
 describe('CompaniesView (super_admin)', () => {
   beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => [] }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: async () => [],
+    }));
     getCompaniesMock.mockReset();
     onboardCompanyMock.mockReset();
     getCompaniesMock.mockResolvedValue({ kind: 'success', data: [] });
@@ -70,6 +76,36 @@ describe('CompaniesView (super_admin)', () => {
 
     expect(container.textContent).toContain('Acme Corp');
     expect(container.textContent).toContain('Globex');
+    expect(container.textContent).toContain('Active');
+    expect(container.textContent).toContain('Inactive');
+    expect(container.textContent).not.toMatch(/\bactive\b|\binactive\b/);
+  });
+
+  it('active les lignes au clic, avec Entrée et avec Espace sans faire défiler la page', async () => {
+    getCompaniesMock.mockResolvedValue({
+      kind: 'success',
+      data: [
+        { id: 'c1', name: 'Acme Corp', status: 'active' },
+        { id: 'c2', name: 'Globex', status: 'inactive' },
+      ],
+    });
+
+    const container = await renderView();
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('[role="button"]'));
+
+    await act(async () => rows[0].click());
+    expect(rows[0].getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(rows[0].getAttribute('aria-controls')!)).not.toBeNull();
+
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => rows[1].dispatchEvent(enter));
+    expect(enter.defaultPrevented).toBe(true);
+    expect(rows[1].getAttribute('aria-expanded')).toBe('true');
+
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => rows[0].dispatchEvent(space));
+    expect(space.defaultPrevented).toBe(true);
+    expect(rows[0].getAttribute('aria-expanded')).toBe('true');
   });
 
   it('affiche un état vide quand aucune entreprise cliente', async () => {
@@ -169,7 +205,8 @@ describe('CompaniesView (super_admin)', () => {
     expect(document.body.textContent).toContain("Nom de l'entreprise");
   });
 
-  it('upload les fichiers en FormData sans définir Content-Type manuellement', async () => {
+  it('utilise /api par défaut et conserve le FormData sans Content-Type manuel', async () => {
+    vi.stubEnv('VITE_API_URL', '');
     onboardCompanyMock.mockResolvedValue({
       kind: 'success',
       data: {
@@ -177,7 +214,10 @@ describe('CompaniesView (super_admin)', () => {
         admin: { id: 'u1', email: 'admin@acme.test', role: 'company_admin', status: 'active' },
       },
     });
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ uploaded: ['acme-corp/machine-a/doc.pdf'] }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    }));
     vi.stubGlobal('fetch', fetchMock);
 
     const container = await renderView();
@@ -216,6 +256,61 @@ describe('CompaniesView (super_admin)', () => {
     expect(body.get('companyName')).toBe('Acme Corp');
     expect(body.get('machineName')).toBe('Machine A');
     expect(body.getAll('files')).toEqual([file]);
+  });
+
+  it('utilise VITE_API_URL lorsque le frontend et le backend sont séparés', async () => {
+    vi.stubEnv('VITE_API_URL', 'https://api.diaglink.test/api');
+    onboardCompanyMock.mockResolvedValue({
+      kind: 'success',
+      data: {
+        company: { id: 'c1', name: 'Acme Corp', status: 'active' },
+        admin: { id: 'u1', email: 'admin@acme.test', role: 'company_admin', status: 'active' },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ uploaded: ['acme-corp/machine-a/test.pdf'] }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = await renderView();
+    const addButton = Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Ajouter une entreprise');
+    await act(async () => addButton!.click());
+    await fillRequiredForm();
+
+    const submitButton = Array.from(document.querySelectorAll('button')).find(b => b.textContent === "Créer l'entreprise");
+    await act(async () => submitButton!.click());
+
+    expect(fetchMock).toHaveBeenCalledWith('https://api.diaglink.test/api/files/upload', expect.objectContaining({
+      method: 'POST',
+      body: expect.any(FormData),
+    }));
+  });
+
+  it('refuse une réponse HTML 2xx inattendue au lieu de confirmer l\'import', async () => {
+    onboardCompanyMock.mockResolvedValue({
+      kind: 'success',
+      data: {
+        company: { id: 'c1', name: 'Acme Corp', status: 'active' },
+        admin: { id: 'u1', email: 'admin@acme.test', role: 'company_admin', status: 'active' },
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<!doctype html><html></html>', {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    })));
+
+    const container = await renderView();
+    const addButton = Array.from(container.querySelectorAll('button')).find(b => b.textContent === 'Ajouter une entreprise');
+    await act(async () => addButton!.click());
+    await fillRequiredForm();
+
+    const submitButton = Array.from(document.querySelectorAll('button')).find(b => b.textContent === "Créer l'entreprise");
+    await act(async () => submitButton!.click());
+
+    expect(document.body.textContent).toContain('unexpected HTML response');
+    expect(document.body.textContent).not.toContain('Entreprise créée.');
+    expect(document.body.textContent).toContain("Nom de l'entreprise");
   });
 });
 

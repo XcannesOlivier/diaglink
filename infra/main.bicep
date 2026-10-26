@@ -95,7 +95,7 @@ param publicCustomDomainName string
 @description('Name of the existing Container Apps managed certificate for the public domain.')
 param publicCustomDomainCertificateName string = ''
 
-param claudeDirectDeployment string = 'claude-sonnet-5'
+param claudeDirectDeployment string = 'claude-sonnet-5-5'
 param claudeFileSearchDiagnosticsEnabled bool = false
 param aiPricingIdentityDeployments array
 param postgresTunnelImageName string

@@ -23,6 +23,11 @@ export function ThemePicker() {
         value: 'Dark',
         text: 'Sombre',
       },
+      {
+        key: 'System',
+        value: 'System',
+        text: 'Système',
+      },
     ],
     []
   );

@@ -19,8 +19,7 @@ public sealed record ClaudeDirectMessage(
 public sealed record ClaudeDirectChatRequest(
     ClaudeDirectMachineContext Machine,
     string SystemPrompt,
-    IReadOnlyList<ClaudeDirectMessage> Messages,
-    CommercialPolicySnapshot CommercialPolicy);
+    IReadOnlyList<ClaudeDirectMessage> Messages);
 
 public sealed record ClaudeDirectToolUse(
     string Id,

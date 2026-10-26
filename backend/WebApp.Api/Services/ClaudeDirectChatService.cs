@@ -164,7 +164,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         string? finalText = null;
         string? finalModel = null;
         string? finalStopReason = null;
-        var webSearchBudget = SelectWebSearchBudget(request, _options.WebSearch);
+        var webSearchBudget = _options.WebSearch.MaxUses;
         long webSearchUsed = 0;
         var suggestionParser = new DiagLinkSuggestionStreamParser();
         var visibleText = new StringBuilder();
@@ -775,7 +775,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         var payload = new Dictionary<string, object?>
         {
             ["model"] = _options.Deployment,
-            ["max_tokens"] = 4096,
+            ["max_tokens"] = 8192,
             ["stream"] = true,
             ["system"] = new object[]
             {
@@ -1140,8 +1140,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
             _options.MaxMessageCalls is < 1 or > 12 ||
             _options.MaxImageBytes is < 8 or > 20 * 1024 * 1024 ||
             _options.WebSearch is null ||
-            _options.WebSearch.DiagnosticMaxUses < 0 ||
-            _options.WebSearch.PartsMaxUses < 0)
+            _options.WebSearch.MaxUses < 0)
         {
             errors.Add(new("invalid_configuration", "ClaudeDirectChat configuration is invalid."));
             return errors;
@@ -1240,9 +1239,6 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
     {
         var prompt = request.SystemPrompt?.Trim() ?? string.Empty;
         var machineDescription = request.Machine.Description?.Trim() ?? string.Empty;
-        var commercialInstructions = request.CommercialPolicy is { Enabled: true }
-            ? request.CommercialPolicy.Instructions?.Trim() ?? string.Empty
-            : string.Empty;
         var sections = new List<string>();
 
         if (!string.IsNullOrEmpty(prompt))
@@ -1253,11 +1249,6 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         if (!string.IsNullOrEmpty(machineDescription))
         {
             sections.Add($"Contexte machine fourni par le serveur :\n{machineDescription}");
-        }
-
-        if (!string.IsNullOrEmpty(commercialInstructions))
-        {
-            sections.Add($"Politique commerciale active fournie par le serveur :\n{commercialInstructions}");
         }
 
         return string.Join("\n\n", sections);
@@ -1482,11 +1473,6 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
     [GeneratedRegex(@"\b(?:SP000913|SP001024)\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex ManufacturerIdPattern();
 
-    [GeneratedRegex(
-        @"(?:\b(?:fournisseur|vendeur|prix|tarif|devis|disponibilit\w*|stock|acheter|achat|commander|commande|marketplace|supplier|vendor|price|quote|availability|purchase|buy)\b|lien\s+d['’]?achat|pi[eè]ce\s+d[ée]tach[ée]e|(?:recherch\w*|trouv\w*)[^\r\n]{0,80}\b(?:pi[eè]ce|r[ée]f[ée]rence|relais|filtre|roulement|capteur|moteur)\b)",
-        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
-    private static partial Regex PartsSearchIntentPattern();
-
     private static void ExtractDocumentIds(JsonElement element, ISet<string> documentIds) =>
         VisitStrings(element, text =>
         {
@@ -1619,23 +1605,6 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         }
 
         return candidates;
-    }
-
-    internal static int SelectWebSearchBudget(
-        ClaudeDirectChatRequest request,
-        ClaudeDirectWebSearchOptions options)
-    {
-        var currentQuestion = request.Messages.LastOrDefault()?.Text ?? string.Empty;
-        const string questionMarker = "[NOUVELLE QUESTION]";
-        var markerIndex = currentQuestion.LastIndexOf(questionMarker, StringComparison.Ordinal);
-        if (markerIndex >= 0)
-        {
-            currentQuestion = currentQuestion[(markerIndex + questionMarker.Length)..];
-        }
-
-        return PartsSearchIntentPattern().IsMatch(currentQuestion)
-            ? options.PartsMaxUses
-            : options.DiagnosticMaxUses;
     }
 
     internal static IReadOnlyList<ClaudeDirectWebCitation> ExtractWebCitations(JsonElement content)

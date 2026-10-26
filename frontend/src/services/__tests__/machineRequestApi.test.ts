@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildMachineRequestFormData, MachineRequestSubmissionError, submitMachineRequest } from '../machineRequestApi';
 import type { StartFormValues } from '../../pages/start/startFormValidation';
+import { CURRENT_TERMS_VERSION } from '../../pages/conditions/termsVersion';
 
 const values: StartFormValues = {
   firstName: 'Claire', lastName: 'Martin', company: 'Ateliers Martin',
@@ -15,10 +16,13 @@ describe('machine request API', () => {
   it('builds the expected multipart fields without client pricing values', () => {
     const first = new File(['pdf-1'], 'manual.pdf', { type: 'application/pdf' });
     const second = new File(['pdf-2'], 'schema.pdf', { type: 'application/pdf' });
-    const formData = buildMachineRequestFormData(values, [first, second], 'payment-42');
+    const formData = buildMachineRequestFormData(
+      values, [first, second], 'payment-42', true, CURRENT_TERMS_VERSION);
 
     expect(Object.fromEntries([...formData.entries()].filter(([, value]) => typeof value === 'string'))).toEqual({
       paymentRequestId: 'payment-42',
+      termsAccepted: 'true',
+      termsVersion: CURRENT_TERMS_VERSION,
       ...values,
     });
     expect(formData.getAll('documents')).toEqual([first, second]);
@@ -32,7 +36,9 @@ describe('machine request API', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(serverResponse), { status: 201, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(submitMachineRequest(values, [new File(['pdf'], 'manual.pdf')], 'payment-42')).resolves.toEqual(serverResponse);
+    await expect(submitMachineRequest(
+      values, [new File(['pdf'], 'manual.pdf')], 'payment-42', true, CURRENT_TERMS_VERSION,
+    )).resolves.toEqual(serverResponse);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith('/api/public/machine-requests', expect.objectContaining({ method: 'POST', body: expect.any(FormData) }));
     expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toBeUndefined();
@@ -40,14 +46,16 @@ describe('machine request API', () => {
 
   it('exposes a safe backend validation message', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ errors: { documents: ['Le PDF est invalide.'] } }), { status: 400 })));
-    await expect(submitMachineRequest(values, [], 'payment-42')).rejects.toMatchObject({ message: 'Le PDF est invalide.', isNetworkError: false });
+    await expect(submitMachineRequest(values, [], 'payment-42', true, CURRENT_TERMS_VERSION))
+      .rejects.toMatchObject({ message: 'Le PDF est invalide.', isNetworkError: false });
   });
 
   it('maps a network failure to the public retry message', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('private network detail')));
-    await expect(submitMachineRequest(values, [], 'payment-42')).rejects.toEqual(expect.objectContaining<Partial<MachineRequestSubmissionError>>({
+    await expect(submitMachineRequest(values, [], 'payment-42', true, CURRENT_TERMS_VERSION))
+      .rejects.toEqual(expect.objectContaining<Partial<MachineRequestSubmissionError>>({
       message: 'Impossible de contacter le service pour le moment. Veuillez réessayer.',
       isNetworkError: true,
-    }));
+      }));
   });
 });

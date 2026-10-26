@@ -178,7 +178,7 @@ public sealed class ClaudeDirectRuntimeManualTests
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
         Assert.AreEqual($"claude-direct-{machine.Id:N}", body.RootElement.GetProperty("id").GetString());
         Assert.AreEqual($"Assistant-Technique-{machine.Name}", body.RootElement.GetProperty("name").GetString());
-        Assert.AreEqual("claude-sonnet-5", body.RootElement.GetProperty("model").GetString());
+        Assert.AreEqual("claude-sonnet-5-5", body.RootElement.GetProperty("model").GetString());
         Assert.AreEqual("Avatar_Default.svg", body.RootElement.GetProperty("metadata").GetProperty("logo").GetString());
         var capabilities = body.RootElement.GetProperty("capabilities");
         Assert.IsTrue(capabilities.GetProperty("imageAttachments").GetBoolean());

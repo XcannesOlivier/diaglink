@@ -162,7 +162,7 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
         StringAssert.Contains(prompt, "## Diagnostic interactif");
         StringAssert.Contains(prompt, "## Demande d’explication");
         StringAssert.Contains(prompt, "## Procédure complète");
-        StringAssert.Contains(prompt, "## Recherche de pièce ou de fournisseur");
+        StringAssert.Contains(prompt, "## Identification de pièce ou de référence");
         StringAssert.Contains(prompt, "normalement moins de 60 mots");
         StringAssert.Contains(prompt, "vise 30 à 60 mots hors source documentaire");
         StringAssert.Contains(prompt, "une interprétation courte et prudente uniquement si elle aide");
@@ -195,20 +195,21 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
     }
 
     [TestMethod]
-    public void PromptProvider_ClaudeDirectSeparatesTechnicalPartStatusesFromCommercialPolicy()
+    public void PromptProvider_ClaudeDirectKeepsTechnicalPartStatusesAndExcludesCommercialSearch()
     {
         var prompt = PromptProvider().GetClaudeDirectPrompt();
 
         StringAssert.Contains(prompt, "## 1. Référence constructeur ou OEM documentée");
         StringAssert.Contains(prompt, "## 2. Remplacement officiel confirmé");
-        StringAssert.Contains(prompt, "## 3. Correspondance annoncée par un vendeur");
+        StringAssert.Contains(prompt, "## 3. Correspondance annoncée par une source tierce");
         StringAssert.Contains(prompt, "## 4. Alternative potentielle non confirmée");
         StringAssert.Contains(prompt, "## 5. Alternative compatible confirmée");
-        StringAssert.Contains(prompt, "le vendeur n’a pas à démontrer une seconde fois son applicabilité à la machine");
         StringAssert.Contains(prompt, "⚠️ Équivalence non confirmée — Ne pas commander sans vérification.");
-        StringAssert.Contains(prompt, "Les préférences de fournisseurs, zones géographiques, marketplaces, nombre d’offres et règles de prix sont définies par la politique commerciale active");
-        Assert.IsFalse(prompt.Contains("Prix : non communiqué", StringComparison.Ordinal));
-        Assert.IsFalse(prompt.Contains("Présente au maximum trois", StringComparison.Ordinal));
+        StringAssert.Contains(prompt, "Limite toute recherche Web aux informations techniques.");
+        StringAssert.Contains(prompt, "Une page de fabricant ou de distributeur peut toutefois servir de source technique");
+        Assert.IsFalse(prompt.Contains("# 8. RECHERCHE COMMERCIALE", StringComparison.Ordinal));
+        Assert.IsFalse(prompt.Contains("Recherche et compare les prix", StringComparison.Ordinal));
+        Assert.IsFalse(prompt.Contains("Politique commerciale active", StringComparison.OrdinalIgnoreCase));
     }
 
     [TestMethod]
@@ -270,8 +271,7 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
     public async Task RequestFactory_ProducesCompleteClaudeDirectChatRequest()
     {
         var fixture = Fixture.Valid();
-        var policyProvider = new RecordingCommercialPolicyProvider();
-        var factory = new ClaudeDirectChatRequestFactory(fixture.Resolver, policyProvider);
+        var factory = new ClaudeDirectChatRequestFactory(fixture.Resolver);
         var machine = Machine();
         machine.VectorStoreId = null;
         var messages = new[] { new ClaudeDirectMessage("user", "question") };
@@ -286,31 +286,7 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
         Assert.AreEqual("company/machine", request.Machine.BlobPrefix);
         Assert.AreEqual("PROMPT DIRECT", request.SystemPrompt);
         Assert.AreSame(messages, request.Messages);
-        Assert.AreEqual(machine.CompanyId, policyProvider.ResolvedCompanyIds.Single());
-        Assert.IsNotNull(request.CommercialPolicy);
-        Assert.IsTrue(request.CommercialPolicy.Enabled);
-        Assert.AreEqual("SERVER COMMERCIAL POLICY", request.CommercialPolicy.Instructions);
         Assert.AreNotEqual(request.SystemPrompt, request.Machine.Description);
-        Assert.AreNotEqual(request.SystemPrompt, request.CommercialPolicy.Instructions);
-        Assert.AreNotEqual(request.Machine.Description, request.CommercialPolicy.Instructions);
-    }
-
-    [TestMethod]
-    public async Task RequestFactory_ResolvesEachMachinePolicyFromItsRealCompanyId()
-    {
-        var fixture = Fixture.Valid();
-        var policyProvider = new RecordingCommercialPolicyProvider();
-        var factory = new ClaudeDirectChatRequestFactory(fixture.Resolver, policyProvider);
-        var firstMachine = Machine();
-        var secondMachine = Machine();
-        secondMachine.CompanyId = Guid.Parse("99999999-8888-7777-6666-555555555555");
-
-        await factory.CreateAsync(firstMachine, []);
-        await factory.CreateAsync(secondMachine, []);
-
-        CollectionAssert.AreEqual(
-            new[] { firstMachine.CompanyId, secondMachine.CompanyId },
-            policyProvider.ResolvedCompanyIds);
     }
 
     [TestMethod]
@@ -423,19 +399,6 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
     private sealed class StaticPromptProvider : ITechnicalAssistantPromptProvider
     {
         public string GetClaudeDirectPrompt() => "PROMPT DIRECT";
-    }
-
-    private sealed class RecordingCommercialPolicyProvider : ICommercialPolicyProvider
-    {
-        public List<Guid> ResolvedCompanyIds { get; } = [];
-
-        public Task<CommercialPolicySnapshot> ResolveAsync(
-            Guid companyId,
-            CancellationToken cancellationToken = default)
-        {
-            ResolvedCompanyIds.Add(companyId);
-            return Task.FromResult(new CommercialPolicySnapshot(true, "SERVER COMMERCIAL POLICY"));
-        }
     }
 
     private sealed class CaptureLogger<T> : ILogger<T>

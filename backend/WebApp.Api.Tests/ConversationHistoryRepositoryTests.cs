@@ -952,7 +952,7 @@ public class ConversationHistoryRepositoryTests
                 "conv-web-citations",
                 "user-A",
                 "assistant",
-                "Fournisseur trouvé",
+                "Documentation constructeur trouvée",
                 [],
                 [],
                 [],
@@ -960,17 +960,17 @@ public class ConversationHistoryRepositoryTests
                     new AnnotationInfo
                     {
                         Type = "uri_citation",
-                        Label = "Fiche 2544-9024",
-                        Url = "https://supplier.example/parts/2544-9024",
-                        Quote = "Doosan battery relay 2544-9024"
+                        Label = "Manuel technique 2544-9024",
+                        Url = "https://manufacturer.example/manuals/2544-9024",
+                        Quote = "Doosan battery relay 2544-9024 technical data"
                     },
                     new AnnotationInfo
                     {
                         Type = "uri_citation",
                         Label = "Doublon",
-                        Url = "https://supplier.example/parts/2544-9024"
+                        Url = "https://manufacturer.example/manuals/2544-9024"
                     },
-                    new AnnotationInfo { Type = "uri_citation", Label = "Invalide", Url = "ftp://supplier.example/part" }
+                    new AnnotationInfo { Type = "uri_citation", Label = "Invalide", Url = "ftp://manufacturer.example/manual" }
                 ],
                 CancellationToken.None);
         }
@@ -981,9 +981,9 @@ public class ConversationHistoryRepositoryTests
         var citation = history!.Single().WebCitations.Single();
 
         Assert.AreEqual("uri_citation", citation.Type);
-        Assert.AreEqual("Fiche 2544-9024", citation.Label);
-        Assert.AreEqual("https://supplier.example/parts/2544-9024", citation.Url);
-        Assert.AreEqual("Doosan battery relay 2544-9024", citation.Quote);
+        Assert.AreEqual("Manuel technique 2544-9024", citation.Label);
+        Assert.AreEqual("https://manufacturer.example/manuals/2544-9024", citation.Url);
+        Assert.AreEqual("Doosan battery relay 2544-9024 technical data", citation.Quote);
         Assert.AreEqual(0, citation.DisplayOrder);
     }
 

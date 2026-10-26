@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import { Body1, Subtitle1 } from '@fluentui/react-components';
 import {
   BoxSearch20Regular,
-  BuildingShop20Regular,
   DocumentSearch20Regular,
   Wrench20Regular,
 } from '@fluentui/react-icons';
@@ -18,7 +17,6 @@ const capabilities = [
   { label: 'Diagnostiquer une panne', icon: Wrench20Regular },
   { label: 'Identifier une pièce', icon: BoxSearch20Regular },
   { label: 'Comprendre un schéma', icon: DocumentSearch20Regular },
-  { label: 'Trouver un fournisseur', icon: BuildingShop20Regular },
 ];
 
 export const StarterMessages = ({

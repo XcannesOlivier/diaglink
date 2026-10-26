@@ -93,6 +93,28 @@ describe('Super Admin wallet consultation', () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it('translates every wallet stage without changing completed filtering', async () => {
+    read.mockResolvedValue({ kind: 'success', data: { ...overview, operations: [
+      { ...awaiting, id: 'reserved', stage: 'Reserved' },
+      { ...awaiting, id: 'created', stage: 'PaymentCreated' },
+      { ...awaiting, id: 'awaiting', stage: 'AwaitingPayment' },
+      { ...awaiting, id: 'confirmed', stage: 'PaymentConfirmed' },
+      { ...awaiting, id: 'credited', stage: 'WalletCredited' },
+      completed,
+    ] } });
+    await render();
+    const toggle = box.querySelector<HTMLButtonElement>('[aria-label="Historique des recharges de crédit"] button')!;
+    await act(async () => toggle.click());
+
+    expect(box.textContent).toContain('Réservation créée');
+    expect(box.textContent).toContain('Paiement créé');
+    expect(box.textContent).toContain('En attente de paiement');
+    expect(box.textContent).toContain('Paiement confirmé');
+    expect(box.textContent).toContain('Crédit ajouté au portefeuille');
+    expect(box.textContent).toContain('Payé');
+    expect(box.querySelector('[aria-label="Réparation des recharges"]')?.textContent).not.toContain('Payé');
+  });
+
   it('refreshes consultation data from the shared revision with a read request only', async () => {
     await render();
     await act(async () => root.render(<WalletTopUpPanel companyId="c1" getAccessToken={token} revision={1} />));

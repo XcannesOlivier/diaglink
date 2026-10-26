@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "10046296558375074378"
+      "templateHash": "4155521025902261415"
     }
   },
   "parameters": {
@@ -196,7 +196,7 @@
     },
     "claudeDirectDeployment": {
       "type": "string",
-      "defaultValue": "claude-sonnet-5"
+      "defaultValue": "claude-sonnet-5-5"
     },
     "claudeFileSearchDiagnosticsEnabled": {
       "type": "bool",
@@ -1478,7 +1478,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "11137981580277880830"
+              "templateHash": "14323757393890347734"
             }
           },
           "parameters": {
@@ -1619,7 +1619,7 @@
             },
             "claudeDirectDeployment": {
               "type": "string",
-              "defaultValue": "claude-sonnet-5"
+              "defaultValue": "claude-sonnet-5-5"
             },
             "claudeFileSearchDiagnosticsEnabled": {
               "type": "bool",

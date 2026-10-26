@@ -98,7 +98,7 @@ describe('AgentChat machine confirmation panel',()=>{
   await act(async()=>root.render(<StarterMessages agentName="Assistant Technique Compresseur Test Alpha" accessory={<div data-confirmation-actions/>}/>));
   const actions=host.querySelector('[data-confirmation-actions]')!,capabilities=host.querySelector('ul')!;
   expect(host.textContent).toContain('Assistant Technique');expect(host.textContent).toContain('Compresseur Test Alpha');
-  expect([...capabilities.querySelectorAll('li')].map(item=>item.textContent)).toEqual(['Diagnostiquer une panne','Identifier une pièce','Comprendre un schéma','Trouver un fournisseur']);
+  expect([...capabilities.querySelectorAll('li')].map(item=>item.textContent)).toEqual(['Diagnostiquer une panne','Identifier une pièce','Comprendre un schéma']);
   expect(capabilities.querySelectorAll('button')).toHaveLength(0);
   expect(actions.compareDocumentPosition(capabilities)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const css=readFileSync(resolve('src/components/AgentChat.module.css'),'utf8');
