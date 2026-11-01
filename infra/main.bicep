@@ -97,6 +97,8 @@ param publicCustomDomainCertificateName string = ''
 
 param claudeDirectDeployment string = 'claude-sonnet-5-5'
 param claudeFileSearchDiagnosticsEnabled bool = false
+@description('Expose approved DiagLink skills and the load_skill tool to Claude Direct.')
+param claudeSkillsEnabled bool = false
 param aiPricingIdentityDeployments array
 param postgresTunnelImageName string
 param vultrSshHost string
@@ -186,6 +188,7 @@ module app 'main-app.bicep' = {
     publicCustomDomainCertificateName: publicCustomDomainCertificateName
     claudeDirectDeployment: claudeDirectDeployment
     claudeFileSearchDiagnosticsEnabled: claudeFileSearchDiagnosticsEnabled
+    claudeSkillsEnabled: claudeSkillsEnabled
     aiPricingIdentityDeployments: aiPricingIdentityDeployments
     postgresTunnelImageName: postgresTunnelImageName
     vultrSshHost: vultrSshHost

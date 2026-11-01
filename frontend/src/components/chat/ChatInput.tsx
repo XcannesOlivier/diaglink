@@ -5,11 +5,10 @@ import {
   type ImperativeControlPluginRef,
 } from '@fluentui-copilot/react-copilot';
 import { Button, Tooltip, Toast, ToastTitle, Toaster, useId, useToastController, Text, makeStyles, tokens } from '@fluentui/react-components';
-import { Attach24Regular, History24Regular, Navigation24Regular, ChatAdd24Regular, Stop24Regular } from '@fluentui/react-icons';
+import { Attach24Regular, History24Regular, Navigation24Regular, ChatAdd24Regular } from '@fluentui/react-icons';
 import { FilePreview } from './FilePreview';
 import { MachineDocuments } from './MachineDocuments';
 import { VoiceInput } from './VoiceInput';
-import { MessageQueue } from './MessageQueue';
 import {
   getFileInputAccept,
   getMaximumAttachmentCount,
@@ -21,6 +20,7 @@ import styles from './ChatInput.module.css';
 const CHAR_WARNING_THRESHOLD = 3000;
 const CHAR_DANGER_THRESHOLD = 3500;
 const CHAR_MAX_RECOMMENDED = 4000;
+const COMPACT_INPUT_MEDIA_QUERY = '(max-width: 1024px), (max-height: 600px)';
 const useCharCounterStyles = makeStyles({
   container: {
     display: 'flex',
@@ -50,6 +50,7 @@ interface ChatInputProps {
   onToggleSidebar?: () => void;
   onOpenMobileMenu?: () => void;
   hasMessages?: boolean;
+  isSending?: boolean;
   isStreaming?: boolean;
   onCancelStream?: () => void;
   isEditing?: boolean;
@@ -58,8 +59,6 @@ interface ChatInputProps {
   recoveredAttachments?: import('../../types/chat').IFileAttachment[];
   currentConversationId?: string | null;
   onRecoveredInputConsumed?: () => void;
-  pendingMessages?: Array<{ text: string; files?: File[] }>;
-  onDequeueMessage?: (index: number) => void;
   droppedFiles?: File[];
   onDroppedFilesConsumed?: () => void;
   onChangeMachine?: () => void;
@@ -101,6 +100,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onToggleSidebar,
   onOpenMobileMenu,
   hasMessages = false,
+  isSending = false,
   isStreaming = false,
   onCancelStream,
   isEditing = false,
@@ -109,14 +109,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   recoveredAttachments,
   currentConversationId = null,
   onRecoveredInputConsumed,
-  pendingMessages = [],
-  onDequeueMessage,
   droppedFiles,
   onDroppedFilesConsumed,
   machineId,
 }) => {
   const [inputText, setInputText] = useState<string>("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [compactInput, setCompactInput] = useState(() =>
+    window.matchMedia(COMPACT_INPUT_MEDIA_QUERY).matches
+  );
   const controlRef = useRef<ImperativeControlPluginRef>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
@@ -129,6 +130,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const counterStyles = useCharCounterStyles();
   const charCount = inputText.length;
   const showCounter = charCount >= CHAR_WARNING_THRESHOLD;
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(COMPACT_INPUT_MEDIA_QUERY);
+    const updateCompactInput = () => setCompactInput(mediaQuery.matches);
+    updateCompactInput();
+    mediaQuery.addEventListener('change', updateCompactInput);
+    return () => mediaQuery.removeEventListener('change', updateCompactInput);
+  }, []);
   
   const getCounterStyle = () => {
     if (charCount >= CHAR_DANGER_THRESHOLD) return counterStyles.danger;
@@ -296,6 +305,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   ]);
 
   const handleSubmit = () => {
+    if (isSending || isStreaming) {
+      return;
+    }
+
     if (inputText && inputText.trim() !== "") {
       const countValidation = validateFileCount(
         selectedFiles,
@@ -400,17 +413,24 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         />
         <div className={styles.inputWrapper} data-disabled={disabled || undefined}>
         <ChatInputFluent
+          appearance={compactInput ? 'responsive' : 'multi'}
           aria-label="Zone de saisie du chat"
           aria-describedby={showCounter ? charCounterId : undefined}
           charactersRemainingMessage={() => ``}
           disabled={disabled}
+          disableSend={isSending}
           history={true}
           onChange={(_, data) => {
             recoveredDraftRef.current = null;
             setInputText(data.value);
           }}
           onSubmit={handleSubmit}
+          isSending={isStreaming}
+          onStop={handleCancelStream}
           placeholderValue={placeholder}
+          send={{
+            'aria-label': isStreaming ? 'Arrêter la réponse' : 'Envoyer le message',
+          }}
         >
           <ImperativeControlPlugin ref={controlRef} />
         </ChatInputFluent>
@@ -420,9 +440,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               {charCount} / {CHAR_MAX_RECOMMENDED} caractères (limite recommandée)
             </Text>
           </div>
-        )}
-        {pendingMessages.length > 0 && onDequeueMessage && (
-          <MessageQueue messages={pendingMessages} onRemove={onDequeueMessage} />
         )}
         <div className={styles.buttonRow}>
           <div className={styles.actionButtons}>
@@ -442,17 +459,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 disabled={disabled}
               />
             </div>
-            {isStreaming && onCancelStream && (
-              <Tooltip content="Arrêter la réponse" relationship="label" withArrow>
-                <Button
-                  appearance="subtle"
-                  icon={<Stop24Regular />}
-                  onClick={handleCancelStream}
-                  aria-label="Arrêter la réponse"
-                  className={styles.cancelButton}
-                />
-              </Tooltip>
-            )}
             {(onNewChat || onToggleSidebar) && (
               <div className={`${styles.actionGroup} ${styles.conversationActions}`} role="group" aria-label="Conversations">
                 {onNewChat && (

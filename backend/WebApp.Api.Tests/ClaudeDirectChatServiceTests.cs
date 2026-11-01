@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Azure;
 using Azure.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -70,7 +71,10 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.AreEqual(3, result.Usage.InputTokens);
         Assert.AreEqual(7, result.Usage.OutputTokens);
         using var request = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
-        Assert.AreEqual(8192, request.RootElement.GetProperty("max_tokens").GetInt32());
+        Assert.AreEqual(4096, request.RootElement.GetProperty("max_tokens").GetInt32());
+        Assert.AreEqual("medium", request.RootElement
+            .GetProperty("output_config").GetProperty("effort").GetString());
+        Assert.IsFalse(request.RootElement.TryGetProperty("thinking", out _));
         Assert.IsTrue(request.RootElement.GetProperty("stream").GetBoolean());
     }
 
@@ -117,7 +121,10 @@ public sealed class ClaudeDirectChatServiceTests
         foreach (var capturedRequest in fixture.Handler.Requests)
         {
             using var body = JsonDocument.Parse(capturedRequest.Body);
-            Assert.AreEqual(8192, body.RootElement.GetProperty("max_tokens").GetInt32());
+            Assert.AreEqual(4096, body.RootElement.GetProperty("max_tokens").GetInt32());
+            Assert.AreEqual("medium", body.RootElement
+                .GetProperty("output_config").GetProperty("effort").GetString());
+            Assert.IsFalse(body.RootElement.TryGetProperty("thinking", out _));
             Assert.IsTrue(body.RootElement.GetProperty("stream").GetBoolean());
         }
 
@@ -673,6 +680,110 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
+    public async Task CompleteAsync_EnabledSkillsLoadsApprovedInstructionsAndTracksContinuationUsage()
+    {
+        var options = new ClaudeDirectChatOptions
+        {
+            FoundryAnthropicEndpoint = "https://resource.test/anthropic",
+            Deployment = "claude-sonnet-5",
+            MaxMessageCalls = 4,
+            MaxImageBytes = 1024,
+            Skills = new ClaudeDirectSkillOptions { Enabled = true, MaxSkillBytes = 32 * 1024 }
+        };
+        var fixture = Fixture.CreateWithOptions(
+            options,
+            SkillToolResponse("diagnostic", "hydraulique", "procedures"),
+            DirectResponse("contrôle suivant", 12, 3));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual("contrôle suivant", result.FinalText);
+        Assert.HasCount(2, fixture.Handler.Requests);
+        CollectionAssert.AreEqual(new[] { "diagnostic", "hydraulique", "procedures" }, result.Calls[0].LoadedSkills.ToArray());
+        CollectionAssert.AreEqual(new[] { "diagnostic", "hydraulique", "procedures" }, result.Calls[1].SkillContinuationFor.ToArray());
+        Assert.AreEqual(17, result.Usage.InputTokens);
+        Assert.AreEqual(5, result.Usage.OutputTokens);
+        using var first = JsonDocument.Parse(fixture.Handler.Requests[0].Body);
+        var tools = first.RootElement.GetProperty("tools");
+        Assert.AreEqual("load_skill", tools[2].GetProperty("name").GetString());
+        var skillNamesSchema = tools[2].GetProperty("input_schema").GetProperty("properties").GetProperty("skill_names");
+        Assert.AreEqual("array", skillNamesSchema.GetProperty("type").GetString());
+        Assert.AreEqual(13, skillNamesSchema.GetProperty("items").GetProperty("enum").GetArrayLength());
+        StringAssert.Contains(first.RootElement.GetProperty("system")[0].GetProperty("text").GetString(), "<skills>");
+        using var second = JsonDocument.Parse(fixture.Handler.Requests[1].Body);
+        var toolResult = second.RootElement.GetProperty("messages")[2].GetProperty("content")[0];
+        Assert.AreEqual("tool_result", toolResult.GetProperty("type").GetString());
+        StringAssert.Contains(toolResult.GetProperty("content").GetString(), "Mission");
+        StringAssert.Contains(toolResult.GetProperty("content").GetString(), "===== SKILL: hydraulique =====");
+        StringAssert.Contains(toolResult.GetProperty("content").GetString(), "===== SKILL: procedures =====");
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_UnknownSkillProducesToolErrorAndAllowsAControlledFinalAnswer()
+    {
+        var options = new ClaudeDirectChatOptions
+        {
+            FoundryAnthropicEndpoint = "https://resource.test/anthropic",
+            Deployment = "claude-sonnet-5",
+            MaxMessageCalls = 12,
+            MaxImageBytes = 1024,
+            Skills = new ClaudeDirectSkillOptions { Enabled = true, MaxSkillBytes = 32 * 1024 }
+        };
+        var fixture = Fixture.CreateWithOptions(
+            options,
+            SkillToolResponse("skill_inexistant"),
+            DirectResponse("Je ne peux pas charger cette compétence.", 8, 3));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual("Je ne peux pas charger cette compétence.", result.FinalText);
+        Assert.HasCount(2, fixture.Handler.Requests);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "unknown_skill"));
+        using var second = JsonDocument.Parse(fixture.Handler.Requests[1].Body);
+        var toolResult = second.RootElement.GetProperty("messages")[2].GetProperty("content")[0];
+        Assert.AreEqual("tool_result", toolResult.GetProperty("type").GetString());
+        Assert.IsTrue(toolResult.GetProperty("is_error").GetBoolean());
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_DisabledSkillsKeepsHistoricalPromptAndOmitsLoadSkill()
+    {
+        var fixture = Fixture.Create(DirectResponse("ok"));
+
+        await fixture.Service.CompleteAsync(Request());
+
+        using var body = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
+        Assert.AreEqual(2, body.RootElement.GetProperty("tools").GetArrayLength());
+        Assert.IsFalse(fixture.Handler.Requests.Single().Body.Contains("load_skill", StringComparison.Ordinal));
+        StringAssert.Contains(body.RootElement.GetProperty("system")[0].GetProperty("text").GetString(), "Use File Search before inspecting technical images.");
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_PreloadedConversationSkillsAreInjectedWithoutAnotherToolCall()
+    {
+        var options = new ClaudeDirectChatOptions
+        {
+            FoundryAnthropicEndpoint = "https://resource.test/anthropic",
+            Deployment = "claude-sonnet-5",
+            MaxMessageCalls = 12,
+            MaxImageBytes = 1024,
+            Skills = new ClaudeDirectSkillOptions { Enabled = true, MaxSkillBytes = 32 * 1024 }
+        };
+        var fixture = Fixture.CreateWithOptions(options, DirectResponse("suite"));
+        var request = Request() with { PreloadedSkillNames = ["diagnostic", "hydraulique"] };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.AreEqual("suite", result.FinalText);
+        Assert.HasCount(1, fixture.Handler.Requests);
+        using var body = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
+        var system = body.RootElement.GetProperty("system")[0].GetProperty("text").GetString();
+        StringAssert.Contains(system, "Compétences déjà chargées dans cette conversation");
+        StringAssert.Contains(system, "===== SKILL: diagnostic =====");
+        StringAssert.Contains(system, "===== SKILL: hydraulique =====");
+    }
+
+    [TestMethod]
     public async Task CompleteAsync_ExposesSecuredGetPageImageContract()
     {
         var fixture = Fixture.Create(DirectResponse("ok"));
@@ -739,7 +850,7 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.AreEqual("claude-sonnet-5-5", options.Deployment);
         Assert.IsFalse(options.WebSearch.Enabled);
         Assert.AreEqual(3, options.WebSearch.MaxUses);
-        Assert.AreEqual(8, options.MaxMessageCalls);
+        Assert.AreEqual(12, options.MaxMessageCalls);
     }
 
     [TestMethod]
@@ -1332,6 +1443,24 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
+    public async Task CompleteAsync_DoesNotProbeRequestedDocumentTwiceWhenExactImageIsMissing()
+    {
+        var fixture = Fixture.Create(
+            ToolResponse(documentId: "manual-a", allowedDocumentIds: ["manual-a", "manual-b"]),
+            DirectResponse("not found handled"));
+        fixture.BlobReader.StreamFactory = _ => null;
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.HasCount(2, fixture.BlobReader.RequestedNames);
+        Assert.AreEqual(1, fixture.BlobReader.RequestedNames.Count(name =>
+            name.Contains("/manual-a/", StringComparison.Ordinal)));
+        Assert.AreEqual(1, fixture.BlobReader.RequestedNames.Count(name =>
+            name.Contains("/manual-b/", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
     public async Task CompleteAsync_MultipleExistingPagesRemainAmbiguousWithConciseError()
     {
         var fixture = Fixture.Create(
@@ -1507,6 +1636,90 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.AreEqual("image", image.GetProperty("type").GetString());
         Assert.AreEqual("image/png", image.GetProperty("source").GetProperty("media_type").GetString());
         Assert.IsFalse(string.IsNullOrWhiteSpace(image.GetProperty("source").GetProperty("data").GetString()));
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_RejectsImageOverConfiguredLimit()
+    {
+        var fixture = Fixture.CreateWithOptions(
+            new ClaudeDirectChatOptions
+            {
+                FoundryAnthropicEndpoint = "https://resource.test/anthropic",
+                Deployment = "claude-sonnet-5",
+                MaxMessageCalls = 4,
+                MaxImageBytes = 8
+            },
+            ToolResponse(),
+            DirectResponse("image rejected"));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "invalid_image_payload"));
+        Assert.HasCount(0, result.Visuals);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_RejectsInvalidPngWithoutExposingDocumentPath()
+    {
+        var fixture = Fixture.Create(ToolResponse(), DirectResponse("image rejected"));
+        fixture.BlobReader.StreamFactory = _ => new MemoryStream([1, 2, 3, 4, 5, 6, 7, 8]);
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "invalid_png"));
+        Assert.HasCount(0, result.Visuals);
+        var logs = string.Join('\n', fixture.Logger.Messages);
+        Assert.IsFalse(logs.Contains(DocumentId, StringComparison.Ordinal));
+        Assert.IsFalse(logs.Contains("company/machine", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_InterruptedImageStreamReturnsPayloadFailure()
+    {
+        var fixture = Fixture.Create(ToolResponse(), DirectResponse("image interrupted"));
+        fixture.BlobReader.StreamFactory = _ => new InterruptingReadStream();
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "invalid_image_payload"));
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(string.Join('\n', fixture.Logger.Messages)
+            .Contains("Stage=ImageBlobRead", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_AzureFailureLogsStatusWithoutSensitiveBlobPath()
+    {
+        var fixture = Fixture.Create(ToolResponse(), DirectResponse("image unavailable"));
+        fixture.BlobReader.OpenFactory = (_, _) => Task.FromException<Stream?>(
+            new RequestFailedException(503, "Simulated failure.", "ServerBusy", null));
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_read_failed"));
+        var logs = string.Join('\n', fixture.Logger.Messages);
+        Assert.IsTrue(logs.Contains("HttpStatus=503", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains("AzureErrorCode=ServerBusy", StringComparison.Ordinal));
+        Assert.IsFalse(logs.Contains(DocumentId, StringComparison.Ordinal));
+        Assert.IsFalse(logs.Contains("company/machine", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_CancellationDuringGetPageImageIsPropagated()
+    {
+        var fixture = Fixture.Create(ToolResponse(), DirectResponse("must not be reached"));
+        using var cancellation = new CancellationTokenSource();
+        fixture.BlobReader.OpenFactory = (_, cancellationToken) =>
+        {
+            cancellation.Cancel();
+            return Task.FromCanceled<Stream?>(cancellationToken);
+        };
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            fixture.Service.CompleteAsync(Request(), cancellation.Token));
+
+        Assert.IsTrue(string.Join('\n', fixture.Logger.Messages)
+            .Contains("Outcome=cancelled", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -2138,6 +2351,19 @@ public sealed class ClaudeDirectChatServiceTests
         }));
     }
 
+    private static HttpResponseMessage SkillToolResponse(params string[] skillNames) =>
+        JsonResponse(JsonSerializer.Serialize(new
+        {
+            id = "msg-skill",
+            model = "claude-sonnet-5",
+            stop_reason = "tool_use",
+            content = new object[]
+            {
+                new { type = "tool_use", id = "skill-1", name = "load_skill", input = new { skill_names = skillNames } }
+            },
+            usage = new { input_tokens = 5, output_tokens = 2 }
+        }));
+
     private static HttpResponseMessage JsonResponse(string json)
     {
         var response = new HttpResponseMessage(HttpStatusCode.OK)
@@ -2195,6 +2421,8 @@ public sealed class ClaudeDirectChatServiceTests
                 credential,
                 blobReader,
                 new TechnicalSourceReferenceResolver(pageMapResolver),
+                new TechnicalAssistantPromptProvider(AppContext.BaseDirectory),
+                new TechnicalSkillProvider(AppContext.BaseDirectory, options.Skills),
                 Options.Create(options),
                 logger);
             return new(service, handler, credential, blobReader, logger);
@@ -2254,11 +2482,14 @@ public sealed class ClaudeDirectChatServiceTests
         public List<string> RequestedNames { get; } = [];
         public Func<string, Stream?> PageMapFactory { get; set; } = _ => null;
         public List<string> RequestedPageMaps { get; } = [];
+        public Func<string, CancellationToken, Task<Stream?>>? OpenFactory { get; set; }
 
         public Task<Stream?> OpenReadAsync(string blobName, CancellationToken cancellationToken)
         {
             RequestedNames.Add(blobName);
-            return Task.FromResult(StreamFactory(blobName));
+            return OpenFactory is null
+                ? Task.FromResult(StreamFactory(blobName))
+                : OpenFactory(blobName, cancellationToken);
         }
 
         public Task<Stream?> OpenPageMapAsync(string blobName, CancellationToken cancellationToken)
@@ -2269,6 +2500,39 @@ public sealed class ClaudeDirectChatServiceTests
 
         public Task<Stream?> OpenPdfAsync(string blobName, CancellationToken cancellationToken) =>
             Task.FromResult<Stream?>(null);
+    }
+
+    private sealed class InterruptingReadStream : Stream
+    {
+        private bool firstRead = true;
+        private static readonly byte[] Prefix = [137, 80, 78, 71, 13, 10, 26, 10];
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!firstRead)
+            {
+                throw new IOException("Simulated interrupted Blob response body.");
+            }
+
+            firstRead = false;
+            Prefix.CopyTo(buffer);
+            return ValueTask.FromResult(Prefix.Length);
+        }
     }
 
     private sealed class CaptureLogger<T> : ILogger<T>

@@ -13,6 +13,19 @@ const report={companyName:'Entreprise',walletBalance:49.96,metrics,machines:[mac
 const buttonByDesktopLabel=(root:ParentNode,label:string)=>[...root.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.querySelector(`.${styles.desktopButtonLabel}`)?.textContent===label)!;
 afterEach(()=>vi.unstubAllGlobals());
 
+it('loads only while active and does not reload an unchanged report after reopening',async()=>{
+ const fetch=vi.fn().mockResolvedValue(new Response(JSON.stringify(report)));vi.stubGlobal('fetch',fetch);
+ const host=document.createElement('div'),root=createRoot(host),token=async()=>null;
+ const render=(active:boolean,revision=0)=>root.render(<CompanyConsumptionPanel companyId="c" token={token} view="global" active={active} revision={revision}/>);
+ try{
+  await act(async()=>render(false));expect(fetch).not.toHaveBeenCalled();
+  await act(async()=>render(true));expect(fetch).toHaveBeenCalledTimes(1);
+  await act(async()=>render(false));await act(async()=>render(true));expect(fetch).toHaveBeenCalledTimes(1);
+  await act(async()=>render(false,1));expect(fetch).toHaveBeenCalledTimes(1);
+  await act(async()=>render(true,1));expect(fetch).toHaveBeenCalledTimes(2);
+ }finally{await act(async()=>root.unmount());}
+});
+
 it('renders one compact summary card per machine with unchanged values and zero-quota support',async()=>{
  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify(report))));
  const host=document.createElement('div'),root=createRoot(host);
@@ -163,8 +176,8 @@ it('opens and closes each machine user consumption independently without navigat
 it('opens and closes Claude call details locally while preserving the main token values',async()=>{
  const history={items:[
   {createdAtUtc:'2026-10-05T14:07:57Z',inputTokens:56358,outputTokens:4446,totalTokens:60804,model:'claude-sonnet-5',provider:'Anthropic',calls:[
-   {callNumber:1,inputTokens:8120,outputTokens:280,totalTokens:8400,model:'claude-sonnet-5',stopReason:'tool_use',tools:['file_search']},
-   {callNumber:2,inputTokens:48238,outputTokens:4166,totalTokens:52404,model:'claude-sonnet-5',stopReason:'end_turn',tools:[]},
+   {callNumber:1,inputTokens:8120,outputTokens:280,totalTokens:8400,model:'claude-sonnet-5',stopReason:'tool_use',tools:['load_skill'],loadedSkills:['diagnostic'],estimatedCostEur:0.012345},
+   {callNumber:2,inputTokens:48238,outputTokens:4166,totalTokens:52404,model:'claude-sonnet-5',stopReason:'end_turn',tools:[],skillContinuationFor:['diagnostic'],estimatedCostEur:0.06789},
   ]},
   {createdAtUtc:'2026-10-05T13:42:21Z',inputTokens:49046,outputTokens:1082,totalTokens:50128,model:'claude-sonnet-5',provider:'Anthropic',calls:[
    {callNumber:1,inputTokens:49046,outputTokens:1082,totalTokens:50128,model:'claude-sonnet-5',stopReason:'end_turn',tools:[]},
@@ -198,11 +211,14 @@ it('opens and closes Claude call details locally while preserving the main token
   expect(rows[0].querySelector('button')?.textContent).toBe('Masquer');expect(rows).toHaveLength(3);
   const detailTable=rows[1].querySelector<HTMLTableElement>('table')!;
   expect(detailTable.classList.contains(styles.tokenHistoryTable)).toBe(true);expect(detailTable.parentElement?.classList.contains(styles.tokenHistoryScroll)).toBe(true);
-  expect([...detailTable.tHead!.rows[0].cells]).toHaveLength(10);
+  expect([...detailTable.tHead!.rows[0].cells]).toHaveLength(12);
   expect([...detailTable.tHead!.rows[0].cells].slice(0,8).map(cell=>cell.textContent)).toEqual(['Appel','Input','Cache lu','Cache créé','Cache 5 min','Cache 1 h','Output','Total']);
   const callRows=[...detailTable.tBodies[0].rows];
   expect([...callRows[0].cells].slice(0,8).map(cell=>cell.textContent)).toEqual(['1',numbers.format(8120),'0','0','0','0',numbers.format(280),numbers.format(8400)]);
   expect([...callRows[1].cells].slice(0,8).map(cell=>cell.textContent)).toEqual(['2',numbers.format(48238),'0','0','0','0',numbers.format(4166),numbers.format(52404)]);
+  expect(callRows[0].cells[10].textContent).toBe('Chargé : diagnostic');
+  expect(callRows[1].cells[10].textContent).toBe('Continuation : diagnostic');
+  expect(callRows[0].cells[11].textContent).toBe(new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(0.012345));
   expect(fetch).toHaveBeenCalledTimes(fetchCount);
 
   await act(async()=>rows[2].querySelector<HTMLButtonElement>('button')!.click());

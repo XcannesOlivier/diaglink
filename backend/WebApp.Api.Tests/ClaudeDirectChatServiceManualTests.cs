@@ -58,6 +58,8 @@ public sealed class ClaudeDirectChatServiceManualTests
             credential,
             blobReader,
             new TechnicalSourceReferenceResolver(pageMapResolver),
+            promptProvider,
+            new TechnicalSkillProvider(AppContext.BaseDirectory, new ClaudeDirectSkillOptions()),
             Options.Create(new ClaudeDirectChatOptions
             {
                 FoundryAnthropicEndpoint = "https://diaglink-foundry-prod.services.ai.azure.com/anthropic",

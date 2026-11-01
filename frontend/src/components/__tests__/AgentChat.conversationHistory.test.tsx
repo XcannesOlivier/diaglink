@@ -33,7 +33,6 @@ const makeState = (
     messages: [],
     currentConversationId: conversationId,
     error: null,
-    pendingMessages: [] as Array<{ text: string; files?: File[] }>,
   },
   conversations: { list: conversations, isLoading: false, sidebarOpen: true, hasMore: false },
   ui: { chatInputEnabled: true, currentView: 'chat' },
@@ -163,24 +162,16 @@ describe('AgentChat machine-scoped conversation history', () => {
     consoleError.mockRestore();
   });
 
-  it('sends queued photos in order when the queue drains', async () => {
-    const files = [
-      new File(['one'], 'queued-1.png', { type: 'image/png' }),
-      new File(['two'], 'queued-2.jpg', { type: 'image/jpeg' }),
-    ];
+  it.each(['sending', 'streaming'] as const)('does not send or queue while status is %s', async status => {
     mocks.state = makeState('company_admin', 'machine-a', [], 'conversation');
-    mocks.state.chat.pendingMessages = [{ text: 'Question en attente', files }];
-
+    mocks.state.chat.status = status;
     await render();
+    mocks.dispatch.mockClear();
 
-    expect(mocks.dispatch).toHaveBeenCalledWith({ type: 'CHAT_CLEAR_QUEUE' });
-    expect(mocks.sendMessage).toHaveBeenCalledWith(
-      'Question en attente',
-      'conversation',
-      files,
-    );
-    expect((mocks.sendMessage.mock.calls[0][2] as File[]).map(file => file.name))
-      .toEqual(['queued-1.png', 'queued-2.jpg']);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="send-message"]')?.click());
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
   });
 
   it('clears the list and ignores a late response after switching machines', async () => {

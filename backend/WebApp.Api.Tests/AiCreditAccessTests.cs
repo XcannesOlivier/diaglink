@@ -1,5 +1,8 @@
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using WebApp.Api.Data;
 using WebApp.Api.Models.Entities;
 using WebApp.Api.Services;
 using Fixture=WebApp.Api.Tests.AiCreditConsumptionServiceTests.Fixture;
@@ -67,5 +70,165 @@ public class AiCreditAccessTests
         Assert.AreEqual(0.01m,(await db.CompanyWallets.AsNoTracking().SingleAsync()).Balance);
         wallet.Balance=10;await db.SaveChangesAsync();Assert.IsTrue((await service.CheckAsync(f.MachineId)).Allowed);
         Assert.AreEqual(0,await db.CreditLedger.CountAsync());Assert.AreEqual(1,await db.AiUsageRecords.CountAsync());
+    }
+
+    [TestMethod]
+    public async Task BatchedAdmissionMatchesLegacyDecisionAndUsesConstantQueryCount()
+    {
+        var counter = new CommandCounter();
+        await using var f = new Fixture(counter);
+        await f.Seed(0);
+        await using (var setup = f.Db())
+        {
+            var first = await setup.AiUsageRecords.SingleAsync();
+            ConfigureValuableUsage(first);
+            for (var index = 1; index < 25; index++)
+            {
+                var usage = f.Usage(Guid.NewGuid());
+                ConfigureValuableUsage(usage);
+                setup.AiUsageRecords.Add(usage);
+            }
+
+            setup.AiPricing.Add(new()
+            {
+                Id = Guid.NewGuid(), Provider = "Test", Model = "test", Currency = "USD",
+                InputPricePerMillion = 1, OutputPricePerMillion = 1,
+                EffectiveFromUtc = first.CreatedAtUtc.AddDays(-1)
+            });
+            setup.ExchangeRates.Add(new()
+            {
+                Id = Guid.NewGuid(), BaseCurrency = "USD", QuoteCurrency = "EUR", Rate = 2,
+                Source = "test", EffectiveFromUtc = first.CreatedAtUtc.AddDays(-1)
+            });
+            setup.CreditLedger.Add(new()
+            {
+                Id = Guid.NewGuid(), CompanyId = f.CompanyId, MachineId = f.MachineId,
+                AiUsageRecordId = first.Id, EntryType = "AiUsage", BucketType = "MachineIncluded",
+                RealAiCost = 0.0005m, Currency = "EUR", CreatedAtUtc = first.CreatedAtUtc
+            });
+            setup.CompanyWallets.Add(new()
+            {
+                // Exact boundary after conversion, included-quota subtraction and x3 commercial rounding.
+                CompanyId = f.CompanyId, Balance = 0.1485m, Currency = "EUR"
+            });
+            await setup.SaveChangesAsync();
+        }
+
+        counter.Reset();
+        AiCreditAccess legacy;
+        await using (var legacyDb = f.Db())
+            legacy = await LegacyCheckAsync(legacyDb, f.MachineId);
+        var legacyQueryCount = counter.Count;
+
+        counter.Reset();
+        AiCreditAccess batched;
+        await using (var batchedDb = f.Db())
+            batched = await new AiCreditAccessService(batchedDb).CheckAsync(f.MachineId);
+        var batchedQueryCount = counter.Count;
+
+        Assert.AreEqual(legacy.Allowed, batched.Allowed);
+        Assert.AreEqual(legacy.Status, batched.Status);
+        Assert.IsFalse(batched.Allowed);
+        Assert.AreEqual("AiCreditExhausted", batched.Status);
+        Assert.AreEqual(79, legacyQueryCount);
+        Assert.AreEqual(7, batchedQueryCount);
+    }
+
+    [TestMethod]
+    public async Task MissingExchangeRateRemainsNonBlockingLikeLegacyAdmission()
+    {
+        await using var f = new Fixture();
+        await f.Seed(0);
+        await using (var setup = f.Db())
+        {
+            var usage = await setup.AiUsageRecords.SingleAsync();
+            ConfigureValuableUsage(usage);
+            setup.AiPricing.Add(new()
+            {
+                Id = Guid.NewGuid(), Provider = "Test", Model = "test", Currency = "USD",
+                InputPricePerMillion = 1, OutputPricePerMillion = 1,
+                EffectiveFromUtc = usage.CreatedAtUtc.AddDays(-1)
+            });
+            setup.CompanyWallets.Add(new() { CompanyId = f.CompanyId, Balance = 0.000001m, Currency = "EUR" });
+            await setup.SaveChangesAsync();
+        }
+
+        AiCreditAccess legacy;
+        await using (var legacyDb = f.Db())
+            legacy = await LegacyCheckAsync(legacyDb, f.MachineId);
+        AiCreditAccess batched;
+        await using (var batchedDb = f.Db())
+            batched = await new AiCreditAccessService(batchedDb).CheckAsync(f.MachineId);
+
+        Assert.AreEqual(legacy.Allowed, batched.Allowed);
+        Assert.AreEqual(legacy.Status, batched.Status);
+        Assert.AreEqual("CompanyWalletAvailable", batched.Status);
+    }
+
+    private static void ConfigureValuableUsage(AiUsageRecord usage)
+    {
+        usage.Provider = "Test";
+        usage.Model = "test";
+        usage.InputTokens = 1000;
+        usage.OutputTokens = 0;
+        usage.TotalTokens = 1000;
+        usage.Available = true;
+        usage.Completed = true;
+    }
+
+    private static async Task<AiCreditAccess> LegacyCheckAsync(
+        DiagLinkDbContext db,
+        Guid? machineId,
+        CancellationToken ct = default)
+    {
+        var machine = await db.Machines.AsNoTracking().SingleOrDefaultAsync(item => item.Id == machineId, ct);
+        if (machine == null) return new(false, "AiCreditExhausted", AiCreditAccessService.ExhaustedMessage);
+        var now = DateTime.UtcNow;
+        var periods = await db.MachineBillingPeriods.AsNoTracking().Where(period => period.MachineId == machine.Id
+            && period.PeriodStartUtc <= now && now < period.PeriodEndUtc).ToListAsync(ct);
+        if (periods.Count == 1 && periods[0].Status == "Active"
+            && periods[0].IncludedAiUsedRealCost >= 0
+            && periods[0].IncludedAiBudgetRealCost > periods[0].IncludedAiUsedRealCost)
+            return new(true, "MachineIncludedAvailable", "Budget IA inclus disponible.");
+        var wallet = await db.CompanyWallets.AsNoTracking().SingleOrDefaultAsync(item => item.CompanyId == machine.CompanyId, ct);
+        if (wallet?.Currency != "EUR" || wallet.Balance <= 0)
+            return new(false, "AiCreditExhausted", AiCreditAccessService.ExhaustedMessage);
+
+        decimal pending = 0;
+        var usages = await db.AiUsageRecords.AsNoTracking().Where(usage => usage.CompanyId == machine.CompanyId
+            && !db.CreditLedger.Any(entry => entry.AiUsageRecordId == usage.Id && entry.EntryType == "AiUsage"
+                && entry.BucketType == "CompanyWallet")).ToListAsync(ct);
+        var calculator = new AiCostCalculator(db);
+        var converter = new AiCostCurrencyConverter(db);
+        foreach (var usage in usages)
+        {
+            var cost = await calculator.CalculateAsync(usage, ct);
+            if (!cost.IsValuable || cost.RealAiCost == null) continue;
+            var converted = await converter.ConvertAsync(cost.RealAiCost.Value, cost.Currency, usage, ct);
+            if (!converted.IsConvertible || converted.ConvertedAmount == null) continue;
+            var entries = await db.CreditLedger.AsNoTracking().Where(entry => entry.AiUsageRecordId == usage.Id
+                && entry.EntryType == "AiUsage" && entry.BucketType == "MachineIncluded").ToListAsync(ct);
+            var remainder = converted.ConvertedAmount.Value - entries.Sum(entry => entry.RealAiCost ?? 0);
+            if (remainder > 0) pending += CompanyWalletDebitService.CommercialAmount(remainder);
+            if (pending >= wallet.Balance)
+                return new(false, "AiCreditExhausted", AiCreditAccessService.ExhaustedMessage);
+        }
+        return new(true, "CompanyWalletAvailable", "CrÃ©dit entreprise disponible.");
+    }
+
+    private sealed class CommandCounter : DbCommandInterceptor
+    {
+        public int Count { get; private set; }
+        public void Reset() => Count = 0;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Count++;
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 }

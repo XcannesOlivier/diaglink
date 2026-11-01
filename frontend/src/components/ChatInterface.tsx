@@ -28,11 +28,9 @@ interface ChatInterfaceProps {
   currentConversationId?: string | null;
   recoveredInput?: string;
   recoveredAttachments?: import('../types/chat').IFileAttachment[];
-  pendingMessages?: Array<{ text: string; files?: File[] }>;
   onSendMessage: (text: string, files?: File[]) => void;
   onClearError?: () => void;
   onRecoveredInputConsumed?: () => void;
-  onDequeueMessage?: (index: number) => void;
   onNewChat?: () => void;
   onCancelStream?: () => void;
   onToggleSidebar?: () => void;
@@ -56,7 +54,7 @@ interface ChatInterfaceProps {
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
-  const { messages, status, error, streamingMessageId, lastStreamEndReason, currentConversationId, recoveredInput, recoveredAttachments, pendingMessages, onSendMessage, onClearError, onRecoveredInputConsumed, onDequeueMessage, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onLoadTechnicalVisual, onLoadTechnicalSource, hasMessages, disabled, agentName, agentDescription, starterAccessory, onChangeMachine } = props;
+  const { messages, status, error, streamingMessageId, lastStreamEndReason, currentConversationId, recoveredInput, recoveredAttachments, onSendMessage, onClearError, onRecoveredInputConsumed, onNewChat, onCancelStream, onToggleSidebar, onOpenMobileMenu, onRegenerate, onCancelEdit, isEditing, onFeedback, onLoadTechnicalVisual, onLoadTechnicalSource, hasMessages, disabled, agentName, agentDescription, starterAccessory, onChangeMachine } = props;
   const deferredMessages = useDeferredValue(messages);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesWrapperRef = useRef<HTMLDivElement>(null);
@@ -72,7 +70,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
   const dragCounterRef = useRef(0);
   
   const isStreaming = status === 'streaming';
-  const isBusy = disabled || status === 'sending';
+  const isSending = status === 'sending';
+  const isBusy = disabled || isSending;
   const isAwaitingResponse = status === 'sending' || isStreaming;
 
   const findAnchoredMessage = useCallback((): HTMLElement | null => {
@@ -385,12 +384,13 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
         <Waves />
         <ChatInput
           onSubmit={handleSendMessage}
-          disabled={isBusy}
+          disabled={disabled}
           onNewChat={onNewChat}
           onToggleSidebar={onToggleSidebar}
           onOpenMobileMenu={onOpenMobileMenu}
           hasMessages={hasMessages}
           placeholder="Décrivez votre problème ou posez votre question…"
+          isSending={isSending}
           isStreaming={isStreaming}
           onCancelStream={isStreaming && onCancelStream ? onCancelStream : undefined}
           isEditing={isEditing}
@@ -399,8 +399,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = (props) => {
           recoveredAttachments={recoveredAttachments}
           currentConversationId={currentConversationId}
           onRecoveredInputConsumed={onRecoveredInputConsumed}
-          pendingMessages={pendingMessages}
-          onDequeueMessage={onDequeueMessage}
           droppedFiles={droppedFiles}
           onDroppedFilesConsumed={handleDroppedFilesConsumed}
           onChangeMachine={onChangeMachine}

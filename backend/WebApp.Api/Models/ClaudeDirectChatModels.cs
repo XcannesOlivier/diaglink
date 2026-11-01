@@ -23,6 +23,9 @@ public sealed record ClaudeDirectChatRequest(
 {
     /// <summary>Trusted SQL metadata used only for source resolution; never sent to the model.</summary>
     public IReadOnlyList<HistoricalTechnicalSourceEvidence> HistoricalSourceEvidence { get; init; } = [];
+
+    /// <summary>Skills loaded by earlier turns of this SQL conversation and re-injected by the server.</summary>
+    public IReadOnlyList<string> PreloadedSkillNames { get; init; } = [];
 }
 
 public sealed record ClaudeDirectToolUse(
@@ -65,6 +68,8 @@ public sealed record ClaudeDirectCallUsage(
     public long CacheCreation1hInputTokens { get; init; }
     public long WebSearchRequests { get; init; }
     public IReadOnlyList<string> Tools { get; init; } = [];
+    public IReadOnlyList<string> LoadedSkills { get; init; } = [];
+    public IReadOnlyList<string> SkillContinuationFor { get; init; } = [];
 }
 
 public sealed record ClaudeDirectAggregateUsage(

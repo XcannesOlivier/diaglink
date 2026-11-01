@@ -21,6 +21,23 @@ public sealed class AiCostCurrencyConverter(DiagLinkDbContext db)
         DateTime usageCreatedAtUtc, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        var preliminary = Convert(sourceAmount, sourceCurrency, usageCreatedAtUtc, []);
+        if (preliminary.FailureReason != "ExchangeRateNotFound") return preliminary;
+
+        var candidates = await db.ExchangeRates.AsNoTracking().Where(r =>
+            r.BaseCurrency == sourceCurrency && r.QuoteCurrency == "EUR" &&
+            r.EffectiveFromUtc <= usageCreatedAtUtc &&
+            (r.EffectiveToUtc == null || usageCreatedAtUtc < r.EffectiveToUtc)).ToListAsync(ct);
+        return Convert(sourceAmount, sourceCurrency, usageCreatedAtUtc, candidates);
+    }
+
+    internal static CurrencyConversionResult Convert(
+        decimal sourceAmount,
+        string? sourceCurrency,
+        DateTime usageCreatedAtUtc,
+        IReadOnlyCollection<ExchangeRate> exchangeRateCandidates)
+    {
+        ArgumentNullException.ThrowIfNull(exchangeRateCandidates);
         var result = new CurrencyConversionResult { SourceAmount = sourceAmount, SourceCurrency = sourceCurrency };
         if (string.IsNullOrWhiteSpace(sourceCurrency)) return result with { FailureReason = "SourceCurrencyMissing" };
         if (sourceCurrency.Length != 3 || sourceCurrency.Any(c => c < 'A' || c > 'Z'))
@@ -35,13 +52,12 @@ public sealed class AiCostCurrencyConverter(DiagLinkDbContext db)
             // AiCostCalculator already supplies six-decimal costs. Identity conversion is exact.
             return result with { IsConvertible = true, ConvertedAmount = sourceAmount, ExchangeRate = 1m };
         }
-        var candidates = await db.ExchangeRates.AsNoTracking().Where(r =>
-            r.BaseCurrency == sourceCurrency && r.QuoteCurrency == "EUR" &&
-            r.EffectiveFromUtc <= usageCreatedAtUtc &&
-            (r.EffectiveToUtc == null || usageCreatedAtUtc < r.EffectiveToUtc)).ToListAsync(ct);
         // SQL collation must not silently normalize currency identifiers.
-        var matches = candidates.Where(r => string.Equals(r.BaseCurrency, sourceCurrency, StringComparison.Ordinal)
-            && string.Equals(r.QuoteCurrency, "EUR", StringComparison.Ordinal)).ToArray();
+        var matches = exchangeRateCandidates.Where(r =>
+            string.Equals(r.BaseCurrency, sourceCurrency, StringComparison.Ordinal)
+            && string.Equals(r.QuoteCurrency, "EUR", StringComparison.Ordinal)
+            && r.EffectiveFromUtc <= usageCreatedAtUtc
+            && (r.EffectiveToUtc == null || usageCreatedAtUtc < r.EffectiveToUtc)).ToArray();
         if (matches.Length == 0) return result with { FailureReason = "ExchangeRateNotFound" };
         if (matches.Length > 1) return result with { FailureReason = "AmbiguousExchangeRate" };
         var rate = matches[0];

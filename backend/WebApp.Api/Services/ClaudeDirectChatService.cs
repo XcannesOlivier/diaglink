@@ -47,6 +47,8 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
     private readonly TokenCredential _credential;
     private readonly ITechnicalVisualBlobReader _blobReader;
     private readonly TechnicalSourceReferenceResolver _sourceReferenceResolver;
+    private readonly ITechnicalAssistantPromptProvider _promptProvider;
+    private readonly ITechnicalSkillProvider _skillProvider;
     private readonly ClaudeDirectChatOptions _options;
     private readonly ILogger<ClaudeDirectChatService> _logger;
 
@@ -55,6 +57,8 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         TokenCredential credential,
         ITechnicalVisualBlobReader blobReader,
         TechnicalSourceReferenceResolver sourceReferenceResolver,
+        ITechnicalAssistantPromptProvider promptProvider,
+        ITechnicalSkillProvider skillProvider,
         IOptions<ClaudeDirectChatOptions> options,
         ILogger<ClaudeDirectChatService> logger)
     {
@@ -62,6 +66,8 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         _credential = credential;
         _blobReader = blobReader;
         _sourceReferenceResolver = sourceReferenceResolver;
+        _promptProvider = promptProvider;
+        _skillProvider = skillProvider;
         _options = options.Value;
         _logger = logger;
     }
@@ -122,6 +128,13 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         var sources = new List<TechnicalSourceReference>();
         var documentResolutions = new List<ClaudeDirectDocumentResolution>();
         var calls = new List<ClaudeDirectCallUsage>();
+        var availableSkillNames = _skillProvider.AvailableSkills
+            .Select(skill => skill.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var loadedSkills = request.PreloadedSkillNames
+            .Where(availableSkillNames.Contains)
+            .ToHashSet(StringComparer.Ordinal);
+        IReadOnlyList<string> pendingSkillContinuation = [];
         var allowedDocumentIds = new HashSet<string>(StringComparer.Ordinal);
         var fileSearchDocumentIds = new HashSet<string>(StringComparer.Ordinal);
         var fileSearchPageEvidence = new HashSet<TechnicalDocumentPageEvidence>();
@@ -339,7 +352,8 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
 
                     LogUsageIterations(root, usageTraceId, callNumber);
 
-                    var callUsage = usage!;
+                    var callUsage = usage! with { SkillContinuationFor = pendingSkillContinuation };
+                    pendingSkillContinuation = [];
                     calls.Add(callUsage);
                     finalModel = callUsage.Model;
                     finalStopReason = callUsage.StopReason;
@@ -509,6 +523,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                     });
 
                     var toolResults = new List<object>();
+                    var skillsLoadedThisCall = new List<string>();
                     foreach (var localCall in localCalls)
                     {
                         toolResults.Add(await ExecuteLocalToolAsync(
@@ -518,9 +533,17 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                             visuals,
                             documentResolutions,
                             errors,
+                            loadedSkills,
+                            skillsLoadedThisCall,
                             callNumber,
                             usageTraceId,
                             cancellationToken));
+                    }
+
+                    if (skillsLoadedThisCall.Count > 0)
+                    {
+                        calls[^1] = calls[^1] with { LoadedSkills = skillsLoadedThisCall.ToArray() };
+                        pendingSkillContinuation = skillsLoadedThisCall.ToArray();
                     }
 
                     history.Add(new Dictionary<string, object?>
@@ -733,7 +756,8 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                             ["type"] = "integer",
                             ["minimum"] = 1,
                             ["maximum"] = 99999,
-                            ["description"] = "Numéro de page correspondant aux assets d’image."
+                            ["description"] =
+                                "Numéro de page physique du PDF (le même que Page PDF dans File Search), jamais le numéro imprimé."
                         },
                         ["asset_type"] = new Dictionary<string, object?>
                         {
@@ -757,6 +781,42 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
             }
         };
 
+        if (_options.Skills.Enabled)
+        {
+            tools.Add(new Dictionary<string, object?>
+            {
+                ["name"] = "load_skill",
+                ["description"] =
+                    "Charge les instructions de méthode approuvées d'une ou plusieurs compétences. " +
+                    "À appeler dès que la demande relève de leur domaine : panne ou alarme, procédure ou intervention, " +
+                    "circuit électrique, hydraulique, pneumatique, graissage ou automate, schéma, pièce, documentation, " +
+                    "explication, compte rendu, escalade. Ne pas appeler pour une question générale simple. " +
+                    "Plusieurs compétences peuvent être chargées en un seul appel. " +
+                    "Ne jamais recharger une compétence déjà disponible dans le tour courant. Compétences : " +
+                    string.Join(" ; ", _skillProvider.AvailableSkills.Select(skill => $"{skill.Name} — {skill.Description}")),
+                ["input_schema"] = new Dictionary<string, object?>
+                {
+                    ["type"] = "object",
+                    ["properties"] = new Dictionary<string, object?>
+                    {
+                        ["skill_names"] = new Dictionary<string, object?>
+                        {
+                            ["type"] = "array",
+                            ["items"] = new Dictionary<string, object?>
+                            {
+                                ["type"] = "string",
+                                ["enum"] = _skillProvider.AvailableSkills.Select(skill => skill.Name).ToArray()
+                            },
+                            ["minItems"] = 1,
+                            ["uniqueItems"] = true
+                        }
+                    },
+                    ["required"] = new[] { "skill_names" },
+                    ["additionalProperties"] = false
+                }
+            });
+        }
+
         if (_options.WebSearch.Enabled && webSearchRemaining > 0)
         {
             tools.Add(new Dictionary<string, object?>
@@ -776,7 +836,11 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         var payload = new Dictionary<string, object?>
         {
             ["model"] = _options.Deployment,
-            ["max_tokens"] = 8192,
+            ["max_tokens"] = 4096,
+            ["output_config"] = new Dictionary<string, object?>
+            {
+                ["effort"] = "medium"
+            },
             ["stream"] = true,
             ["system"] = new object[]
             {
@@ -861,10 +925,48 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         List<TechnicalVisualReference> visuals,
         List<ClaudeDirectDocumentResolution> documentResolutions,
         List<ClaudeDirectError> errors,
+        HashSet<string> loadedSkills,
+        List<string> skillsLoadedThisCall,
         int callNumber,
         string traceId,
         CancellationToken cancellationToken)
     {
+        if (string.Equals(call.Name, "load_skill", StringComparison.Ordinal))
+        {
+            if (!_options.Skills.Enabled)
+            {
+                return ErrorToolResult(
+                    call.Id,
+                    AddToolError(errors, "unsupported_tool", "Skills are disabled.", callNumber, call.Id));
+            }
+
+            var skillNames = GetStringArray(call.Input, "skill_names");
+            var skill = _skillProvider.Load(skillNames, loadedSkills);
+            if (!skill.Success)
+            {
+                return ErrorToolResult(
+                    call.Id,
+                    AddToolError(errors, skill.Code, skill.Message, callNumber, call.Id));
+            }
+
+            foreach (var skillName in skill.LoadedSkillNames ?? [])
+            {
+                loadedSkills.Add(skillName);
+                skillsLoadedThisCall.Add(skillName);
+                _logger.LogInformation(
+                    "ClaudeDirectSkill Trace={TraceId} Call={CallNumber} Skill={SkillName} Outcome=loaded",
+                    traceId,
+                    callNumber,
+                    skillName);
+            }
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "tool_result",
+                ["tool_use_id"] = call.Id,
+                ["content"] = skill.Content
+            };
+        }
+
         if (!string.Equals(call.Name, "get_page_image", StringComparison.Ordinal))
         {
             return ErrorToolResult(
@@ -892,6 +994,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                 machine.BlobPrefix,
                 validatedImageRequest,
                 allowedDocumentIds,
+                callNumber,
                 traceId,
                 cancellationToken);
             _logger.LogInformation(
@@ -905,22 +1008,42 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                 validatedImageRequest.AssetType,
                 resolution.Mode);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (OperationCanceledException)
         {
             _logger.LogInformation(
-                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType}",
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} CancellationRequested={CancellationRequested}",
+                traceId,
+                "ClaudeDirectChatService",
+                "ImageResolution",
+                callNumber,
+                imageResolutionStopwatch.ElapsedMilliseconds,
+                "cancelled",
+                validatedImageRequest.AssetType,
+                cancellationToken.IsCancellationRequested);
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            var (httpStatus, azureErrorCode) = GetAzureFailure(exception);
+            _logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} ErrorType={ErrorType} HttpStatus={HttpStatus} AzureErrorCode={AzureErrorCode}",
                 traceId,
                 "ClaudeDirectChatService",
                 "ImageResolution",
                 callNumber,
                 imageResolutionStopwatch.ElapsedMilliseconds,
                 "failure",
-                validatedImageRequest.AssetType);
+                validatedImageRequest.AssetType,
+                exception.GetType().Name,
+                httpStatus,
+                azureErrorCode);
             _logger.LogWarning(
-                "Claude direct image read failed. CallNumber={CallNumber}, ToolUseId={ToolUseId}, ErrorType={ErrorType}",
+                "Claude direct image read failed. CallNumber={CallNumber}, ToolUseId={ToolUseId}, ErrorType={ErrorType}, HttpStatus={HttpStatus}, AzureErrorCode={AzureErrorCode}",
                 callNumber,
                 call.Id,
-                exception.GetType().Name);
+                exception.GetType().Name,
+                httpStatus,
+                azureErrorCode);
             documentResolutions.Add(new(
                 validatedImageRequest.RequestedDocumentId,
                 null,
@@ -968,10 +1091,26 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                 validatedImageRequest.AssetType,
                 bytes.Length);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (OperationCanceledException)
         {
             _logger.LogInformation(
-                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} Bytes={Bytes}",
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} Bytes={Bytes} CancellationRequested={CancellationRequested}",
+                traceId,
+                "ClaudeDirectChatService",
+                "ImageBlobRead",
+                callNumber,
+                imageDownloadStopwatch.ElapsedMilliseconds,
+                "cancelled",
+                validatedImageRequest.AssetType,
+                0,
+                cancellationToken.IsCancellationRequested);
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            var (httpStatus, azureErrorCode) = GetAzureFailure(exception);
+            _logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} Bytes={Bytes} ErrorType={ErrorType} HttpStatus={HttpStatus} AzureErrorCode={AzureErrorCode}",
                 traceId,
                 "ClaudeDirectChatService",
                 "ImageBlobRead",
@@ -979,7 +1118,10 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                 imageDownloadStopwatch.ElapsedMilliseconds,
                 "failure",
                 validatedImageRequest.AssetType,
-                0);
+                0,
+                exception.GetType().Name,
+                httpStatus,
+                azureErrorCode);
             _logger.LogWarning(
                 "Claude direct image payload was rejected. CallNumber={CallNumber}, ToolUseId={ToolUseId}, ErrorType={ErrorType}",
                 callNumber,
@@ -1042,17 +1184,38 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         string blobPrefix,
         ImageRequest request,
         IReadOnlySet<string> allowedDocumentIds,
+        int callNumber,
         string traceId,
         CancellationToken cancellationToken)
     {
+        var attemptedDocumentIds = new HashSet<string>(StringComparer.Ordinal);
+        var probeNumber = 0;
+
+        async Task<(TechnicalVisualReference Visual, Stream Stream)?> TryOpenAsync(string documentId)
+        {
+            if (!attemptedDocumentIds.Add(documentId))
+            {
+                return null;
+            }
+
+            var visual = BuildVisual(documentId, request);
+            var stream = await OpenVisualAsync(
+                blobPrefix,
+                visual,
+                callNumber,
+                ++probeNumber,
+                traceId,
+                cancellationToken);
+            return stream is null ? null : (visual, stream);
+        }
+
         if (!string.IsNullOrWhiteSpace(request.RequestedDocumentId) &&
             allowedDocumentIds.Contains(request.RequestedDocumentId))
         {
-            var exactVisual = BuildVisual(request.RequestedDocumentId, request);
-            var exactStream = await OpenVisualAsync(blobPrefix, exactVisual, traceId, cancellationToken);
-            if (exactStream is not null)
+            var exact = await TryOpenAsync(request.RequestedDocumentId);
+            if (exact is not null)
             {
-                return new(exactVisual, exactStream, ClaudeDirectDocumentResolutionMode.Exact);
+                return new(exact.Value.Visual, exact.Value.Stream, ClaudeDirectDocumentResolutionMode.Exact);
             }
         }
 
@@ -1064,21 +1227,19 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         if (allowedDocumentIds.Count == 1)
         {
             var documentId = allowedDocumentIds.Single();
-            var visual = BuildVisual(documentId, request);
-            var stream = await OpenVisualAsync(blobPrefix, visual, traceId, cancellationToken);
-            return stream is null
+            var match = await TryOpenAsync(documentId);
+            return match is null
                 ? new(null, null, ClaudeDirectDocumentResolutionMode.NotFound)
-                : new(visual, stream, ClaudeDirectDocumentResolutionMode.UniqueMcpDocument);
+                : new(match.Value.Visual, match.Value.Stream, ClaudeDirectDocumentResolutionMode.UniqueMcpDocument);
         }
 
         var matches = new List<(TechnicalVisualReference Visual, Stream Stream)>();
         foreach (var documentId in allowedDocumentIds.Order(StringComparer.Ordinal))
         {
-            var visual = BuildVisual(documentId, request);
-            var stream = await OpenVisualAsync(blobPrefix, visual, traceId, cancellationToken);
-            if (stream is not null)
+            var match = await TryOpenAsync(documentId);
+            if (match is not null)
             {
-                matches.Add((visual, stream));
+                matches.Add(match.Value);
             }
         }
 
@@ -1106,6 +1267,8 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
     private async Task<Stream?> OpenVisualAsync(
         string blobPrefix,
         TechnicalVisualReference visual,
+        int callNumber,
+        int probeNumber,
         string traceId,
         CancellationToken cancellationToken)
     {
@@ -1115,16 +1278,70 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var stream = await _blobReader.OpenReadAsync(blobName, cancellationToken);
-        _logger.LogInformation(
-            "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType}",
-            traceId,
-            "ClaudeDirectChatService",
-            "ImageBlobOpen",
-            stopwatch.ElapsedMilliseconds,
-            stream is null ? "not_found" : "success",
-            visual.AssetType);
-        return stream;
+        try
+        {
+            var stream = await _blobReader.OpenReadAsync(blobName, cancellationToken);
+            _logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} Probe={ProbeNumber} Operation={Operation} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} HttpStatus={HttpStatus}",
+                traceId,
+                "ClaudeDirectChatService",
+                "ImageBlobOpen",
+                callNumber,
+                probeNumber,
+                "DownloadStreaming",
+                stopwatch.ElapsedMilliseconds,
+                stream is null ? "not_found" : "success",
+                visual.AssetType,
+                stream is null ? StatusCodes.Status404NotFound : null);
+            return stream;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} Probe={ProbeNumber} Operation={Operation} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} HttpStatus={HttpStatus} CancellationRequested={CancellationRequested}",
+                traceId,
+                "ClaudeDirectChatService",
+                "ImageBlobOpen",
+                callNumber,
+                probeNumber,
+                "DownloadStreaming",
+                stopwatch.ElapsedMilliseconds,
+                "cancelled",
+                visual.AssetType,
+                null,
+                cancellationToken.IsCancellationRequested);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            var (httpStatus, azureErrorCode) = GetAzureFailure(exception);
+            _logger.LogInformation(
+                "DiagLinkPerformance TurnTraceId={TurnTraceId} Component={Component} Stage={Stage} Call={CallNumber} Probe={ProbeNumber} Operation={Operation} DurationMs={DurationMs} Outcome={Outcome} AssetType={AssetType} ErrorType={ErrorType} HttpStatus={HttpStatus} AzureErrorCode={AzureErrorCode}",
+                traceId,
+                "ClaudeDirectChatService",
+                "ImageBlobOpen",
+                callNumber,
+                probeNumber,
+                "DownloadStreaming",
+                stopwatch.ElapsedMilliseconds,
+                "failure",
+                visual.AssetType,
+                exception.GetType().Name,
+                httpStatus,
+                azureErrorCode);
+            throw;
+        }
+    }
+
+    private static (int? HttpStatus, string AzureErrorCode) GetAzureFailure(Exception exception)
+    {
+        var azureFailure = exception as Azure.RequestFailedException
+            ?? (exception as AggregateException)?.Flatten().InnerExceptions
+                .OfType<Azure.RequestFailedException>()
+                .LastOrDefault();
+        return azureFailure is null
+            ? (null, "unavailable")
+            : (azureFailure.Status, azureFailure.ErrorCode ?? "unavailable");
     }
 
     private List<ClaudeDirectError> ValidateRequest(ClaudeDirectChatRequest? request)
@@ -1140,6 +1357,8 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
             string.IsNullOrWhiteSpace(_options.Deployment) ||
             _options.MaxMessageCalls is < 1 or > 12 ||
             _options.MaxImageBytes is < 8 or > 20 * 1024 * 1024 ||
+            _options.Skills is null ||
+            _options.Skills.MaxSkillBytes is < 1024 or > 128 * 1024 ||
             _options.WebSearch is null ||
             _options.WebSearch.MaxUses < 0)
         {
@@ -1236,15 +1455,38 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
             $"toolboxes/{Uri.EscapeDataString(toolboxName)}/versions/{Uri.EscapeDataString(toolboxVersion)}/mcp?api-version=v1");
     }
 
-    private static string BuildSystemPrompt(ClaudeDirectChatRequest request)
+    private string BuildSystemPrompt(ClaudeDirectChatRequest request)
     {
-        var prompt = request.SystemPrompt?.Trim() ?? string.Empty;
+        var prompt = (_options.Skills.Enabled
+            ? _promptProvider.GetClaudeDirectSkillsPrompt()
+            : request.SystemPrompt)?.Trim() ?? string.Empty;
         var machineDescription = request.Machine.Description?.Trim() ?? string.Empty;
         var sections = new List<string>();
 
         if (!string.IsNullOrEmpty(prompt))
         {
             sections.Add(prompt);
+        }
+
+        if (_options.Skills.Enabled && request.PreloadedSkillNames.Count > 0)
+        {
+            var availableSkillNames = _skillProvider.AvailableSkills
+                .Select(skill => skill.Name)
+                .ToHashSet(StringComparer.Ordinal);
+            var names = request.PreloadedSkillNames
+                .Where(availableSkillNames.Contains)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (names.Length > 0)
+            {
+                var preloaded = _skillProvider.Load(names, new HashSet<string>(StringComparer.Ordinal));
+                if (preloaded.Success && !string.IsNullOrWhiteSpace(preloaded.Content))
+                {
+                    sections.Add(
+                        "Compétences déjà chargées dans cette conversation — applique ces instructions sans rappeler load_skill :\n" +
+                        preloaded.Content);
+                }
+            }
         }
 
         if (!string.IsNullOrEmpty(machineDescription))
@@ -2065,6 +2307,19 @@ else
         element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
             ? property.GetString()
             : null;
+
+    private static IReadOnlyList<string> GetStringArray(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Array)
+            return [];
+
+        return property.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString())
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Cast<string>()
+            .ToArray();
+    }
 
     private static bool? GetBoolean(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var property) &&

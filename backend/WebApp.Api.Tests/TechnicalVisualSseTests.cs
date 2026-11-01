@@ -35,6 +35,7 @@ public class TechnicalVisualSseTests
     private static readonly ConversationMessageSourceReferenceInfo Source = new()
     {
         Id = 921,
+        DocumentName = "DEVELON-DX10z-Manual.pdf",
         PdfPage = 72,
         DisplayPage = "70",
         Label = "p. 70",
@@ -158,8 +159,9 @@ public class TechnicalVisualSseTests
         using var json = JsonDocument.Parse(payload);
         var source = json.RootElement.GetProperty("sources")[0];
         CollectionAssert.AreEquivalent(
-            new[] { "id", "pdfPage", "displayPage", "label", "startIndex", "endIndex", "displayOrder" },
+            new[] { "id", "documentName", "pdfPage", "displayPage", "label", "startIndex", "endIndex", "displayOrder" },
             source.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.AreEqual("DEVELON-DX10z-Manual.pdf", source.GetProperty("documentName").GetString());
         foreach (var forbidden in new[] { "documentId", "sourceBlob", "blob", "https://", "sig=", "sas", "foundry" })
         {
             Assert.IsFalse(payload.Contains(forbidden, StringComparison.OrdinalIgnoreCase));

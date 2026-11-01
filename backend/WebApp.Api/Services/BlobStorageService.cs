@@ -118,12 +118,13 @@ public class BlobStorageService : ITechnicalVisualBlobReader, ITechnicalDocument
 
         try
         {
-            return await _client
+            var download = await _client
                 .GetBlobContainerClient("documents")
                 .GetBlobClient(blobName)
-                .OpenReadAsync(cancellationToken: cancellationToken);
+                .DownloadStreamingAsync(cancellationToken: cancellationToken);
+            return download.Value.Content;
         }
-        catch (Azure.RequestFailedException)
+        catch (Azure.RequestFailedException ex) when (ex.Status == StatusCodes.Status404NotFound)
         {
             return null;
         }
@@ -159,7 +160,7 @@ public class BlobStorageService : ITechnicalVisualBlobReader, ITechnicalDocument
                 .GetBlobClient(blobName)
                 .OpenReadAsync(cancellationToken: cancellationToken);
         }
-        catch (Azure.RequestFailedException)
+        catch (Azure.RequestFailedException ex) when (ex.Status == StatusCodes.Status404NotFound)
         {
             return null;
         }

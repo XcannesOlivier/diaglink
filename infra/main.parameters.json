@@ -89,6 +89,9 @@
     "claudeFileSearchDiagnosticsEnabled": {
       "value": "${CLAUDE_FILE_SEARCH_DIAGNOSTICS_ENABLED=false}"
     },
+    "claudeSkillsEnabled": {
+      "value": "${CLAUDE_SKILLS_ENABLED=false}"
+    },
     "aiPricingIdentityDeployments": {
       "value": [
         {

@@ -206,6 +206,7 @@ builder.Services.AddSingleton<Azure.Core.TokenCredential>(_ =>
         : new Azure.Identity.DefaultAzureCredential();
 });
 builder.Services.AddSingleton<ITechnicalAssistantPromptProvider, TechnicalAssistantPromptProvider>();
+builder.Services.AddSingleton<ITechnicalSkillProvider, TechnicalSkillProvider>();
 builder.Services.AddSingleton<ClaudeDirectAgentMetadataFactory>();
 builder.Services.AddScoped<IConversationSummarizer, ClaudeConversationSummarizer>();
 builder.Services.AddSingleton<ClaudeDirectChatAttachmentValidator>();
@@ -1233,6 +1234,7 @@ app.MapGet("/api/machines/{machineId:guid}/ai-credit", async (Guid machineId, Ht
 app.MapPost("/api/chat/stream", async (
     ChatRequest request,
     AiUsagePersistenceBillingService usagePersistenceBilling,
+    AiUsageRepository aiUsageRepository,
     AiCreditAccessService creditAccess,
     ConversationHistoryRepository historyRepository,
     ConversationSummaryService conversationSummaryService,
@@ -1468,6 +1470,7 @@ app.MapPost("/api/chat/stream", async (
         var assistantSuggestions = new List<string>();
         var assistantWebCitations = new List<AnnotationInfo>();
         Guid? sqlConversationId = null;
+        IReadOnlyList<string> preloadedSkillNames = [];
         // Captured from the authorized machine, never the caller's company claim.
         var machineCompanyId = resolvedMachine?.CompanyId;
         var sqlUserId = Guid.TryParse(httpContext.User.FindFirst(DiagLinkClaimTypes.UserId)?.Value, out var parsedUserId)
@@ -1477,6 +1480,10 @@ app.MapPost("/api/chat/stream", async (
             stageStopwatch.Restart();
             sqlConversationId = await historyRepository.GetConversationIdByPublicIdAsync(conversationId, cancellationToken);
             LogStage("ConversationIdReadSql", stageStopwatch.ElapsedMilliseconds, sqlConversationId.HasValue ? "success" : "not_found");
+            if (sqlConversationId.HasValue)
+            {
+                preloadedSkillNames = await aiUsageRepository.GetLoadedSkillNamesAsync(sqlConversationId.Value, cancellationToken);
+            }
         }
         catch (Exception ex)
         {
@@ -1498,7 +1505,8 @@ app.MapPost("/api/chat/stream", async (
                 messageForModel,
                 cancellationToken,
                 claudeDirectImages,
-                historicalSourceEvidence);
+                historicalSourceEvidence,
+                preloadedSkillNames);
 
         var runtimeStopwatch = Stopwatch.StartNew();
         long? firstVisibleTextMs = null;

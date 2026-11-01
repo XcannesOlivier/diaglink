@@ -131,6 +131,8 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
                 mention.EndIndex,
                 references.Count)
             {
+                DocumentName = pageMaps[resolution.DocumentId].DocumentName,
+                VersionToken = pageMaps[resolution.DocumentId].VersionToken,
                 PageKind = mention.PageKind
             });
         }
@@ -255,6 +257,12 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
             return false;
         }
 
+        if (source.VersionToken is not null &&
+            !string.Equals(source.VersionToken, pageMap.VersionToken, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         return source.PageKind == TechnicalSourcePageKind.Pdf
             ? pageMap.PdfPages.Contains(source.PdfPage)
             : pageMap.PdfPagesByDisplayPage.TryGetValue(source.DisplayPage, out var pdfPages) &&
@@ -272,38 +280,33 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
             .Where(mention => mention.PageKind == TechnicalSourcePageKind.Pdf)
             .GroupBy(mention => mention.GroupStartIndex))
         {
-            var pages = group
-                .Select(mention => int.TryParse(mention.Page, out var page) ? page : 0)
-                .Where(page => page > 0)
-                .Distinct()
-                .ToArray();
-            if (pages.Length == 0)
-            {
-                continue;
-            }
-
-            var evidencedDocuments = pageMaps
-                .Where(item => pages.All(page =>
-                    item.Value.PdfPages.Contains(page) &&
-                    evidence.Any(proof =>
-                        string.Equals(proof.DocumentId, item.Key, StringComparison.Ordinal) &&
-                        proof.PdfPage == page)))
-                .Select(item => item.Key)
-                .ToArray();
-
-            string? documentId = evidencedDocuments.Length == 1
-                ? evidencedDocuments[0]
-                : evidencedDocuments.Length == 0 && isSingleDocument && pageMaps.Count == 1
-                    ? pageMaps.Keys.Single()
-                    : null;
-            if (documentId is null || pages.Any(page => !pageMaps[documentId].PdfPages.Contains(page)))
-            {
-                continue;
-            }
-
             foreach (var mention in group)
             {
-                resolutions.Add(mention, new(documentId, int.Parse(mention.Page)));
+                if (!int.TryParse(mention.Page, out var page) || page <= 0)
+                {
+                    continue;
+                }
+
+                var evidencedDocuments = pageMaps
+                    .Where(item =>
+                        item.Value.PdfPages.Contains(page) &&
+                        evidence.Any(proof =>
+                            string.Equals(proof.DocumentId, item.Key, StringComparison.Ordinal) &&
+                            proof.PdfPage == page))
+                    .Select(item => item.Key)
+                    .ToArray();
+
+                string? documentId = evidencedDocuments.Length == 1
+                    ? evidencedDocuments[0]
+                    : evidencedDocuments.Length == 0 && isSingleDocument && pageMaps.Count == 1
+                        ? pageMaps.Keys.Single()
+                        : null;
+                if (documentId is null || !pageMaps[documentId].PdfPages.Contains(page))
+                {
+                    continue;
+                }
+
+                resolutions.Add(mention, new(documentId, page));
             }
         }
     }

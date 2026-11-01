@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using WebApp.Api.Data;
 using WebApp.Api.Models;
@@ -19,11 +20,13 @@ public class AiCreditConsumptionServiceTests
         public Guid CompanyId = Guid.NewGuid(), MachineId = Guid.NewGuid(), UsageId = Guid.NewGuid(), PeriodId = Guid.NewGuid();
         public AiCreditConsumptionService Service => new(Options);
         public DiagLinkDbContext Db() => new(Options);
-        public Fixture()
+        public Fixture(params IInterceptor[] interceptors)
         {
             var cs = $"Data Source=credit-{Guid.NewGuid()};Mode=Memory;Cache=Shared;Default Timeout=1";
             keeper = new SqliteConnection(cs); keeper.Open();
-            Options = new DbContextOptionsBuilder<DiagLinkDbContext>().UseSqlite(cs).Options;
+            var builder = new DbContextOptionsBuilder<DiagLinkDbContext>().UseSqlite(cs);
+            if (interceptors.Length > 0) builder.AddInterceptors(interceptors);
+            Options = builder.Options;
         }
         public async Task Seed(decimal budget = 10m, decimal used = 0m)
         {

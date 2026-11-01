@@ -9,7 +9,6 @@ const clearUserScopedState = (state: AppState): AppState => ({
   chat: {
     ...initialAppState.chat,
     messages: [],
-    pendingMessages: [],
   },
   conversations: {
     ...initialAppState.conversations,
@@ -148,7 +147,6 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           currentConversationId: action.conversationId,
           streamingMessageId: undefined,
           error: null,
-          pendingMessages: [],
           editSnapshot: undefined,
           recoveredInput: undefined,
           recoveredAttachments: undefined,
@@ -423,7 +421,6 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
           streamingMessageId: undefined,
           lastStreamEndReason: undefined,
           recoveredInput: undefined, recoveredAttachments: undefined,
-          pendingMessages: [],
         },
         ui: {
           ...state.ui,
@@ -498,34 +495,6 @@ export const appReducer = (state: AppState, action: AppAction): AppState => {
         chat: {
           ...state.chat,
           recoveredInput: undefined, recoveredAttachments: undefined,
-        },
-      };
-
-    // === Message Queue ===
-    case 'CHAT_QUEUE_MESSAGE':
-      return {
-        ...state,
-        chat: {
-          ...state.chat,
-          pendingMessages: [...state.chat.pendingMessages, { text: action.text, files: action.files }],
-        },
-      };
-
-    case 'CHAT_DEQUEUE_MESSAGE':
-      return {
-        ...state,
-        chat: {
-          ...state.chat,
-          pendingMessages: state.chat.pendingMessages.filter((_, i) => i !== action.index),
-        },
-      };
-
-    case 'CHAT_CLEAR_QUEUE':
-      return {
-        ...state,
-        chat: {
-          ...state.chat,
-          pendingMessages: [],
         },
       };
 

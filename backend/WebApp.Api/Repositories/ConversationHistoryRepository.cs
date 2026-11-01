@@ -4,6 +4,7 @@ using System.Text.Json;
 using WebApp.Api.Data;
 using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
+using WebApp.Api.Services;
 
 namespace WebApp.Api.Repositories;
 
@@ -15,11 +16,16 @@ public class ConversationHistoryRepository
 {
     private readonly DiagLinkDbContext _db;
     private readonly ILogger<ConversationHistoryRepository> _logger;
+    private readonly TechnicalPageMapResolver? _pageMapResolver;
 
-    public ConversationHistoryRepository(DiagLinkDbContext db, ILogger<ConversationHistoryRepository> logger)
+    public ConversationHistoryRepository(
+        DiagLinkDbContext db,
+        ILogger<ConversationHistoryRepository> logger,
+        TechnicalPageMapResolver? pageMapResolver = null)
     {
         _db = db;
         _logger = logger;
+        _pageMapResolver = pageMapResolver;
     }
 
     public async Task CreateConversationAsync(
@@ -215,6 +221,7 @@ public class ConversationHistoryRepository
         conversation.UpdatedAtUtc = now;
 
         await _db.SaveChangesAsync(cancellationToken);
+        var orderedSources = sources.OrderBy(source => source.DisplayOrder).ToArray();
         return new ConversationMessagePersistenceResult(
             message.Id,
             message.Visuals
@@ -223,7 +230,9 @@ public class ConversationHistoryRepository
                 .ToList(),
             message.Sources
                 .OrderBy(source => source.DisplayOrder)
-                .Select(ToSourceInfo)
+                .Select((source, index) => ToSourceInfo(
+                    source,
+                    index < orderedSources.Length ? orderedSources[index].DocumentName : source.DocumentId))
                 .ToList(),
             message.WebCitations
                 .OrderBy(citation => citation.DisplayOrder)
@@ -363,12 +372,14 @@ public class ConversationHistoryRepository
                     source.DocumentId,
                     source.PdfPage,
                     pdfPage.ToString(CultureInfo.InvariantCulture),
-                    TechnicalSourcePageKind.Pdf)
+                    TechnicalSourcePageKind.Pdf,
+                    TechnicalSourcePageStorage.ReadVersionToken(source.DisplayPage))
                 : new HistoricalTechnicalSourceEvidence(
                     source.DocumentId,
                     source.PdfPage,
-                    source.DisplayPage,
-                    TechnicalSourcePageKind.Display))
+                    TechnicalSourcePageStorage.PublicDisplayPage(source.DisplayPage),
+                    TechnicalSourcePageKind.Display,
+                    TechnicalSourcePageStorage.ReadVersionToken(source.DisplayPage)))
             .Distinct()
             .ToArray();
     }
@@ -476,6 +487,8 @@ public class ConversationHistoryRepository
             return null;
         }
 
+        var sourceNames = await ResolveCurrentSourceNamesAsync(conversation, cancellationToken);
+
         return conversation.Messages
             .Select(m => new ConversationMessageInfo
             {
@@ -489,7 +502,10 @@ public class ConversationHistoryRepository
                     .ToList(),
                 Sources = m.Sources
                     .OrderBy(source => source.DisplayOrder)
-                    .Select(ToSourceInfo)
+                    .Where(source => _pageMapResolver is null || sourceNames.ContainsKey(SourceKey(source)))
+                    .Select(source => ToSourceInfo(
+                        source,
+                        sourceNames.GetValueOrDefault(SourceKey(source), source.DocumentId)))
                     .ToList(),
                 WebCitations = m.WebCitations
                     .OrderBy(citation => citation.DisplayOrder)
@@ -498,6 +514,87 @@ public class ConversationHistoryRepository
             })
             .ToList();
     }
+
+    private async Task<Dictionary<string, string>> ResolveCurrentSourceNamesAsync(
+        Conversation conversation,
+        CancellationToken cancellationToken)
+    {
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (_pageMapResolver is null || conversation.MachineId is not Guid machineId)
+        {
+            return names;
+        }
+
+        var blobPrefix = await _db.Machines
+            .AsNoTracking()
+            .Where(machine => machine.Id == machineId)
+            .Select(machine => machine.BlobPrefix)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(blobPrefix))
+        {
+            return names;
+        }
+
+        var sources = conversation.Messages.SelectMany(message => message.Sources).ToArray();
+        foreach (var document in sources.GroupBy(source => source.DocumentId, StringComparer.Ordinal))
+        {
+            var displayPages = document
+                .Where(source => !TechnicalSourcePageStorage.TryReadPdfPage(source.DisplayPage, out _))
+                .Select(source => TechnicalSourcePageStorage.PublicDisplayPage(source.DisplayPage))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            TechnicalPageMapResolution? pageMap;
+            try
+            {
+                pageMap = await _pageMapResolver.ResolveAsync(
+                    blobPrefix,
+                    document.Key,
+                    displayPages,
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Historical technical source revalidation failed. DocumentId={DocumentId}",
+                    document.Key);
+                continue;
+            }
+            if (pageMap is null)
+            {
+                continue;
+            }
+
+            foreach (var source in document)
+            {
+                var storedVersion = TechnicalSourcePageStorage.ReadVersionToken(source.DisplayPage);
+                if (storedVersion is not null &&
+                    !string.Equals(storedVersion, pageMap.VersionToken, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                var currentPhysicalReference =
+                    TechnicalSourcePageStorage.TryReadPdfPage(source.DisplayPage, out var storedPdfPage) &&
+                    storedPdfPage == source.PdfPage &&
+                    pageMap.PdfPages.Contains(source.PdfPage);
+                var currentDisplayReference =
+                    !TechnicalSourcePageStorage.TryReadPdfPage(source.DisplayPage, out _) &&
+                    pageMap.PdfPagesByDisplayPage.TryGetValue(
+                        TechnicalSourcePageStorage.PublicDisplayPage(source.DisplayPage),
+                        out var currentPdfPages) &&
+                    currentPdfPages.Contains(source.PdfPage);
+                if (currentPhysicalReference || currentDisplayReference)
+                {
+                    names[SourceKey(source)] = pageMap.DocumentName;
+                }
+            }
+        }
+
+        return names;
+    }
+
+    private static string SourceKey(ConversationMessageSourceReference source) =>
+        $"{source.Id}:{source.DocumentId}:{source.PdfPage}:{source.DisplayPage}";
 
     private static IReadOnlyList<string> DeserializeSuggestions(string? json)
     {
@@ -528,9 +625,11 @@ public class ConversationHistoryRepository
     };
 
     private static ConversationMessageSourceReferenceInfo ToSourceInfo(
-        ConversationMessageSourceReference source) => new()
+        ConversationMessageSourceReference source,
+        string documentName) => new()
     {
         Id = source.Id,
+        DocumentName = string.IsNullOrWhiteSpace(documentName) ? source.DocumentId : documentName,
         PdfPage = source.PdfPage,
         DisplayPage = TechnicalSourcePageStorage.PublicDisplayPage(source.DisplayPage),
         Label = source.Label,

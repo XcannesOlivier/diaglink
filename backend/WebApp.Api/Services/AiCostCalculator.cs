@@ -28,6 +28,25 @@ public sealed class AiCostCalculator(DiagLinkDbContext db)
     {
         ArgumentNullException.ThrowIfNull(record);
         ct.ThrowIfCancellationRequested();
+        var preliminary = Calculate(record, []);
+        if (preliminary.FailureReason != "PricingNotFound") return preliminary;
+
+        var type = record.UsageType.ToString();
+        var candidates = await db.AiPricing.AsNoTracking()
+            .Where(p => p.Provider == record.Provider && p.Model == record.Model
+                && (p.UsageType == type || p.UsageType == null)
+                && p.EffectiveFromUtc <= record.CreatedAtUtc
+                && (p.EffectiveToUtc == null || record.CreatedAtUtc < p.EffectiveToUtc))
+            .ToListAsync(ct);
+        return Calculate(record, candidates);
+    }
+
+    internal static AiCostCalculationResult Calculate(
+        AiUsageRecord record,
+        IReadOnlyCollection<AiPricing> pricingCandidates)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentNullException.ThrowIfNull(pricingCandidates);
         var result = new AiCostCalculationResult
         {
             UsageRecordId = record.Id,
@@ -72,18 +91,14 @@ public sealed class AiCostCalculator(DiagLinkDbContext db)
             CacheCreation1hInputTokens = cacheCreation1hTokens
         };
 
-        var type = record.UsageType.ToString();
-        var candidates = await db.AiPricing.AsNoTracking()
-            .Where(p => p.Provider == record.Provider && p.Model == record.Model
-                && (p.UsageType == type || p.UsageType == null)
-                && p.EffectiveFromUtc <= record.CreatedAtUtc
-                && (p.EffectiveToUtc == null || record.CreatedAtUtc < p.EffectiveToUtc))
-            .ToListAsync(ct);
         // SQL collations may ignore case or trailing spaces. Reject these loose matches
         // after the indexed SQL filter; never normalize provider/model identifiers.
-        var exact = candidates.Where(p =>
+        var type = record.UsageType.ToString();
+        var exact = pricingCandidates.Where(p =>
             string.Equals(p.Provider, record.Provider, StringComparison.Ordinal)
-            && string.Equals(p.Model, record.Model, StringComparison.Ordinal)).ToArray();
+            && string.Equals(p.Model, record.Model, StringComparison.Ordinal)
+            && p.EffectiveFromUtc <= record.CreatedAtUtc
+            && (p.EffectiveToUtc == null || record.CreatedAtUtc < p.EffectiveToUtc)).ToArray();
         var selected = exact.Where(p => string.Equals(p.UsageType, type, StringComparison.Ordinal)).ToArray();
         if (selected.Length == 0) selected = exact.Where(p => p.UsageType == null).ToArray();
         if (selected.Length == 0) return result with { FailureReason = "PricingNotFound" };

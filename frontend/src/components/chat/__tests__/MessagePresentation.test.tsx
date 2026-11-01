@@ -184,9 +184,96 @@ describe('chat message presentation', () => {
     ));
 
     const markdown = container.querySelector('[data-source-count]');
-    expect(markdown?.getAttribute('data-source-count')).toBe('1');
-    expect(markdown?.getAttribute('data-source-label')).toBe('p. 70');
+    expect(markdown?.getAttribute('data-source-count')).toBe('0');
+    expect(markdown?.textContent).not.toContain('Source: p. 70');
+    expect(container.querySelector('section[aria-label="Sources documentaires"]')?.textContent)
+      .toContain('p. 70');
     expect(container.querySelectorAll('section[aria-labelledby="web-sources-mixed-sources"] a')).toHaveLength(1);
+  });
+
+  it('groups verified pages by PDF name in a compact manufacturer source section', async () => {
+    const loadSource = vi.fn();
+    await act(async () => root.render(
+      <AssistantMessage
+        onLoadTechnicalSource={loadSource}
+        message={{
+          id: 'document-groups',
+          role: 'assistant',
+          content: 'Voir p. 15, p. 16 et p. 7.',
+          sources: [
+            { id: 1, documentName: 'SP000913 - Hydraulic System.pdf', pdfPage: 17, displayPage: '15', label: 'p. 15', startIndex: 5, endIndex: 10, displayOrder: 0 },
+            { id: 2, documentName: 'SP000913 - Hydraulic System.pdf', pdfPage: 18, displayPage: '16', label: 'p. 16', startIndex: 12, endIndex: 17, displayOrder: 1 },
+            { id: 4, documentName: 'SP000913 - Hydraulic System.pdf', pdfPage: 18, displayPage: '18', label: '18', startIndex: 12, endIndex: 14, displayOrder: 2 },
+            { id: 3, documentName: 'SP001689 - Hydraulic Schematic.pdf', pdfPage: 7, displayPage: '7', label: 'p. 7', startIndex: 21, endIndex: 25, displayOrder: 2 },
+          ],
+        }}
+      />,
+    ));
+
+    const section = container.querySelector('section[aria-label="Sources documentaires"]');
+    expect(section?.textContent).toContain('Sources :');
+    expect(section?.textContent).not.toContain('Sources constructeur');
+    expect(section?.textContent).toContain('SP000913 - Hydraulic System.pdf');
+    expect(section?.textContent).toContain('SP001689 - Hydraulic Schematic.pdf');
+    expect(section?.querySelectorAll('li')).toHaveLength(2);
+    expect(section?.querySelectorAll('button')).toHaveLength(3);
+    expect(section?.querySelectorAll('h3')).toHaveLength(0);
+    expect(section?.querySelector('[title="SP000913 - Hydraulic System.pdf"]')?.textContent)
+      .toBe('SP000913 - Hydraulic System.pdf');
+    expect(section?.querySelector('button')?.textContent).toContain('p. 15');
+    expect(Array.from(section?.querySelectorAll('button') ?? []).map(button => button.textContent))
+      .not.toContain('p. 18');
+    expect(section?.querySelector('button')?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('hides a verified historical Claude source line while keeping the structured PDF link', async () => {
+    const content = 'Procédure historique.\n📄 Source : p. 16';
+    const startIndex = content.indexOf('p. 16');
+    await act(async () => root.render(
+      <AssistantMessage
+        onLoadTechnicalSource={vi.fn()}
+        message={{
+          id: 'historical-source',
+          role: 'assistant',
+          content,
+          sources: [{
+            id: 42,
+            documentName: 'Doosan DX225LCA Workshop Manual.pdf',
+            pdfPage: 18,
+            displayPage: '16',
+            label: 'p. 16',
+            startIndex,
+            endIndex: startIndex + 5,
+            displayOrder: 0,
+          }],
+        }}
+      />,
+    ));
+
+    expect(container.textContent).toContain('Procédure historique.');
+    expect(container.textContent).not.toContain('📄 Source : p. 16');
+    expect(container.textContent).toContain('Sources :');
+    expect(container.textContent).toContain('Doosan DX225LCA Workshop Manual.pdf');
+    expect(container.querySelectorAll('section[aria-label="Sources documentaires"] button')).toHaveLength(1);
+  });
+
+  it('keeps the Claude source line visible until streaming is complete', async () => {
+    const content = 'Réponse en cours.\n📄 Source : p. 16';
+    const startIndex = content.indexOf('p. 16');
+    await act(async () => root.render(
+      <AssistantMessage
+        isStreaming
+        message={{
+          id: 'streaming-source',
+          role: 'assistant',
+          content,
+          sources: [{ id: 7, documentName: 'manual.pdf', pdfPage: 18, displayPage: '16', label: 'p. 16', startIndex, endIndex: startIndex + 5, displayOrder: 0 }],
+        }}
+      />,
+    ));
+
+    expect(container.textContent).toContain('📄 Source : p. 16');
+    expect(container.querySelector('section[aria-label="Sources documentaires"]')).toBeNull();
   });
 
   it('does not render a Web sources section without a Web citation', async () => {
@@ -220,7 +307,7 @@ describe('chat message presentation', () => {
     const cards = article.querySelectorAll('[data-technical-visual-id]');
     const question = Array.from(article.querySelectorAll('button')).find(button => button.textContent === 'Voulez-vous poursuivre ?');
     expect(Array.from(cards).map(card => card.getAttribute('data-technical-visual-id'))).toEqual(['1', '2']);
-    expect(cards[0].textContent).toContain('Page 71');
+    expect(cards[0].textContent).toContain('Page physique PDF 71');
     expect(cards[0].textContent).toContain('Vue détaillée');
     expect(cards[1].textContent).toContain('Page complète');
     expect(cards[1].compareDocumentPosition(question!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -274,9 +361,9 @@ describe('chat message presentation', () => {
       />
     ));
     await act(async () => Promise.resolve());
-    const enlarge = container.querySelector<HTMLButtonElement>('button[aria-label="Agrandir illustration technique — page 74"]');
+    const enlarge = container.querySelector<HTMLButtonElement>('button[aria-label="Agrandir illustration technique — page physique pdf 74"]');
     await act(async () => enlarge?.click());
-    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('Page 74');
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('Page physique PDF 74');
     const close = document.body.querySelector<HTMLButtonElement>('button[aria-label="Fermer"]');
     await act(async () => close?.click());
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();

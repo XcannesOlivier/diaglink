@@ -1,12 +1,14 @@
 import { Suspense, lazy, memo, useMemo, useCallback, useState } from 'react';
-import { Spinner, Tooltip, Text } from '@fluentui/react-components';
+import { Dialog, DialogBody, DialogSurface, DialogTitle, Spinner, Tooltip, Text } from '@fluentui/react-components';
 import { CopilotMessage } from '@fluentui-copilot/react-copilot-chat';
 import { DocumentRegular, GlobeRegular, OpenRegular, ArrowSyncRegular } from '@fluentui/react-icons';
 import { Markdown } from '../core/Markdown';
 import { MessageActions } from './MessageActions';
 import { TechnicalVisualGallery } from './TechnicalVisualGallery';
+import { DialogCloseButton } from '../core/DialogCloseButton';
 import { useFormatTimestamp } from '../../hooks/useFormatTimestamp';
 import { parseContentWithCitations } from '../../utils/citationParser';
+import { compactVerifiedSourceLines } from '../../utils/technicalSources';
 import type { IChatItem, IAnnotation, TechnicalSourceReference } from '../../types/chat';
 import styles from './AssistantMessage.module.css';
 
@@ -67,6 +69,34 @@ function AssistantMessageComponent({
     });
     return Array.from(citationsByUrl.values());
   }, [message.annotations]);
+
+  const technicalSourceGroups = useMemo(() => {
+    const groups = new Map<string, { documentName: string; pages: TechnicalSourceReference[] }>();
+    message.sources?.forEach((source) => {
+      const documentName = source.documentName || 'Document constructeur';
+      let group = groups.get(documentName);
+      if (!group) {
+        group = { documentName, pages: [] };
+        groups.set(documentName, group);
+      }
+      const samePhysicalPage = group.pages.findIndex(page => page.pdfPage === source.pdfPage);
+      if (samePhysicalPage < 0) {
+        group.pages.push(source);
+      } else if (
+        group.pages[samePhysicalPage].displayPage === String(source.pdfPage) &&
+        source.displayPage !== String(source.pdfPage)
+      ) {
+        // Prefer the printed manual number when two verified labels target the same PDF page.
+        group.pages[samePhysicalPage] = source;
+      }
+    });
+    return Array.from(groups.values());
+  }, [message.sources]);
+
+  const presentedTechnicalContent = useMemo(
+    () => compactVerifiedSourceLines(message.content, message.sources),
+    [message.content, message.sources],
+  );
   
   // Parse content with citations for consistent numbering between inline and footnotes
   const parsedContent = useMemo(() => {
@@ -234,10 +264,10 @@ function AssistantMessageComponent({
         <>
           <Suspense fallback={<Spinner size="small" />}>
             <Markdown
-              content={message.content}
+              content={isStreaming ? message.content : presentedTechnicalContent.content}
               annotations={message.annotations}
               onCitationClick={handleCitationClick}
-              sources={message.sources}
+              sources={isStreaming ? message.sources : presentedTechnicalContent.sources}
               onTechnicalSourceClick={onLoadTechnicalSource ? setSelectedSource : undefined}
             />
           </Suspense>
@@ -246,6 +276,39 @@ function AssistantMessageComponent({
               <Spinner size="tiny" />
               <Text size={200}>{getToolUseLabel(message.activeToolUse)}</Text>
             </div>
+          )}
+          {!isStreaming && technicalSourceGroups.length > 0 && (
+            <section
+              className={styles.technicalSources}
+              aria-label="Sources documentaires"
+            >
+              <DocumentRegular className={styles.technicalSourcesIcon} aria-hidden="true" />
+              <span className={styles.technicalSourcesLabel}>Sources :</span>
+              <ul className={styles.technicalSourceList}>
+                {technicalSourceGroups.map(group => (
+                  <li key={group.documentName} className={styles.technicalSourceDocument}>
+                    <span className={styles.technicalSourceName} title={group.documentName}>
+                      {group.documentName}
+                    </span>
+                    {group.pages.map((source, index) => (
+                      <span key={`${source.id}-${source.pdfPage}`} className={styles.technicalSourcePageItem}>
+                        {index > 0 && <span aria-hidden="true">,</span>}
+                        <button
+                          type="button"
+                          className={styles.technicalSourcePage}
+                          onClick={() => setSelectedSource(source)}
+                          disabled={!onLoadTechnicalSource}
+                          aria-label={`Ouvrir ${group.documentName}, page ${source.displayPage}`}
+                        >
+                          <span>p. {source.displayPage}</span>
+                          <OpenRegular aria-hidden="true" />
+                        </button>
+                      </span>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
           {message.visuals && message.visuals.length > 0 && onLoadTechnicalVisual && (
             <TechnicalVisualGallery visuals={message.visuals} loadVisual={onLoadTechnicalVisual} />
@@ -298,7 +361,18 @@ function AssistantMessageComponent({
             </div>
           )}
           {selectedSource && onLoadTechnicalSource && (
-            <Suspense fallback={null}>
+            <Suspense fallback={(
+              <Dialog open onOpenChange={(_event, data) => !data.open && setSelectedSource(undefined)}>
+                <DialogSurface aria-label="Ouverture du document source">
+                  <DialogBody>
+                    <DialogTitle action={<DialogCloseButton onClick={() => setSelectedSource(undefined)} />}>
+                      Ouverture du document
+                    </DialogTitle>
+                    <Spinner label="Préparation du visualiseur PDF…" />
+                  </DialogBody>
+                </DialogSurface>
+              </Dialog>
+            )}>
               <TechnicalSourcePdfDialog
                 source={selectedSource}
                 loadPdf={onLoadTechnicalSource}

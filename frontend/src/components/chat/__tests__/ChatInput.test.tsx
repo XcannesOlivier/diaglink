@@ -6,10 +6,37 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInput } from '../ChatInput';
 
 vi.mock('@fluentui-copilot/react-copilot', () => ({
-  ChatInput: ({ children, onSubmit }: { children?: React.ReactNode; onSubmit?: () => void }) => (
-    <div>
+  ChatInput: ({ children, onSubmit, onStop, onChange, appearance, isSending, disableSend, disabled, send }: {
+    children?: React.ReactNode;
+    onSubmit?: () => void;
+    onStop?: () => void;
+    onChange?: (_event: unknown, data: { value: string }) => void;
+    appearance?: string;
+    isSending?: boolean;
+    disableSend?: boolean;
+    disabled?: boolean;
+    send?: { 'aria-label'?: string };
+  }) => (
+    <div
+      data-testid="copilot-chat-input"
+      data-appearance={appearance}
+      onKeyDown={event => {
+        if (event.key === 'Enter' && !disableSend && !disabled) onSubmit?.();
+      }}
+    >
       {children}
-      <button type="button" data-testid="submit-chat" onClick={onSubmit}>Envoyer</button>
+      <input
+        data-testid="draft-input"
+        disabled={disabled}
+        onChange={event => onChange?.({}, { value: event.target.value })}
+      />
+      <button
+        type="button"
+        data-testid="submit-chat"
+        aria-label={send?.['aria-label']}
+        disabled={disableSend || disabled}
+        onClick={isSending ? onStop : onSubmit}
+      >{isSending ? 'Stop' : 'Envoyer'}</button>
     </div>
   ),
   ImperativeControlPlugin: () => null,
@@ -30,7 +57,6 @@ vi.mock('../MachineDocuments', () => ({
   MachineDocuments: () => <button>Documents machine</button>,
 }));
 vi.mock('../VoiceInput', () => ({ VoiceInput: ({ disabled }: { disabled?: boolean }) => <button aria-label="Saisie vocale" disabled={disabled} /> }));
-vi.mock('../MessageQueue', () => ({ MessageQueue: () => null }));
 
 describe('ChatInput machine actions', () => {
   let container: HTMLDivElement;
@@ -62,6 +88,14 @@ describe('ChatInput machine actions', () => {
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(input, 'files', { value: files, configurable: true });
     await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+  };
+
+  const typeDraft = async (input: HTMLInputElement, value: string) => {
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      valueSetter?.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
   };
 
   it('keeps machine documents without rendering the change-machine button', async () => {
@@ -104,7 +138,7 @@ describe('ChatInput machine actions', () => {
   it.each([
     ['desktop', false],
     ['mobile', true],
-  ])('shows the stop-response button only while streaming on %s', async (_viewport, mobile) => {
+  ])('replaces send with stop in the Copilot submit slot while streaming on %s', async (_viewport, mobile) => {
     vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
       matches: mobile && query === '(max-width: 1000px)',
       media: query,
@@ -123,6 +157,8 @@ describe('ChatInput machine actions', () => {
 
     const stopButton = container.querySelector<HTMLButtonElement>('[aria-label="Arrêter la réponse"]');
     expect(stopButton).not.toBeNull();
+    expect(stopButton?.closest('[data-testid="copilot-chat-input"]')).not.toBeNull();
+    expect(container.querySelectorAll('[aria-label="Arrêter la réponse"]')).toHaveLength(1);
     await act(async () => stopButton!.click());
     expect(onCancelStream).toHaveBeenCalledOnce();
 
@@ -130,6 +166,52 @@ describe('ChatInput machine actions', () => {
       <ChatInput onSubmit={vi.fn()} isStreaming={false} onCancelStream={onCancelStream} />,
     ));
     expect(container.querySelector('[aria-label="Arrêter la réponse"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Envoyer le message"]')).not.toBeNull();
+  });
+
+  it('keeps the draft editable but blocks submit during sending', async () => {
+    const onSubmit = vi.fn();
+    await act(async () => root.render(
+      <ChatInput onSubmit={onSubmit} isSending />,
+    ));
+
+    const draft = container.querySelector<HTMLInputElement>('[data-testid="draft-input"]')!;
+    expect(draft.disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="submit-chat"]')?.disabled).toBe(true);
+
+    await typeDraft(draft, 'Question suivante');
+    await act(async () => {
+      draft.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(draft.value).toBe('Question suivante');
+  });
+
+  it('preserves a draft typed during streaming and submits it only after completion', async () => {
+    const onSubmit = vi.fn();
+    const onCancelStream = vi.fn();
+    await act(async () => root.render(
+      <ChatInput onSubmit={onSubmit} isStreaming onCancelStream={onCancelStream} />,
+    ));
+
+    const draft = container.querySelector<HTMLInputElement>('[data-testid="draft-input"]')!;
+    await typeDraft(draft, 'Question préparée');
+    await act(async () => {
+      draft.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(draft.value).toBe('Question préparée');
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="submit-chat"]')?.click());
+    expect(onCancelStream).toHaveBeenCalledOnce();
+
+    await act(async () => root.render(
+      <ChatInput onSubmit={onSubmit} isStreaming={false} onCancelStream={onCancelStream} />,
+    ));
+    expect(container.querySelector<HTMLInputElement>('[data-testid="draft-input"]')?.value)
+      .toBe('Question préparée');
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="submit-chat"]')?.click());
+    expect(onSubmit).toHaveBeenCalledWith('Question préparée', undefined);
   });
 
   it('keeps Escape wired to the existing stream cancellation callback', async () => {
@@ -190,6 +272,62 @@ describe('ChatInput machine actions', () => {
     expect(css).toMatch(/\.actionGroup > button,[\s\S]*?min-width:\s*40px;[\s\S]*?min-height:\s*40px;/);
     expect(css).toMatch(/\.actionGroup\s*\{[^}]*display:\s*flex;[^}]*flex-shrink:\s*0;/);
     expect(css).toMatch(/\.conversationActions\s*\{[^}]*border-left:\s*1px solid var\(--colorNeutralStroke2\);/);
+  });
+
+  it('reduces the editor height progressively on tablet, mobile and short landscape screens', () => {
+    const css = readFileSync(resolve('src/components/chat/ChatInput.module.css'), 'utf8');
+    expect(css).toMatch(/\.inputWrapper\s+:global\(\.fai-ChatInput\)\s*\{[\s\S]*?max-height:\s*120px;/);
+    expect(css).not.toContain(':global(.fui-ChatInput)');
+
+    const tabletRules = css.slice(
+      css.indexOf('@media (max-width: 1024px)'),
+      css.indexOf('@media (max-width: 1000px)'),
+    );
+    expect(tabletRules).toMatch(/\.chatInputContainer\s*\{[\s\S]*?padding:\s*0\.75rem 1rem;/);
+    expect(tabletRules).toMatch(/:global\(\.fai-ChatInput\)[\s\S]*?max-height:\s*96px;/);
+    expect(tabletRules).toMatch(/:global\(\.fai-EditorInput__input\)[\s\S]*?font-size:\s*16px\s*!important;/);
+
+    const mobileRules = css.slice(
+      css.indexOf('@media (max-width: 480px)'),
+      css.indexOf('@media (max-width: 1024px) and (max-height: 600px)'),
+    );
+    expect(mobileRules).toMatch(/:global\(\.fai-ChatInput\)[\s\S]*?max-height:\s*76px;/);
+    expect(mobileRules).toContain('env(safe-area-inset-bottom)');
+    expect(mobileRules).toMatch(/:global\(\.fai-EditorInput__placeholderValue\)[\s\S]*?white-space:\s*nowrap;/);
+
+    const landscapeRules = css.slice(css.indexOf('@media (max-width: 1024px) and (max-height: 600px)'));
+    expect(landscapeRules).toMatch(/:global\(\.fai-ChatInput\)[\s\S]*?max-height:\s*68px;/);
+  });
+
+  it('uses a collapsed responsive editor on compact screens and keeps the desktop editor multi-line', async () => {
+    const matchMedia = vi.spyOn(window, 'matchMedia');
+    matchMedia.mockImplementation(query => ({
+      matches: query.includes('max-width: 1024px'),
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() { return true; },
+    }));
+    await act(async () => root.render(<ChatInput onSubmit={vi.fn()} />));
+    expect(container.querySelector('[data-testid="copilot-chat-input"]')?.getAttribute('data-appearance')).toBe('responsive');
+
+    matchMedia.mockImplementation(query => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() { return true; },
+    }));
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(<ChatInput onSubmit={vi.fn()} />));
+    expect(container.querySelector('[data-testid="copilot-chat-input"]')?.getAttribute('data-appearance')).toBe('multi');
   });
 
   it.each([

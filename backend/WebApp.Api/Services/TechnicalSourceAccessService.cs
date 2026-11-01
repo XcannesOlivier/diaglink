@@ -69,11 +69,19 @@ public sealed class TechnicalSourceAccessService(
         var pageMap = await pageMapResolver.ResolveAsync(
             blobPrefix,
             candidate.DocumentId,
-            [candidate.DisplayPage],
+            [TechnicalSourcePageStorage.PublicDisplayPage(candidate.DisplayPage)],
             cancellationToken);
         if (pageMap is null)
         {
             logger.LogDebug("Technical source access rejected. Outcome={Outcome}", "page_map_mismatch");
+            return new(TechnicalSourceAccessKind.NotFound);
+        }
+
+        var storedVersion = TechnicalSourcePageStorage.ReadVersionToken(candidate.DisplayPage);
+        if (storedVersion is not null &&
+            !string.Equals(storedVersion, pageMap.VersionToken, StringComparison.Ordinal))
+        {
+            logger.LogDebug("Technical source access rejected. Outcome={Outcome}", "document_version_mismatch");
             return new(TechnicalSourceAccessKind.NotFound);
         }
 
@@ -83,7 +91,9 @@ public sealed class TechnicalSourceAccessService(
             pageMap.PdfPages.Contains(candidate.PdfPage);
         var displayReferenceIsCurrent =
             !TechnicalSourcePageStorage.TryReadPdfPage(candidate.DisplayPage, out _) &&
-            pageMap.PdfPagesByDisplayPage.TryGetValue(candidate.DisplayPage, out var currentPdfPages) &&
+            pageMap.PdfPagesByDisplayPage.TryGetValue(
+                TechnicalSourcePageStorage.PublicDisplayPage(candidate.DisplayPage),
+                out var currentPdfPages) &&
             currentPdfPages.Contains(candidate.PdfPage);
         if (!physicalReferenceIsCurrent && !displayReferenceIsCurrent)
         {

@@ -52,8 +52,11 @@ describe('TechnicalSourcePdfDialog', () => {
     });
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as CanvasRenderingContext2D);
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 800 });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 });
     vi.stubGlobal('ResizeObserver', class {
-      observe() {}
+      private readonly callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) { this.callback = callback; }
+      observe() { this.callback([], this as unknown as ResizeObserver); }
       disconnect() {}
     });
   });
@@ -65,7 +68,7 @@ describe('TechnicalSourcePdfDialog', () => {
     vi.unstubAllGlobals();
   });
 
-  it('loads by opaque id and renders pdfPage without displaying the physical number', async () => {
+  it('loads by opaque id, opens the verified physical page and distinguishes printed numbering', async () => {
     const loadPdf = vi.fn().mockResolvedValue({
       type: 'application/pdf',
       arrayBuffer: async () => new ArrayBuffer(4),
@@ -83,14 +86,35 @@ describe('TechnicalSourcePdfDialog', () => {
       wasmUrl: '/pdfjs-wasm/',
     });
     expect(document.body.textContent).toContain('Source p. 72');
-    expect(document.body.textContent).not.toContain('74');
-    expect(document.body.querySelector('canvas')?.getAttribute('aria-label')).toBe('Source page 72');
+    expect(document.body.textContent).toContain('PDF 74/100');
+    expect(document.body.querySelector('canvas')?.getAttribute('aria-label')).toBe('Page PDF 74, page imprimée 72');
   });
 
   it('builds the decoder URL from the Vite base path', () => {
     expect(createPdfJsWasmUrl('/')).toBe('/pdfjs-wasm/');
     expect(createPdfJsWasmUrl('/diaglink/')).toBe('/diaglink/pdfjs-wasm/');
     expect(createPdfJsWasmUrl('/diaglink')).toBe('/diaglink/pdfjs-wasm/');
+  });
+
+  it('fits the complete portrait page within both available dimensions', async () => {
+    const loadPdf = vi.fn().mockResolvedValue({
+      type: 'application/pdf',
+      arrayBuffer: async () => new ArrayBuffer(4),
+    } as Blob);
+    await act(async () => root.render(
+      <TechnicalSourcePdfDialog source={source} loadPdf={loadPdf} onClose={vi.fn()} />
+    ));
+    await act(async () => {
+      await vi.waitFor(() => expect(pdf.render).toHaveBeenCalled());
+    });
+
+    const fittedViewportCall = pdf.getViewport.mock.calls.find(
+      ([options]) => Math.abs(options.scale - 0.845) < 0.001,
+    );
+    expect(fittedViewportCall).toBeDefined();
+    const canvas = document.body.querySelector('canvas');
+    expect(Number.parseFloat(canvas?.style.width ?? '0')).toBeLessThanOrEqual(776);
+    expect(Number.parseFloat(canvas?.style.height ?? '0')).toBeLessThanOrEqual(676);
   });
 
   it('keeps page navigation and zoom controls operational', async () => {
@@ -104,6 +128,7 @@ describe('TechnicalSourcePdfDialog', () => {
     await act(async () => {
       await vi.waitFor(() => expect(pdf.render).toHaveBeenCalled());
     });
+    expect(document.body.querySelector('[data-technical-viewer="pdf"]')).not.toBeNull();
 
     const nextPage = document.body.querySelector<HTMLButtonElement>('button[aria-label="Page suivante"]');
     expect(nextPage?.disabled).toBe(false);
@@ -116,9 +141,35 @@ describe('TechnicalSourcePdfDialog', () => {
     expect(zoomIn?.disabled).toBe(false);
     const viewportCallsBeforeZoom = pdf.getViewport.mock.calls.length;
     await act(async () => zoomIn?.click());
+    await act(async () => new Promise(resolve => window.setTimeout(resolve, 150)));
     await act(async () => {
       await vi.waitFor(() => expect(pdf.getViewport.mock.calls.length).toBeGreaterThan(viewportCallsBeforeZoom));
     });
+    const reset = document.body.querySelector<HTMLButtonElement>('button[aria-label="Vue initiale"]');
+    expect(reset?.disabled).toBe(false);
+    await act(async () => reset?.click());
+    expect(reset?.disabled).toBe(true);
+  });
+
+  it('coalesces rapid zoom updates into a single expensive PDF render', async () => {
+    const loadPdf = vi.fn().mockResolvedValue({
+      type: 'application/pdf',
+      arrayBuffer: async () => new ArrayBuffer(4),
+    } as Blob);
+    await act(async () => root.render(
+      <TechnicalSourcePdfDialog source={source} loadPdf={loadPdf} onClose={vi.fn()} />
+    ));
+    await act(async () => vi.waitFor(() => expect(pdf.render).toHaveBeenCalled()));
+    const rendersBeforeZoom = pdf.render.mock.calls.length;
+    const zoomIn = document.body.querySelector<HTMLButtonElement>('button[aria-label="Agrandir"]')!;
+
+    await act(async () => {
+      zoomIn.click();
+      zoomIn.click();
+      zoomIn.click();
+    });
+    await act(async () => new Promise(resolve => window.setTimeout(resolve, 150)));
+    await act(async () => vi.waitFor(() => expect(pdf.render.mock.calls.length).toBe(rendersBeforeZoom + 1)));
   });
 
   it('shows a safe loading failure and supports retry', async () => {

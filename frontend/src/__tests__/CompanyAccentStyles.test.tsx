@@ -31,7 +31,7 @@ describe('authenticated company accent surfaces', () => {
 
   it('preserves semantic controls but lets mobile selection inherit the authenticated brand', () => {
     for (const path of ['components/chat/VoiceInput.tsx', 'components/chat/FilePreview.tsx',
-      'components/chat/MessageQueue.tsx', 'components/ConversationSidebar.tsx',
+      'components/ConversationSidebar.tsx',
       'components/views/UsersView.tsx', 'components/views/MachineSubscriptionDialog.tsx']) {
       expect(read(path)).toContain('data-company-accent-exempt');
     }

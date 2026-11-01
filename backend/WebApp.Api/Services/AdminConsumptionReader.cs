@@ -50,9 +50,15 @@ public static class AdminConsumptionReader
         long CacheCreationInputTokens,
         long CacheCreation5mInputTokens,
         long CacheCreation1hInputTokens,
+        int WebSearchRequests,
         string Model,
         string StopReason,
-        string[] Tools);
+        string[] Tools,
+        string[]? LoadedSkills,
+        string[]? SkillContinuationFor)
+    {
+        public decimal? EstimatedCostEur { get; init; }
+    }
 
     public record MachineTokenHistoryResponse(
         MachineTokenHistoryItem[] Items,
@@ -118,9 +124,18 @@ public static class AdminConsumptionReader
          .ToArrayAsync(ct);
 
      var hasMore = rows.Length > pageSize;
+     var visibleRows = rows.Take(pageSize).ToArray();
+     var providers = visibleRows.Select(row => row.Provider).Where(value => value != null).Distinct().ToArray();
+     var models = visibleRows.Select(row => row.Model).Where(value => value != null).Distinct().ToArray();
+     var pricing = providers.Length == 0 || models.Length == 0
+         ? []
+         : await db.AiPricing.AsNoTracking()
+             .Where(price => providers.Contains(price.Provider) && models.Contains(price.Model))
+             .ToArrayAsync(ct);
+     var exchangeRates = await db.ExchangeRates.AsNoTracking().ToArrayAsync(ct);
 
      return Results.Ok(new MachineTokenHistoryResponse(
-          rows.Take(pageSize).Select(row => new MachineTokenHistoryItem(
+          visibleRows.Select(row => new MachineTokenHistoryItem(
               row.CreatedAtUtc,
               row.InputTokens,
               row.OutputTokens,
@@ -131,8 +146,47 @@ public static class AdminConsumptionReader
               row.CacheCreation1hInputTokens,
               row.Model,
               row.Provider,
-              ReadCallBreakdown(row.CallBreakdownJson))).ToArray(),
+              ValueCalls(ReadCallBreakdown(row.CallBreakdownJson), row.Provider, row.CreatedAtUtc, pricing, exchangeRates))).ToArray(),
          hasMore));
+    }
+
+    private static MachineTokenHistoryCall[]? ValueCalls(
+        MachineTokenHistoryCall[]? calls,
+        string? provider,
+        DateTime createdAtUtc,
+        IReadOnlyCollection<AiPricing> pricing,
+        IReadOnlyCollection<ExchangeRate> exchangeRates)
+    {
+        if (calls is null || string.IsNullOrWhiteSpace(provider)) return calls;
+        return calls.Select(call =>
+        {
+            if (call.InputTokens > int.MaxValue || call.OutputTokens > int.MaxValue || call.TotalTokens > int.MaxValue ||
+                call.CacheReadInputTokens > int.MaxValue || call.CacheCreationInputTokens > int.MaxValue ||
+                call.CacheCreation5mInputTokens > int.MaxValue || call.CacheCreation1hInputTokens > int.MaxValue)
+                return call;
+            var usage = new AiUsageRecord
+            {
+                Id = Guid.Empty,
+                UsageType = AiUsageType.ChatResponse,
+                Available = true,
+                Completed = true,
+                Provider = provider,
+                Model = call.Model,
+                InputTokens = (int)call.InputTokens,
+                OutputTokens = (int)call.OutputTokens,
+                TotalTokens = checked((int)call.TotalTokens),
+                CacheReadInputTokens = (int)call.CacheReadInputTokens,
+                CacheCreationInputTokens = (int)call.CacheCreationInputTokens,
+                CacheCreation5mInputTokens = (int)call.CacheCreation5mInputTokens,
+                CacheCreation1hInputTokens = (int)call.CacheCreation1hInputTokens,
+                WebSearchRequests = call.WebSearchRequests,
+                CreatedAtUtc = createdAtUtc
+            };
+            var cost = AiCostCalculator.Calculate(usage, pricing);
+            if (!cost.IsValuable || cost.RealAiCost is null) return call;
+            var converted = AiCostCurrencyConverter.Convert(cost.RealAiCost.Value, cost.Currency, createdAtUtc, exchangeRates);
+            return converted.IsConvertible ? call with { EstimatedCostEur = converted.ConvertedAmount } : call;
+        }).ToArray();
     }
 
     private static MachineTokenHistoryCall[]? ReadCallBreakdown(string? value)
@@ -162,17 +216,56 @@ public static class AdminConsumptionReader
             && query.Any(u => u.Id == e.AiUsageRecordId && u.MachineId == e.MachineId)).ToArrayAsync(ct);
         var walletDebits = ledger.Where(e => e.BucketType == "CompanyWallet").ToLookup(e => e.AiUsageRecordId);
         var includedDebits = ledger.Where(e => e.BucketType == "MachineIncluded").ToLookup(e => e.AiUsageRecordId);
-        var costs = new AiCostCalculator(db);
-        var converter = new AiCostCurrencyConverter(db);
+
+        var priceableUsages = usages.Where(usage =>
+            AiCostCalculator.Calculate(usage, []).FailureReason == "PricingNotFound").ToArray();
+        IReadOnlyCollection<AiPricing> pricing = [];
+        if (priceableUsages.Length > 0)
+        {
+            var providers = priceableUsages.Select(usage => usage.Provider!).Distinct(StringComparer.Ordinal).ToArray();
+            var models = priceableUsages.Select(usage => usage.Model!).Distinct(StringComparer.Ordinal).ToArray();
+            var usageTypes = priceableUsages.Select(usage => usage.UsageType.ToString()).Distinct(StringComparer.Ordinal).ToArray();
+            var earliestUsageUtc = priceableUsages.Min(usage => usage.CreatedAtUtc);
+            var latestUsageUtc = priceableUsages.Max(usage => usage.CreatedAtUtc);
+            pricing = await db.AiPricing.AsNoTracking().Where(price =>
+                providers.Contains(price.Provider)
+                && models.Contains(price.Model)
+                && (price.UsageType == null || usageTypes.Contains(price.UsageType))
+                && price.EffectiveFromUtc <= latestUsageUtc
+                && (price.EffectiveToUtc == null || earliestUsageUtc < price.EffectiveToUtc)).ToArrayAsync(ct);
+        }
+
+        var calculated = usages.ToDictionary(usage => usage.Id, usage => AiCostCalculator.Calculate(usage, pricing));
+        var ratesNeeded = usages.Where(usage =>
+        {
+            var cost = calculated[usage.Id];
+            return cost.IsValuable && cost.RealAiCost != null
+                && AiCostCurrencyConverter.Convert(cost.RealAiCost.Value, cost.Currency, usage.CreatedAtUtc, [])
+                    .FailureReason == "ExchangeRateNotFound";
+        }).ToArray();
+        IReadOnlyCollection<ExchangeRate> exchangeRates = [];
+        if (ratesNeeded.Length > 0)
+        {
+            var currencies = ratesNeeded.Select(usage => calculated[usage.Id].Currency!).Distinct(StringComparer.Ordinal).ToArray();
+            var earliestUsageUtc = ratesNeeded.Min(usage => usage.CreatedAtUtc);
+            var latestUsageUtc = ratesNeeded.Max(usage => usage.CreatedAtUtc);
+            exchangeRates = await db.ExchangeRates.AsNoTracking().Where(rate =>
+                currencies.Contains(rate.BaseCurrency)
+                && rate.QuoteCurrency == "EUR"
+                && rate.EffectiveFromUtc <= latestUsageUtc
+                && (rate.EffectiveToUtc == null || earliestUsageUtc < rate.EffectiveToUtc)).ToArrayAsync(ct);
+        }
+
         var valued = new Dictionary<Guid, decimal?>();
         foreach (var usage in usages)
         {
             ct.ThrowIfCancellationRequested();
-            var cost = await costs.CalculateAsync(usage, ct);
+            var cost = calculated[usage.Id];
             decimal? eur = null;
             if (cost.IsValuable && cost.RealAiCost != null)
             {
-                var converted = await converter.ConvertAsync(cost.RealAiCost.Value, cost.Currency, usage, ct);
+                var converted = AiCostCurrencyConverter.Convert(
+                    cost.RealAiCost.Value, cost.Currency, usage.CreatedAtUtc, exchangeRates);
                 if (converted.IsConvertible) eur = converted.ConvertedAmount;
             }
             valued[usage.Id] = eur;

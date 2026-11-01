@@ -11,6 +11,7 @@ import {
   Tooltip,
 } from '@fluentui/react-components';
 import {
+  ArrowResetRegular,
   ChevronLeftRegular,
   ChevronRightRegular,
   ZoomInRegular,
@@ -20,6 +21,7 @@ import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type PDFDocume
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { TechnicalSourceReference } from '../../types/chat';
 import { DialogCloseButton } from '../core/DialogCloseButton';
+import { useTechnicalViewerNavigation } from '../../hooks/useTechnicalViewerNavigation';
 import styles from './TechnicalSourcePdfDialog.module.css';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -43,11 +45,23 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
   const [document, setDocument] = useState<PDFDocumentProxy>();
   const [pageNumber, setPageNumber] = useState(source.pdfPage);
   const [zoom, setZoom] = useState(1);
-  const [viewportWidth, setViewportWidth] = useState(0);
+  const [renderZoom, setRenderZoom] = useState(1);
   const [loading, setLoading] = useState(true);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string>();
   const [retry, setRetry] = useState(0);
+  const navigation = useTechnicalViewerNavigation({
+    viewportRef,
+    zoom,
+    minZoom: 0.5,
+    maxZoom: 4,
+    onZoomChange: setZoom,
+  });
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setRenderZoom(zoom), 120);
+    return () => window.clearTimeout(timeout);
+  }, [zoom]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -56,7 +70,8 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
     setError(undefined);
     setDocument(undefined);
     setPageNumber(source.pdfPage);
-    setZoom(1);
+    setRenderZoom(1);
+    navigation.resetView();
 
     void loadPdf(source.id, controller.signal)
       .then(blob => blob.arrayBuffer())
@@ -84,25 +99,11 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
       controller.abort();
       void loadingTask?.destroy();
     };
-  }, [loadPdf, retry, source.id, source.pdfPage]);
-
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const updateWidth = () => setViewportWidth(viewport.clientWidth);
-    updateWidth();
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateWidth);
-      return () => window.removeEventListener('resize', updateWidth);
-    }
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, [document]);
+  }, [loadPdf, navigation.resetView, retry, source.id, source.pdfPage]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!document || !canvas || viewportWidth <= 0) return;
+    if (!document || !canvas || navigation.viewportSize.width <= 0 || navigation.viewportSize.height <= 0) return;
     let cancelled = false;
     let renderTask: RenderTask | undefined;
     setRendering(true);
@@ -112,8 +113,14 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
       .then(page => {
         if (cancelled) return;
         const baseViewport = page.getViewport({ scale: 1 });
-        const fitScale = Math.max(0.25, Math.min(2, (viewportWidth - 24) / baseViewport.width));
-        const viewport = page.getViewport({ scale: fitScale * zoom });
+        const availableWidth = Math.max(1, navigation.viewportSize.width - 24);
+        const availableHeight = Math.max(1, navigation.viewportSize.height - 24);
+        const fitScale = Math.max(0.05, Math.min(
+          2,
+          availableWidth / baseViewport.width,
+          availableHeight / baseViewport.height,
+        ));
+        const viewport = page.getViewport({ scale: fitScale * renderZoom });
         const outputScale = Math.min(window.devicePixelRatio || 1, 2);
         const context = canvas.getContext('2d', { alpha: false });
         if (!context) throw new Error('Le document ne peut pas être affiché dans ce navigateur.');
@@ -142,7 +149,7 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
       cancelled = true;
       renderTask?.cancel();
     };
-  }, [document, pageNumber, viewportWidth, zoom]);
+  }, [document, navigation.viewportSize.height, navigation.viewportSize.width, pageNumber, renderZoom]);
 
   const iconButton = (
     label: string,
@@ -167,20 +174,31 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
               </div>
             )}
           >
-            Source {source.label}
+            <span className={styles.titleText}>Source {source.label} — {source.documentName || 'Document constructeur'}</span>
           </DialogTitle>
           <DialogContent className={styles.content}>
             {document && (
               <div className={styles.toolbar} aria-label="Navigation du document source">
                 {iconButton('Page précédente', <ChevronLeftRegular />, () => setPageNumber(current => Math.max(1, current - 1)), pageNumber <= 1 || rendering)}
                 {iconButton('Page suivante', <ChevronRightRegular />, () => setPageNumber(current => Math.min(document.numPages, current + 1)), pageNumber >= document.numPages || rendering)}
+                <span className={styles.pageIndicator} aria-live="polite" aria-label={`Page PDF ${pageNumber} sur ${document.numPages}`}>
+                  PDF {pageNumber}/{document.numPages}
+                </span>
                 <span className={styles.toolbarSpacer} />
                 {iconButton('Réduire', <ZoomOutRegular />, () => setZoom(current => Math.max(0.5, current - 0.25)), zoom <= 0.5 || rendering)}
-                {iconButton('Agrandir', <ZoomInRegular />, () => setZoom(current => Math.min(2.5, current + 0.25)), zoom >= 2.5 || rendering)}
+                {iconButton('Vue initiale', <ArrowResetRegular />, navigation.resetView, navigation.isAtInitialView || rendering)}
+                {iconButton('Agrandir', <ZoomInRegular />, () => setZoom(current => Math.min(4, current + 0.25)), zoom >= 4 || rendering)}
               </div>
             )}
-            <div className={styles.viewport} ref={viewportRef}>
+            <div
+              data-technical-viewer="pdf"
+              className={`${styles.viewport} ${navigation.isPannable ? styles.pannable : ''} ${navigation.isDragging ? styles.dragging : ''}`}
+              ref={viewportRef}
+              {...navigation.viewportPointerHandlers}
+              aria-busy={loading || rendering}
+            >
               {loading && <Spinner label="Chargement du document source…" />}
+              {!loading && rendering && <Spinner className={styles.renderSpinner} size="small" label="Affichage de la page…" />}
               {error && (
                 <div className={styles.error} role="alert">
                   <Text>{error}</Text>
@@ -189,8 +207,10 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
               )}
               <canvas
                 ref={canvasRef}
-                className={document && !error ? styles.canvas : styles.hiddenCanvas}
-                aria-label={`Source page ${source.displayPage}`}
+                className={`${document && !error ? styles.canvas : styles.hiddenCanvas} ${rendering ? styles.renderingCanvas : ''}`}
+                aria-label={pageNumber === source.pdfPage
+                  ? `Page PDF ${pageNumber}, page imprimée ${source.displayPage}`
+                  : `Page PDF ${pageNumber}`}
               />
             </div>
           </DialogContent>

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using WebApp.Api.Data;
 using WebApp.Api.Models;
 using WebApp.Api.Models.Entities;
@@ -9,6 +10,55 @@ public class AiUsageRepository(
     DbContextOptions<DiagLinkDbContext> options,
     ILogger<AiUsageRepository> logger)
 {
+    public virtual async Task<IReadOnlyList<string>> GetLoadedSkillNamesAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken)
+    {
+        await using var db = new DiagLinkDbContext(options);
+        var breakdowns = await db.AiUsageRecords
+            .AsNoTracking()
+            .Where(record =>
+                record.ConversationId == conversationId &&
+                record.UsageType == AiUsageType.ChatResponse &&
+                record.CallBreakdownJson != null)
+            .Select(record => record.CallBreakdownJson!)
+            .ToListAsync(cancellationToken);
+
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var breakdown in breakdowns)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(breakdown);
+                if (document.RootElement.ValueKind != JsonValueKind.Array)
+                    continue;
+                foreach (var call in document.RootElement.EnumerateArray())
+                {
+                    if (!call.TryGetProperty("loadedSkills", out var loadedSkills) ||
+                        loadedSkills.ValueKind != JsonValueKind.Array)
+                    {
+                        continue;
+                    }
+
+                    foreach (var skill in loadedSkills.EnumerateArray())
+                    {
+                        if (skill.ValueKind == JsonValueKind.String &&
+                            !string.IsNullOrWhiteSpace(skill.GetString()))
+                        {
+                            names.Add(skill.GetString()!);
+                        }
+                    }
+                }
+            }
+            catch (JsonException exception)
+            {
+                logger.LogWarning(exception, "Invalid AI call breakdown for conversation {ConversationId}.", conversationId);
+            }
+        }
+
+        return names.Order(StringComparer.Ordinal).ToArray();
+    }
+
     public virtual async Task<AiUsageRecordWriteResult> RecordAsync(AiUsageMeasurement measurement, CancellationToken cancellationToken)
     {
         var usage = measurement.Response;

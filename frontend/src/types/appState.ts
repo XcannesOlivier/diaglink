@@ -61,7 +61,6 @@ export interface AppState {
     recoveredAttachments?: IFileAttachment[];
     editSnapshot?: IChatItem[]; // messages removed during edit, for undo
     regenerateText?: string;// auto-resend text for regenerate/edit flows
-    pendingMessages: Array<{ text: string; files?: File[] }>;
   };
 
   // Conversation history state
@@ -122,9 +121,6 @@ export type AppAction =
   | { type: 'CHAT_STREAM_RETRY'; messageId: string; attempt: number; maxRetries: number }
   | { type: 'CHAT_RECOVER_MESSAGE'; messageText: string; attachments?: IFileAttachment[]; error: AppError; retryCount: number }
   | { type: 'CHAT_CONSUMED_RECOVERED_INPUT' }
-  | { type: 'CHAT_QUEUE_MESSAGE'; text: string; files?: File[] }
-  | { type: 'CHAT_DEQUEUE_MESSAGE'; index: number }
-  | { type: 'CHAT_CLEAR_QUEUE' }
   | { type: 'CHAT_REGENERATE' }
   | { type: 'CHAT_EDIT_MESSAGE'; messageId: string; newText: string }
   | { type: 'CHAT_CANCEL_EDIT' }
@@ -168,7 +164,6 @@ export const initialAppState: AppState = {
     recoveredAttachments: undefined,
     editSnapshot: undefined,
     regenerateText: undefined,
-    pendingMessages: [],
   },
   conversations: {
     list: [],

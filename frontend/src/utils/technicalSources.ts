@@ -10,11 +10,104 @@ export interface PreparedTechnicalSourceContent {
   preparedSources: PreparedTechnicalSource[];
 }
 
+export interface CompactedTechnicalSourceContent {
+  content: string;
+  sources: TechnicalSourceReference[];
+}
+
 interface MarkdownNode {
   type: string;
   value?: string;
   url?: string;
   children?: MarkdownNode[];
+}
+
+const documentarySourceLinePattern = /^(\s*(?:#{1,6}\s*)?(?:[-*]\s+)?(?:\*\*|__)?\s*(?:📄\s*)?(?:\*\*|__)?\s*(?:sources?|références?)(?:\s+constructeur)?\s*(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*)/iu;
+const documentaryScaffoldingPattern = /\bpages?\s*(?:(?:du\s+)?pdf|physiques?|imprim(?:ée|e)s?)?\s*:/giu;
+
+/**
+ * Removes only verified references from explicit Claude-generated source lines.
+ * Any remaining text is retained as an unverified documentary reference.
+ */
+export function compactVerifiedSourceLines(
+  content: string,
+  sources: readonly TechnicalSourceReference[] | undefined,
+): CompactedTechnicalSourceContent {
+  const exactSources = (sources ?? []).filter(source =>
+    source.startIndex >= 0 &&
+    source.endIndex > source.startIndex &&
+    source.endIndex <= content.length &&
+    content.slice(source.startIndex, source.endIndex) === source.label);
+  if (exactSources.length === 0) {
+    return { content, sources: [...(sources ?? [])] };
+  }
+
+  const operations: Array<{ start: number; end: number; replacement: string }> = [];
+  const linePattern = /[^\r\n]*(?:\r\n|\r|\n|$)/g;
+  for (const match of content.matchAll(linePattern)) {
+    const rawLine = match[0];
+    if (!rawLine || match.index === undefined) continue;
+    const newline = rawLine.match(/(?:\r\n|\r|\n)$/)?.[0] ?? '';
+    const line = newline ? rawLine.slice(0, -newline.length) : rawLine;
+    const prefix = documentarySourceLinePattern.exec(line);
+    if (!prefix) continue;
+
+    const lineStart = match.index;
+    const lineEnd = lineStart + line.length;
+    const verifiedOnLine = exactSources
+      .filter(source => source.startIndex >= lineStart && source.endIndex <= lineEnd)
+      .sort((left, right) => right.startIndex - left.startIndex);
+    if (verifiedOnLine.length === 0) continue;
+
+    let residual = line;
+    for (const source of verifiedOnLine) {
+      const start = source.startIndex - lineStart;
+      const end = source.endIndex - lineStart;
+      residual = residual.slice(0, start) + residual.slice(end);
+    }
+    residual = residual.slice(prefix[0].length)
+      .replace(/\s+/g, ' ')
+      .replace(/^\s*[,;·|/–—-]+\s*/u, '')
+      .replace(/:\s*[,;·|/–—-]+\s*/gu, ': ')
+      .replace(/\s*([,;·])\s*(?=([,;·]|$))/gu, '')
+      .trim();
+
+    const substantiveResidual = residual
+      .replace(documentaryScaffoldingPattern, '')
+      .replace(/[\s,;:·|/\\()[\].–—-]/gu, '');
+    const replacement = substantiveResidual.length === 0
+      ? ''
+      : `📄 Références non vérifiées : ${residual}${newline}`;
+    operations.push({ start: lineStart, end: lineStart + rawLine.length, replacement });
+  }
+
+  if (operations.length === 0) {
+    return { content, sources: [...(sources ?? [])] };
+  }
+
+  let compactedContent = content;
+  for (const operation of [...operations].sort((left, right) => right.start - left.start)) {
+    compactedContent = compactedContent.slice(0, operation.start) +
+      operation.replacement +
+      compactedContent.slice(operation.end);
+  }
+
+  const adjustedSources = (sources ?? []).flatMap(source => {
+    if (operations.some(operation =>
+      source.startIndex < operation.end && operation.start < source.endIndex)) {
+      return [];
+    }
+    const delta = operations
+      .filter(operation => operation.end <= source.startIndex)
+      .reduce((total, operation) => total + operation.replacement.length - (operation.end - operation.start), 0);
+    return [{
+      ...source,
+      startIndex: source.startIndex + delta,
+      endIndex: source.endIndex + delta,
+    }];
+  });
+
+  return { content: compactedContent, sources: adjustedSources };
 }
 
 /** Projects an untrusted API value onto the public source-reference contract. */
@@ -27,6 +120,11 @@ export function parseTechnicalSources(value: unknown): TechnicalSourceReference[
     const item = candidate as Record<string, unknown>;
     if (
       typeof item.id !== 'number' || !Number.isSafeInteger(item.id) || item.id <= 0 ||
+      (item.documentName !== undefined &&
+        (typeof item.documentName !== 'string' ||
+          item.documentName.length === 0 ||
+          item.documentName.length > 255 ||
+          /[\u0000-\u001f\\/]/.test(item.documentName))) ||
       typeof item.pdfPage !== 'number' || !Number.isSafeInteger(item.pdfPage) || item.pdfPage <= 0 ||
       typeof item.displayPage !== 'string' || item.displayPage.length === 0 ||
       typeof item.label !== 'string' || item.label.length === 0 ||
@@ -38,6 +136,7 @@ export function parseTechnicalSources(value: unknown): TechnicalSourceReference[
     if (!byId.has(item.id)) {
       byId.set(item.id, {
         id: item.id,
+        ...(typeof item.documentName === 'string' ? { documentName: item.documentName } : {}),
         pdfPage: item.pdfPage,
         displayPage: item.displayPage,
         label: item.label,

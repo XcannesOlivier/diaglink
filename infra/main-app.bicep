@@ -49,6 +49,8 @@ param publicCustomDomainName string
 param publicCustomDomainCertificateName string = ''
 param claudeDirectDeployment string = 'claude-sonnet-5-5'
 param claudeFileSearchDiagnosticsEnabled bool = false
+@description('Expose approved DiagLink skills and the load_skill tool to Claude Direct.')
+param claudeSkillsEnabled bool = false
 @description('Existing non-secret deployment identities used to resolve AI pricing.')
 param aiPricingIdentityDeployments array
 @description('Immutable ACR image for the autossh sidecar.')
@@ -278,6 +280,10 @@ var claudeEnv = [
   {
     name: 'ClaudeDirectChat__FileSearchDiagnostics__Enabled'
     value: string(claudeFileSearchDiagnosticsEnabled)
+  }
+  {
+    name: 'ClaudeDirectChat__Skills__Enabled'
+    value: string(claudeSkillsEnabled)
   }
 ]
 

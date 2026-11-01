@@ -1,5 +1,7 @@
+using System.Data.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using WebApp.Api.Services;
 using WebApp.Api.Models;
@@ -14,11 +16,14 @@ public class AdminConsumptionReaderTests
   await using var f=new Fixture();await f.Seed();await using var db=f.Db();
   var now=DateTime.UtcNow;
   db.AiUsageRecords.RemoveRange(db.AiUsageRecords);
+  db.AiPricing.Add(new(){Id=Guid.NewGuid(),Provider="Anthropic",Model="claude-sonnet-5",UsageType="ChatResponse",Currency="EUR",
+   InputPricePerMillion=1,OutputPricePerMillion=2,CacheReadPricePerMillion=0.1m,CacheCreation5mPricePerMillion=1.25m,
+   CacheCreation1hPricePerMillion=2,WebSearchPricePerRequest=0.01m,EffectiveFromUtc=now.AddDays(-1)});
   db.AiUsageRecords.AddRange(
    new(){Id=Guid.NewGuid(),MachineId=f.MachineId,CompanyId=f.CompanyId,CreatedAtUtc=now,UsageType=AiUsageType.ChatResponse,
     Provider="Anthropic",Model="claude-sonnet-5",Available=true,Completed=true,InputTokens=30,OutputTokens=7,TotalTokens=37,
     CacheReadInputTokens=12,CacheCreationInputTokens=9,CacheCreation5mInputTokens=7,CacheCreation1hInputTokens=2,
-    CallBreakdownJson="""[{"callNumber":1,"inputTokens":10,"outputTokens":2,"cacheReadInputTokens":12,"cacheCreationInputTokens":9,"cacheCreation5mInputTokens":7,"cacheCreation1hInputTokens":2,"totalTokens":12,"model":"claude-sonnet-5","stopReason":"tool_use","tools":["file_search"]}]"""},
+    CallBreakdownJson="""[{"callNumber":1,"inputTokens":10,"outputTokens":2,"cacheReadInputTokens":12,"cacheCreationInputTokens":9,"cacheCreation5mInputTokens":7,"cacheCreation1hInputTokens":2,"webSearchRequests":0,"totalTokens":12,"model":"claude-sonnet-5","stopReason":"tool_use","tools":["load_skill"],"loadedSkills":["diagnostic"],"skillContinuationFor":[]}]"""},
    new(){Id=Guid.NewGuid(),MachineId=f.MachineId,CompanyId=f.CompanyId,CreatedAtUtc=now.AddMinutes(-1),UsageType=AiUsageType.ChatResponse,
     Provider="Anthropic",Model="claude-sonnet-5",Available=true,Completed=true,InputTokens=20,OutputTokens=5,TotalTokens=25,CallBreakdownJson=null},
    new(){Id=Guid.NewGuid(),MachineId=f.MachineId,CompanyId=f.CompanyId,CreatedAtUtc=now.AddMinutes(-2),UsageType=AiUsageType.ChatResponse,
@@ -38,7 +43,8 @@ public class AdminConsumptionReaderTests
   var call=current.Calls[0];
   Assert.AreEqual(1,call.CallNumber);Assert.AreEqual(10L,call.InputTokens);Assert.AreEqual(2L,call.OutputTokens);Assert.AreEqual(12L,call.TotalTokens);
   Assert.AreEqual(12L,call.CacheReadInputTokens);Assert.AreEqual(9L,call.CacheCreationInputTokens);
-  Assert.AreEqual("claude-sonnet-5",call.Model);Assert.AreEqual("tool_use",call.StopReason);CollectionAssert.AreEqual(new[]{"file_search"},call.Tools);
+  Assert.AreEqual("claude-sonnet-5",call.Model);Assert.AreEqual("tool_use",call.StopReason);CollectionAssert.AreEqual(new[]{"load_skill"},call.Tools);
+  CollectionAssert.AreEqual(new[]{"diagnostic"},call.LoadedSkills);Assert.IsNotNull(call.EstimatedCostEur);
   Assert.IsNull(response.Items[1].Calls);
   Assert.IsNull(response.Items[2].Calls);
  }
@@ -170,5 +176,88 @@ public class AdminConsumptionReaderTests
   Assert.AreEqual(1m,splitMetrics.RealCost);Assert.AreEqual(1.2m,splitMetrics.CommercialCredit);Assert.AreEqual(.6m,splitMetrics.WalletRealCost);
   var withoutQuota=report.Machines.Single(row=>row.Id==noQuotaMachine);
   Assert.AreEqual(0m,withoutQuota.Budget);Assert.AreEqual(0m,withoutQuota.Users.Single(user=>user.Id==noQuotaUser).Metrics.IncludedQuotaConsumed);
+ }
+
+ [TestMethod]
+ public async Task BatchedReportMatchesLegacyValuationAndUsesConstantQueryCount()
+ {
+  var counter=new CommandCounter();
+  await using var f=new Fixture(counter);await f.Seed();
+  await using(var setup=f.Db())
+  {
+   await setup.Database.ExecuteSqlRawAsync("CREATE TABLE Users (Id TEXT PRIMARY KEY, CompanyId TEXT, EntraObjectId TEXT, Email TEXT, Role TEXT, Status TEXT, CreatedAt TEXT, UpdatedAt TEXT, FirstName TEXT, LastName TEXT, PhoneNumber TEXT)");
+   await setup.Database.ExecuteSqlRawAsync("CREATE TABLE UserMachines (UserId TEXT NOT NULL, MachineId TEXT NOT NULL, CreatedAt TEXT NOT NULL, PRIMARY KEY (UserId, MachineId))");
+   var original=await setup.AiUsageRecords.SingleAsync();
+   setup.AiUsageRecords.Remove(original);
+   for(var index=0;index<25;index++)setup.AiUsageRecords.Add(ValuableUsage(f,index));
+   setup.AiPricing.Add(new(){Id=Guid.NewGuid(),Provider="Test",Model="test",Currency="USD",
+    InputPricePerMillion=1,OutputPricePerMillion=1,EffectiveFromUtc=original.CreatedAtUtc.AddDays(-1)});
+   setup.ExchangeRates.Add(new(){Id=Guid.NewGuid(),BaseCurrency="USD",QuoteCurrency="EUR",Rate=2,
+    Source="test",EffectiveFromUtc=original.CreatedAtUtc.AddDays(-1)});
+   await setup.SaveChangesAsync();
+  }
+
+  decimal legacyTotal=0;
+  await using(var legacyDb=f.Db())
+  {
+   var usages=await legacyDb.AiUsageRecords.AsNoTracking().OrderBy(usage=>usage.Id).ToArrayAsync();
+   counter.Reset();
+   var calculator=new AiCostCalculator(legacyDb);var converter=new AiCostCurrencyConverter(legacyDb);
+   foreach(var usage in usages)
+   {
+    var cost=await calculator.CalculateAsync(usage);
+    var converted=await converter.ConvertAsync(cost.RealAiCost!.Value,cost.Currency,usage);
+    legacyTotal+=converted.ConvertedAmount!.Value;
+   }
+  }
+  var legacyValuationQueries=counter.Count;
+
+  counter.Reset();
+  AdminConsumptionReader.Report report;
+  var reportFrom=new DateTime(2026,9,9,0,0,0,DateTimeKind.Utc);
+  var reportTo=new DateTime(2026,9,12,0,0,0,DateTimeKind.Utc);
+  await using(var reportDb=f.Db())
+   report=(AdminConsumptionReader.Report)((IValueHttpResult)await AdminConsumptionReader.ReadAsync(
+    f.CompanyId,reportFrom.ToString("O"),reportTo.ToString("O"),null,reportDb,default)).Value!;
+  var batchedReportQueries=counter.Count;
+
+  Assert.AreEqual(50,legacyValuationQueries);
+  Assert.AreEqual(10,batchedReportQueries);
+  Assert.AreEqual(.05m,legacyTotal);
+  Assert.AreEqual(legacyTotal,report.Metrics.RealCost);
+  Assert.AreEqual(25,report.Metrics.Responses);
+
+  await using(var setup=f.Db())
+  {
+   for(var index=25;index<50;index++)setup.AiUsageRecords.Add(ValuableUsage(f,index));
+   await setup.SaveChangesAsync();
+  }
+  counter.Reset();
+  await using(var reportDb=f.Db())
+   report=(AdminConsumptionReader.Report)((IValueHttpResult)await AdminConsumptionReader.ReadAsync(
+    f.CompanyId,reportFrom.ToString("O"),reportTo.ToString("O"),null,reportDb,default)).Value!;
+  Assert.AreEqual(10,counter.Count);
+  Assert.AreEqual(.10m,report.Metrics.RealCost);
+  Assert.AreEqual(50,report.Metrics.Responses);
+ }
+
+ private static WebApp.Api.Models.Entities.AiUsageRecord ValuableUsage(Fixture fixture,int index)=>new()
+ {
+  Id=Guid.NewGuid(),MachineId=fixture.MachineId,CompanyId=fixture.CompanyId,
+  CreatedAtUtc=new DateTime(2026,9,10,12,0,0,DateTimeKind.Utc).AddMinutes(index),
+  UsageType=AiUsageType.ChatResponse,Provider="Test",Model="test",Available=true,Completed=true,
+  InputTokens=1000,OutputTokens=0,TotalTokens=1000
+ };
+
+ private sealed class CommandCounter:DbCommandInterceptor
+ {
+  public int Count{get;private set;}
+  public void Reset()=>Count=0;
+  public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+   CommandEventData eventData,InterceptionResult<DbDataReader> result,CancellationToken cancellationToken=default)
+  {
+   Count++;
+   return base.ReaderExecutingAsync(command,eventData,result,cancellationToken);
+  }
  }
 }

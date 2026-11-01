@@ -59,7 +59,6 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
 
   const handleSendMessage = async (text: string, files?: File[]) => {
     if (chat.status === 'streaming' || chat.status === 'sending') {
-      dispatch({ type: 'CHAT_QUEUE_MESSAGE', text, files });
       return;
     }
     // If starting a new conversation, require a selected machine. Offer a toast with machines to choose from.
@@ -102,27 +101,6 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
     }
 
     await chatService.sendMessage(text, chat.currentConversationId, files, state.machine.selected?.id);
-  };
-
-  // Drain the queue when the stream completes
-  const pendingRef = useRef(chat.pendingMessages);
-  pendingRef.current = chat.pendingMessages;
-
-  useEffect(() => {
-    if (chat.status === 'idle' && pendingRef.current.length > 0) {
-      const combinedText = pendingRef.current.map(m => m.text).join('\n\n');
-      const combinedFiles = pendingRef.current.flatMap(m => m.files || []);
-      dispatch({ type: 'CHAT_CLEAR_QUEUE' });
-      chatService.sendMessage(
-        combinedText,
-        chat.currentConversationId,
-        combinedFiles.length > 0 ? combinedFiles : undefined
-      );
-    }
-  }, [chat.status, chat.currentConversationId, chatService, dispatch]);
-
-  const handleDequeueMessage = (index: number) => {
-    dispatch({ type: 'CHAT_DEQUEUE_MESSAGE', index });
   };
 
   const handleClearError = () => {
@@ -392,8 +370,6 @@ export const AgentChat: React.FC<AgentChatProps> = ({ agentName, agentDescriptio
           onFeedback={handleFeedback}
           onLoadTechnicalVisual={handleLoadTechnicalVisual}
           onLoadTechnicalSource={handleLoadTechnicalSource}
-          pendingMessages={chat.pendingMessages}
-          onDequeueMessage={handleDequeueMessage}
           hasMessages={chat.messages.length > 0}
           disabled={false}
           agentName={agentName}

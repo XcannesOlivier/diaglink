@@ -22,17 +22,141 @@
 }
 
 .imageButton { width: 100%; padding: 0; border: 0; cursor: zoom-in; background: transparent; }
+.loadButton { min-height: 44px; border: 0; color: var(--colorBrandForeground1); cursor: pointer; background: transparent; }
 .imageButton:focus-visible { outline: 2px solid var(--colorStrokeFocus2); outline-offset: -2px; }
 .image { display: block; width: 100%; max-height: 280px; object-fit: contain; }
-.status { display: flex; align-items: center; gap: 8px; padding: 24px; color: var(--colorNeutralForeground3); font-size: 12px; }
+.status { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px; color: var(--colorNeutralForeground3); font-size: 12px; }
 .caption { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; color: var(--colorNeutralForeground2); font-size: 12px; }
-.dialog { width: min(920px, calc(100vw - 32px)); max-width: 920px; }
-.dialogContent { display: flex; min-height: 0; flex-direction: column; }
-.dialogCaption { margin: 0 0 8px; color: var(--colorNeutralForeground2); }
-.dialogImage { display: block; width: 100%; max-height: calc(100vh - 180px); object-fit: contain; }
+.dialog {
+  box-sizing: border-box;
+  width: 90vw !important;
+  width: 90dvw !important;
+  max-width: none !important;
+  height: 90vh !important;
+  height: 90dvh !important;
+  max-height: none !important;
+  padding: 0;
+  overflow: hidden;
+}
+
+.title {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.titleText {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialogBody {
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.dialogContent {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--colorNeutralStroke2);
+  border-bottom: 1px solid var(--colorNeutralStroke2);
+  background: var(--colorNeutralBackground2);
+  flex-shrink: 0;
+}
+
+.toolbarSpacer { flex: 1; }
+.dialogCaption { min-width: 0; overflow: hidden; color: var(--colorNeutralForeground2); text-overflow: ellipsis; white-space: nowrap; }
+.zoomValue { min-width: 48px; color: var(--colorNeutralForeground2); font-size: 12px; text-align: center; }
+
+.imageViewport {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+  background: var(--colorNeutralBackground3);
+  overscroll-behavior: contain;
+  touch-action: none;
+  user-select: none;
+}
+
+.imageViewport.pannable {
+  cursor: grab;
+}
+
+.imageViewport.dragging {
+  cursor: grabbing;
+}
+
+.dialogImage {
+  display: block;
+  max-width: none;
+  height: auto;
+  margin: 0 auto;
+  background: white;
+  box-shadow: var(--shadow8);
+  pointer-events: none;
+  user-select: none;
+}
+
+.dialogError {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--colorNeutralForeground2);
+  text-align: center;
+}
+
+@media (max-width: 1024px), (max-height: 800px) {
+  .dialog.dialog {
+    width: 95vw !important;
+    width: 95dvw !important;
+    height: 95vh !important;
+    height: 95dvh !important;
+  }
+}
+
+@media (pointer: coarse), (max-width: 1024px) {
+  .toolbar button,
+  .dialogBody [data-dialog-close-button] {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+}
 
 @media (max-width: 600px) {
   .gallery { grid-template-columns: 1fr; }
   .image { max-height: 240px; }
   .caption { flex-wrap: wrap; }
+  .dialog.dialog {
+    width: calc(100dvw - max(4px, env(safe-area-inset-left)) - max(4px, env(safe-area-inset-right))) !important;
+    height: calc(100dvh - max(4px, env(safe-area-inset-top)) - max(4px, env(safe-area-inset-bottom)));
+    max-width: 100dvw !important;
+    max-height: 100dvh !important;
+    border-radius: 8px;
+  }
+  .dialogContent.dialogContent { overflow-y: hidden !important; }
+  .toolbar { padding-inline: 4px; }
+  .imageViewport { padding: 8px; }
 }

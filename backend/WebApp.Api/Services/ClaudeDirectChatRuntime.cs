@@ -16,7 +16,8 @@ public sealed class ClaudeDirectChatRuntime(
         string message,
         [EnumeratorCancellation] CancellationToken cancellationToken = default,
         IReadOnlyList<ClaudeDirectUserImage>? userImages = null,
-        IReadOnlyList<HistoricalTechnicalSourceEvidence>? historicalSourceEvidence = null)
+        IReadOnlyList<HistoricalTechnicalSourceEvidence>? historicalSourceEvidence = null,
+        IReadOnlyList<string>? preloadedSkillNames = null)
     {
         ArgumentNullException.ThrowIfNull(machine);
         ArgumentException.ThrowIfNullOrWhiteSpace(message);
@@ -28,6 +29,10 @@ public sealed class ClaudeDirectChatRuntime(
         if (historicalSourceEvidence is { Count: > 0 })
         {
             request = request with { HistoricalSourceEvidence = historicalSourceEvidence };
+        }
+        if (preloadedSkillNames is { Count: > 0 })
+        {
+            request = request with { PreloadedSkillNames = preloadedSkillNames };
         }
         ClaudeDirectChatResult? result = null;
         await foreach (var update in chatService.StreamAsync(request, cancellationToken))
@@ -86,10 +91,13 @@ public sealed class ClaudeDirectChatRuntime(
                 cacheCreationInputTokens = call.CacheCreationInputTokens,
                 cacheCreation5mInputTokens = call.CacheCreation5mInputTokens,
                 cacheCreation1hInputTokens = call.CacheCreation1hInputTokens,
+                webSearchRequests = call.WebSearchRequests,
                 totalTokens = call.TotalTokens,
                 model = call.Model,
                 stopReason = call.StopReason,
-                tools = call.Tools
+                tools = call.Tools,
+                loadedSkills = call.LoadedSkills,
+                skillContinuationFor = call.SkillContinuationFor
             }));
         yield return new StreamChunk
         {

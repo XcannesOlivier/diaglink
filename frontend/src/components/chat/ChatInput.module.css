@@ -35,7 +35,7 @@
   box-shadow: var(--shadow8);
 }
 
-.inputWrapper :global(.fui-ChatInput) {
+.inputWrapper :global(.fai-ChatInput) {
   max-height: 120px;
   width: 100%;
   background: transparent;
@@ -43,13 +43,13 @@
   border-radius: 0 !important;
 }
 
-.inputWrapper :global(.fui-ChatInput) :global(textarea) {
+.inputWrapper :global(.fai-ChatInput) :global(textarea) {
   background: transparent;
   min-height: 40px;
   min-width: 0; /* allow textarea to shrink inside flex */
 }
 
-.inputWrapper :global(.fui-ChatInput) :global(.fui-ChatInput__container) {
+.inputWrapper :global(.fai-ChatInput) :global(.fai-ChatInput__inputWrapper) {
   background: transparent;
 }
 
@@ -70,23 +70,23 @@
 }
 
 /* Style the built-in send button to match our subtle buttons */
-.inputWrapper :global(.fui-ChatInput) :global(button) {
+.inputWrapper :global(.fai-ChatInput) :global(button) {
   color: var(--colorNeutralForeground2);
   background: transparent !important;
   border: none;
 }
 
-.inputWrapper :global(.fui-ChatInput) :global(button:hover:enabled) {
+.inputWrapper :global(.fai-ChatInput) :global(button:hover:enabled) {
   color: var(--colorNeutralForeground2Hover);
   background: var(--colorSubtleBackgroundHover) !important;
 }
 
-.inputWrapper :global(.fui-ChatInput) :global(button:active:enabled) {
+.inputWrapper :global(.fai-ChatInput) :global(button:active:enabled) {
   color: var(--colorNeutralForeground2Pressed);
   background: var(--colorSubtleBackgroundPressed) !important;
 }
 
-.inputWrapper :global(.fui-ChatInput) :global(button:disabled) {
+.inputWrapper :global(.fai-ChatInput) :global(button:disabled) {
   color: var(--colorNeutralForegroundDisabled);
   background: transparent !important;
   cursor: not-allowed;
@@ -223,7 +223,41 @@
   }
 }
 
+@media (max-width: 1024px) {
+  .chatInputContainer {
+    padding: 0.75rem 1rem;
+  }
+
+  .inputWrapper :global(.fai-ChatInput) {
+    max-height: 96px;
+  }
+
+  .inputWrapper :global(.fai-ChatInput__inputWrapper) {
+    padding: 8px 10px 6px !important;
+    row-gap: 4px !important;
+  }
+
+  .inputWrapper :global(.fai-ChatInput__editor) {
+    max-height: 72px !important;
+    margin: 0 !important;
+    padding-inline: 4px !important;
+    overflow-y: auto;
+  }
+
+  .inputWrapper :global(.fai-EditorInput__input),
+  .inputWrapper :global(.fai-EditorInput__placeholderValue) {
+    max-height: 72px !important;
+    font-size: 16px !important;
+    line-height: 20px !important;
+  }
+
+  .buttonRow {
+    padding-block: 0.375rem;
+  }
+}
+
 @media (max-width: 1000px) {
+
   .changeMachineDesktopLabel {
     display: none;
   }
@@ -243,7 +277,36 @@
 }
 
 @media (max-width: 480px) {
+  .chatInputContainer {
+    padding-top: 0.5rem;
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+  }
+
+  .inputWrapper :global(.fai-ChatInput) {
+    max-height: 76px;
+  }
+
+  .inputWrapper :global(.fai-ChatInput__inputWrapper) {
+    padding: 6px 8px 4px !important;
+    row-gap: 2px !important;
+  }
+
+  .inputWrapper :global(.fai-ChatInput__editor),
+  .inputWrapper :global(.fai-EditorInput__input),
+  .inputWrapper :global(.fai-EditorInput__placeholderValue) {
+    max-height: 56px !important;
+  }
+
+  .inputWrapper :global(.fai-EditorInput__placeholderValue) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .buttonRow {
+    padding: 0.25rem 0.375rem;
     flex-wrap: nowrap;
     align-items: flex-start;
     justify-content: flex-start;
@@ -266,13 +329,26 @@
   }
 }
 
+@media (max-width: 1024px) and (max-height: 600px) {
+  .chatInputContainer {
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+  }
+
+  .inputWrapper :global(.fai-ChatInput) {
+    max-height: 68px;
+  }
+
+  .inputWrapper :global(.fai-ChatInput__editor),
+  .inputWrapper :global(.fai-EditorInput__input),
+  .inputWrapper :global(.fai-EditorInput__placeholderValue) {
+    max-height: 48px !important;
+  }
+}
+
 .divider {
   width: 1px;
   height: 20px;
   background-color: var(--colorNeutralStroke2);
   flex-shrink: 0;
-}
-
-.cancelButton {
-  margin-left: 0.25rem;
 }

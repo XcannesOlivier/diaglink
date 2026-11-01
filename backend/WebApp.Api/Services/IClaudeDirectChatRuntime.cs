@@ -10,5 +10,6 @@ public interface IClaudeDirectChatRuntime
         string message,
         CancellationToken cancellationToken = default,
         IReadOnlyList<ClaudeDirectUserImage>? userImages = null,
-        IReadOnlyList<HistoricalTechnicalSourceEvidence>? historicalSourceEvidence = null);
+        IReadOnlyList<HistoricalTechnicalSourceEvidence>? historicalSourceEvidence = null,
+        IReadOnlyList<string>? preloadedSkillNames = null);
 }

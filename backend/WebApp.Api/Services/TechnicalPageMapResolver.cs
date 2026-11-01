@@ -1,11 +1,14 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using WebApp.Api.Models;
 
 namespace WebApp.Api.Services;
 
 public sealed record TechnicalPageMapResolution(
     string SourceBlob,
+    string DocumentName,
+    string? VersionToken,
     IReadOnlyDictionary<string, IReadOnlyList<int>> PdfPagesByDisplayPage,
     IReadOnlySet<int> PdfPages);
 
@@ -54,7 +57,19 @@ public sealed partial class TechnicalPageMapResolver(
             }
         }
 
-        return new(pageMap.SourceBlob, resolvedPages, pageMap.PdfPages);
+        return new(
+            pageMap.SourceBlob,
+            GetDocumentName(pageMap.SourceBlob),
+            pageMap.VersionToken,
+            resolvedPages,
+            pageMap.PdfPages);
+    }
+
+    internal static string GetDocumentName(string sourceBlob)
+    {
+        var separator = sourceBlob.LastIndexOf('/');
+        var name = separator >= 0 ? sourceBlob[(separator + 1)..] : sourceBlob;
+        return name.Length <= 255 ? name : name[^255..];
     }
 
     private async Task<ValidatedPageMap?> LoadAsync(
@@ -89,6 +104,16 @@ public sealed partial class TechnicalPageMapResolver(
                 pagesElement.GetArrayLength() == 0)
             {
                 return null;
+            }
+
+            string? versionToken = null;
+            if (root.TryGetProperty("sourceETag", out _) )
+            {
+                if (!TryReadOptionalString(root, "sourceETag", 128, out var sourceVersion))
+                {
+                    return null;
+                }
+                versionToken = TechnicalSourcePageStorage.CreateVersionToken(sourceVersion);
             }
 
             var pages = new Dictionary<string, List<int>>(StringComparer.Ordinal);
@@ -137,7 +162,7 @@ public sealed partial class TechnicalPageMapResolver(
             }
 
             LogPerformance(stopwatch.ElapsedMilliseconds, "success", pages.Count);
-            return new(sourceBlob, pages, pdfPages);
+            return new(sourceBlob, versionToken, pages, pdfPages);
         }
         catch (JsonException exception)
         {
@@ -188,6 +213,24 @@ public sealed partial class TechnicalPageMapResolver(
             !string.IsNullOrWhiteSpace(value = element.GetString()!);
     }
 
+    private static bool TryReadOptionalString(
+        JsonElement parent,
+        string name,
+        int maxLength,
+        out string value)
+    {
+        value = string.Empty;
+        if (!parent.TryGetProperty(name, out var element))
+        {
+            return false;
+        }
+
+        return element.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(value = element.GetString()!) &&
+            value.Length <= maxLength &&
+            !value.Any(char.IsControl);
+    }
+
     private static bool IsSafeSourceBlob(string blobPrefix, string sourceBlob) =>
         IsSafeBlobPrefix(blobPrefix) &&
         sourceBlob.StartsWith(blobPrefix + "/", StringComparison.Ordinal) &&
@@ -211,6 +254,7 @@ public sealed partial class TechnicalPageMapResolver(
 
     private sealed record ValidatedPageMap(
         string SourceBlob,
+        string? VersionToken,
         Dictionary<string, List<int>> Pages,
         HashSet<int> PdfPages);
 }

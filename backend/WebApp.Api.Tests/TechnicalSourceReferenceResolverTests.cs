@@ -29,6 +29,31 @@ public sealed class TechnicalSourceReferenceResolverTests
         Assert.AreEqual(text.IndexOf("p. 70", StringComparison.Ordinal), reference.StartIndex);
         Assert.AreEqual(reference.StartIndex + reference.Label.Length, reference.EndIndex);
         Assert.AreEqual(0, reference.DisplayOrder);
+        Assert.AreEqual("develon-dx10z-manuel-utilisation-maintenance-en.pdf", reference.DocumentName);
+    }
+
+    [TestMethod]
+    public async Task HistoricalReferenceWithChangedSourceEtagIsNotReused()
+    {
+        var currentVersion = TechnicalSourcePageStorage.CreateVersionToken("etag-v2");
+        var historicalVersion = TechnicalSourcePageStorage.CreateVersionToken("etag-v1");
+        var fixture = Fixture.WithContent($$"""
+            {"schemaVersion":1,"documentId":"{{DocumentId}}","sourceBlob":"{{SourceBlob}}","sourceETag":"etag-v2","pages":[
+              {"pdfPage":72,"displayPage":"70","source":"ExtractedText"}
+            ]}
+            """);
+
+        var references = await fixture.Resolver.ResolveAsync(
+            "Page PDF : 72",
+            BlobPrefix,
+            [],
+            [],
+            [],
+            [new(DocumentId, 72, "72", TechnicalSourcePageKind.Pdf, historicalVersion)],
+            default);
+
+        Assert.AreNotEqual(historicalVersion, currentVersion);
+        Assert.IsEmpty(references);
     }
 
     [TestMethod]
@@ -544,6 +569,64 @@ public sealed class TechnicalSourceReferenceResolverTests
         CollectionAssert.AreEqual(new[] { 20, 21 }, references.Select(item => item.PdfPage).ToArray());
         Assert.IsTrue(references.All(item => item.DocumentId == "dx225-parts"));
         Assert.IsTrue(references.All(item => item.PageKind == TechnicalSourcePageKind.Pdf));
+    }
+
+    [TestMethod]
+    public async Task PhysicalPageListResolvesVerifiedPagesAcrossDocumentsIndependently()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("manual-a", Fixture.PageMap("manual-a", """
+                {"pdfPage":214,"displayPage":null,"source":"ExtractedText"},
+                {"pdfPage":215,"displayPage":null,"source":"ExtractedText"}
+                """)),
+            ("manual-b", Fixture.PageMap("manual-b", """
+                {"pdfPage":670,"displayPage":null,"source":"ExtractedText"}
+                """)));
+        const string text = "Source : Page PDF : 214, 215, 670";
+
+        var references = await fixture.Resolver.ResolveAsync(
+            text,
+            BlobPrefix,
+            ["manual-a", "manual-b"],
+            [new("manual-a", 214), new("manual-a", 215), new("manual-b", 670)],
+            [],
+            default);
+
+        CollectionAssert.AreEqual(new[] { 214, 215, 670 }, references.Select(item => item.PdfPage).ToArray());
+        CollectionAssert.AreEqual(new[] { "manual-a", "manual-a", "manual-b" }, references.Select(item => item.DocumentId).ToArray());
+        Assert.IsTrue(references.All(item => item.PageKind == TechnicalSourcePageKind.Pdf));
+    }
+
+    [TestMethod]
+    public async Task RepeatedPhysicalPageHeadingsResolveAcrossDocumentsWithoutLettingAmbiguityBlockSafePages()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("manual-a", Fixture.PageMap("manual-a", """
+                {"pdfPage":58,"displayPage":null,"source":"ExtractedText"},
+                {"pdfPage":59,"displayPage":null,"source":"ExtractedText"}
+                """)),
+            ("manual-b", Fixture.PageMap("manual-b", """
+                {"pdfPage":59,"displayPage":null,"source":"ExtractedText"},
+                {"pdfPage":670,"displayPage":null,"source":"ExtractedText"}
+                """)));
+        const string text = "Source : Page PDF : 58, Page PDF : 59 (Fig. 019 — repère 1A), Page PDF : 670,";
+
+        var references = await fixture.Resolver.ResolveAsync(
+            text,
+            BlobPrefix,
+            ["manual-a", "manual-b"],
+            [
+                new("manual-a", 58),
+                new("manual-a", 59),
+                new("manual-b", 59),
+                new("manual-b", 670)
+            ],
+            [],
+            default);
+
+        CollectionAssert.AreEqual(new[] { 58, 670 }, references.Select(item => item.PdfPage).ToArray());
+        CollectionAssert.AreEqual(new[] { "58", "670" }, references.Select(item => item.Label).ToArray());
+        CollectionAssert.AreEqual(new[] { "manual-a", "manual-b" }, references.Select(item => item.DocumentId).ToArray());
     }
 
     [TestMethod]

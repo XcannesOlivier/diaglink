@@ -59,6 +59,36 @@ public class AiUsageRepositoryTests
     }
 
     [TestMethod]
+    public async Task LoadedSkills_AreRecoveredAcrossConversationTurns()
+    {
+        var options = Options();
+        var conversationId = Guid.NewGuid();
+        var first = Measurement() with
+        {
+            SqlConversationId = conversationId,
+            Response = Measurement().Response with
+            {
+                CallBreakdownJson = """[{"loadedSkills":["diagnostic","hydraulique"]}]"""
+            }
+        };
+        var second = Measurement() with
+        {
+            SqlConversationId = conversationId,
+            Response = Measurement().Response with
+            {
+                CallBreakdownJson = """[{"loadedSkills":["hydraulique","procedures"]}]"""
+            }
+        };
+        var repository = new AiUsageRepository(options, NullLogger<AiUsageRepository>.Instance);
+        await repository.RecordAsync(first, CancellationToken.None);
+        await repository.RecordAsync(second, CancellationToken.None);
+
+        var result = await repository.GetLoadedSkillNamesAsync(conversationId, CancellationToken.None);
+
+        CollectionAssert.AreEqual(new[] { "diagnostic", "hydraulique", "procedures" }, result.ToArray());
+    }
+
+    [TestMethod]
     public async Task KnownUsage_PersistsAllCacheTokenCategories()
     {
         var options = Options();

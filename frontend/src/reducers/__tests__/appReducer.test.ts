@@ -24,7 +24,6 @@ function createInitialState(): AppState {
       recoveredAttachments: undefined,
       editSnapshot: undefined,
       regenerateText: undefined,
-      pendingMessages: [],
     },
     ui: {
       chatInputEnabled: true,
@@ -83,10 +82,6 @@ function populateUserScopedState(state: AppState): void {
     recoveredAttachments: [attachment],
     editSnapshot: [createMockMessage({ id: 'snapshot-a' })],
     regenerateText: 'Relancer pour le compte A',
-    pendingMessages: [{
-      text: 'Message en attente du compte A',
-      files: [new File(['photo'], 'photo-a.png', { type: 'image/png' })],
-    }],
   };
   state.conversations = {
     list: [{ id: 'conversation-a', title: 'Conversation A', createdAt: 1, lastActivityAt: 2 }],
@@ -733,12 +728,11 @@ describe('appReducer', () => {
       expect(result.ui.chatInputEnabled).toBe(true);
     });
 
-    it('preserves partial content, conversation data, attachments, citations, visuals, and the queue', () => {
+    it('preserves partial content, conversation data, attachments, citations, and visuals', () => {
       const state = createInitialState();
       const attachment = { fileName: 'photo.png', fileSizeBytes: 1024, dataUri: 'data:image/png;base64,AA==' };
       const annotation: IAnnotation = { type: 'uri_citation', label: 'Manuel', url: 'https://example.test/manual' };
       const visual = { id: 7, documentId: 'manual', page: 12, assetType: 'full' as const, tile: null, name: 'page.png', displayOrder: 0 };
-      const queuedFile = new File(['queued'], 'queued.png', { type: 'image/png' });
       state.chat.status = 'streaming';
       state.chat.currentConversationId = 'conversation-42';
       state.chat.streamingMessageId = 'assistant-1';
@@ -746,13 +740,11 @@ describe('appReducer', () => {
         createMockMessage({ id: 'user-1', role: 'user', content: 'Question', attachments: [attachment] }),
         createMockMessage({ id: 'assistant-1', role: 'assistant', content: 'Réponse partielle', annotations: [annotation], visuals: [visual] }),
       ];
-      state.chat.pendingMessages = [{ text: 'Question suivante', files: [queuedFile] }];
 
       const result = appReducer(state, { type: 'CHAT_CANCEL_STREAM' });
 
       expect(result.chat.currentConversationId).toBe('conversation-42');
       expect(result.chat.messages).toEqual(state.chat.messages);
-      expect(result.chat.pendingMessages).toEqual(state.chat.pendingMessages);
     });
   });
 
@@ -1128,95 +1120,7 @@ describe('appReducer', () => {
     });
   });
 
-  describe('CHAT_QUEUE_MESSAGE', () => {
-    it('appends text to pendingMessages', () => {
-      const state = createInitialState();
-
-      const result = appReducer(state, { type: 'CHAT_QUEUE_MESSAGE', text: 'first' });
-
-      expect(result.chat.pendingMessages).toEqual([{ text: 'first', files: undefined }]);
-    });
-
-    it('appends multiple messages in order', () => {
-      const state = createInitialState();
-      state.chat.pendingMessages = [{ text: 'first' }];
-
-      const result = appReducer(state, { type: 'CHAT_QUEUE_MESSAGE', text: 'second' });
-
-      expect(result.chat.pendingMessages).toEqual([{ text: 'first' }, { text: 'second', files: undefined }]);
-    });
-
-    it('keeps queued photos and their order until they are sent', () => {
-      const state = createInitialState();
-      const files = [
-        new File(['one'], 'queued-1.png', { type: 'image/png' }),
-        new File(['two'], 'queued-2.jpg', { type: 'image/jpeg' }),
-      ];
-
-      const result = appReducer(state, { type: 'CHAT_QUEUE_MESSAGE', text: 'queued', files });
-
-      expect(result.chat.pendingMessages).toEqual([{ text: 'queued', files }]);
-      expect(result.chat.pendingMessages[0].files?.map(file => file.name))
-        .toEqual(['queued-1.png', 'queued-2.jpg']);
-    });
-  });
-
-  describe('CHAT_DEQUEUE_MESSAGE', () => {
-    it('removes message at given index', () => {
-      const state = createInitialState();
-      state.chat.pendingMessages = [{ text: 'a' }, { text: 'b' }, { text: 'c' }];
-
-      const result = appReducer(state, { type: 'CHAT_DEQUEUE_MESSAGE', index: 1 });
-
-      expect(result.chat.pendingMessages).toEqual([{ text: 'a' }, { text: 'c' }]);
-    });
-
-    it('handles removing last item', () => {
-      const state = createInitialState();
-      state.chat.pendingMessages = [{ text: 'only' }];
-
-      const result = appReducer(state, { type: 'CHAT_DEQUEUE_MESSAGE', index: 0 });
-
-      expect(result.chat.pendingMessages).toEqual([]);
-    });
-  });
-
-  describe('CHAT_CLEAR_QUEUE', () => {
-    it('empties pendingMessages', () => {
-      const state = createInitialState();
-      state.chat.pendingMessages = [{ text: 'a' }, { text: 'b' }, { text: 'c' }];
-
-      const result = appReducer(state, { type: 'CHAT_CLEAR_QUEUE' });
-
-      expect(result.chat.pendingMessages).toEqual([]);
-    });
-  });
-
-  describe('CHAT_CLEAR', () => {
-    it('clears pendingMessages', () => {
-      const state = createInitialState();
-      state.chat.pendingMessages = [{ text: 'queued' }];
-
-      const result = appReducer(state, { type: 'CHAT_CLEAR' });
-
-      expect(result.chat.pendingMessages).toEqual([]);
-    });
-  });
-
   describe('CHAT_LOAD_CONVERSATION', () => {
-    it('clears pendingMessages when switching conversations', () => {
-      const state = createInitialState();
-      state.chat.pendingMessages = [{ text: 'queued' }];
-
-      const result = appReducer(state, {
-        type: 'CHAT_LOAD_CONVERSATION',
-        conversationId: 'new-conv',
-        messages: [],
-      });
-
-      expect(result.chat.pendingMessages).toEqual([]);
-    });
-
     it('discards recovery and regeneration state from the previous conversation', () => {
       const state = createInitialState();
       state.chat.recoveredInput = 'Question from conversation A';
@@ -1779,7 +1683,6 @@ describe('appReducer', () => {
           "chat.error",
           "chat.lastStreamEndReason",
           "chat.messages",
-          "chat.pendingMessages",
           "chat.recoveredAttachments",
           "chat.recoveredInput",
           "chat.regenerateText",

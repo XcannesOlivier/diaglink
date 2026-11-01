@@ -12,8 +12,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Pin transitive dependency to patched version (addresses GHSA-37gx-xxp4-5rgx / GHSA-w3x6-4m5h-cxqf) -->
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.12" />
+    <!-- Pin transitive cryptography dependencies to the patched .NET 10 servicing release. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.13" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
     <!-- In-memory EF Core provider for ConversationHistoryRepository isolation tests (no real SQL dependency) -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.11" />

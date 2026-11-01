@@ -10,7 +10,7 @@ import type { SelectedMachine } from '../../types/machine';
 const mocks=vi.hoisted(()=>({dispatch:vi.fn(),dispatchToast:vi.fn(),getMachines:vi.fn(),sendMessage:vi.fn(),state:null as unknown as ReturnType<typeof makeState>}));
 const makeState=(role:'technician'|'company_admin'|'diaglink_super_admin', selected: SelectedMachine | null = {id:'machine-1',name:'Compresseur Test Alpha',reference:null}, currentConversationId: string | null = null)=>({
  auth:{status:'authenticated',user:null,error:null,currentUser:{userId:'u1',companyId:'c1',role}},
- chat:{status:'idle',messages:[],currentConversationId,error:null,pendingMessages:[]},
+ chat:{status:'idle',messages:[],currentConversationId,error:null},
  conversations:{list:[],isLoading:false,sidebarOpen:false,hasMore:false},
  ui:{chatInputEnabled:true,currentView:'chat'},
  machine:{selected},

@@ -74,6 +74,7 @@ infra
 # Documentation (not needed in container)
 README.md
 *.md
+!backend/WebApp.Api/Prompts/Skills/*/SKILL.md
 docs
 
 # IDE and scripts (not needed in container)

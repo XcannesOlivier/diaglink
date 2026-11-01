@@ -101,6 +101,18 @@ public sealed class TechnicalSourceAccessTests
     }
 
     [TestMethod]
+    public async Task ResolveAsync_ReplacedPdfVersionReturnsNotFound()
+    {
+        await using var fixture = await Fixture.CreateAsync(
+            storedSourceVersion: "etag-before-replacement",
+            currentSourceVersion: "etag-after-replacement");
+
+        var result = await fixture.Access.ResolveAsync(fixture.SourceId, Owner, fixture.Principal, default);
+
+        Assert.AreEqual(TechnicalSourceAccessKind.NotFound, result.Kind);
+    }
+
+    [TestMethod]
     public async Task OpenResolvedAsync_StreamsInlinePdfWithoutStorageMetadata()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -257,6 +269,7 @@ public sealed class TechnicalSourceAccessTests
     {
         public byte[]? PdfContent { get; set; }
         public int PageMapPdfPage { get; set; } = 72;
+        public string? SourceVersion { get; set; }
         public string? RequestedPageMapBlobName { get; private set; }
         public string? RequestedPdfBlobName { get; private set; }
 
@@ -268,6 +281,7 @@ public sealed class TechnicalSourceAccessTests
               "schemaVersion": 1,
               "documentId": "{{DocumentId}}",
               "sourceBlob": "{{SourceBlob}}",
+              {{(SourceVersion is null ? string.Empty : $"\"sourceETag\":\"{SourceVersion}\",")}}
               "pages": [{"pdfPage":{{PageMapPdfPage}},"displayPage":"70","source":"ExtractedText"}]
             }
             """;
@@ -513,7 +527,9 @@ public sealed class TechnicalSourceAccessTests
 
         public static async Task<Fixture> CreateAsync(
             bool grantMachineAccess = true,
-            bool physicalCitation = false)
+            bool physicalCitation = false,
+            string? storedSourceVersion = null,
+            string? currentSourceVersion = null)
         {
             var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -571,7 +587,9 @@ public sealed class TechnicalSourceAccessTests
                 },
                 DocumentId = DocumentId,
                 PdfPage = 72,
-                DisplayPage = physicalCitation ? "pdf:72" : "70",
+                DisplayPage = storedSourceVersion is null
+                    ? physicalCitation ? "pdf:72" : "70"
+                    : $"v1:{TechnicalSourcePageStorage.CreateVersionToken(storedSourceVersion)}:{(physicalCitation ? "pdf:72" : "70")}",
                 Label = "p. 70",
                 StartIndex = 9,
                 EndIndex = 14,
@@ -586,7 +604,7 @@ public sealed class TechnicalSourceAccessTests
                 new Claim(DiagLinkClaimTypes.CompanyId, companyId.ToString()),
                 new Claim(DiagLinkClaimTypes.UserId, userId.ToString())
             ], "test"));
-            var reader = new FakeDocumentBlobReader();
+            var reader = new FakeDocumentBlobReader { SourceVersion = currentSourceVersion };
             var pageMapResolver = new TechnicalPageMapResolver(
                 reader,
                 NullLogger<TechnicalPageMapResolver>.Instance);

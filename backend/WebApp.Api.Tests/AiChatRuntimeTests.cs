@@ -234,7 +234,8 @@ public sealed class ClaudeDirectChatRuntimeTests
                 CacheCreationInputTokens = 5,
                 CacheCreation5mInputTokens = 4,
                 CacheCreation1hInputTokens = 1,
-                Tools = ["file_search"]
+                Tools = ["load_skill"],
+                LoadedSkills = ["diagnostic"]
             },
             new(2, 20, 5, "claude-returned", "end_turn", "response-final", "request-final")
             {
@@ -254,10 +255,11 @@ public sealed class ClaudeDirectChatRuntimeTests
         var serializedCalls = document.RootElement.EnumerateArray().ToArray();
         Assert.HasCount(2, serializedCalls);
         CollectionAssert.AreEquivalent(
-            new[] { "callNumber", "inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "cacheCreation5mInputTokens", "cacheCreation1hInputTokens", "totalTokens", "model", "stopReason", "tools" },
+            new[] { "callNumber", "inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "cacheCreation5mInputTokens", "cacheCreation1hInputTokens", "webSearchRequests", "totalTokens", "model", "stopReason", "tools", "loadedSkills", "skillContinuationFor" },
             serializedCalls[0].EnumerateObject().Select(property => property.Name).ToArray());
         Assert.AreEqual(12, serializedCalls[0].GetProperty("totalTokens").GetInt64());
-        Assert.AreEqual("file_search", serializedCalls[0].GetProperty("tools")[0].GetString());
+        Assert.AreEqual("load_skill", serializedCalls[0].GetProperty("tools")[0].GetString());
+        Assert.AreEqual("diagnostic", serializedCalls[0].GetProperty("loadedSkills")[0].GetString());
         Assert.AreEqual(3, serializedCalls[0].GetProperty("cacheReadInputTokens").GetInt64());
         Assert.IsFalse(usage.CallBreakdownJson.Contains("response-secret", StringComparison.Ordinal));
         Assert.IsFalse(usage.CallBreakdownJson.Contains("request-secret", StringComparison.Ordinal));
