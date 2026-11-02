@@ -238,6 +238,7 @@ public sealed class AiCreditAuthorizationTests
                     .AddScheme<AuthenticationSchemeOptions, DiagLinkSessionAuthenticationHandler>(
                         DiagLinkAuthenticationDefaults.Scheme, _ => { });
             });
+            builder.UseExplicitOfflinePostgreSqlBootstrapConfiguration();
         }
     }
 
