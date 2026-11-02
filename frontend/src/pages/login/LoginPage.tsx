@@ -5,7 +5,7 @@ import { AIFoundryLogo } from '../../components/icons/AIFoundryLogo';
 import { InstallShortcutDialog } from '../../components/marketing/InstallShortcutDialog';
 import { detectShortcutPlatform, type ShortcutPlatform } from '../../utils/installShortcut';
 import { PUBLIC_ORIGIN } from '../../config/origins';
-import loginLogo from '../../assets/Logo DiagLink1.png';
+import loginLogo from '../../assets/Logo DiagLink.png';
 import authStyles from '../../App.module.css';
 
 interface LoginPageProps {
