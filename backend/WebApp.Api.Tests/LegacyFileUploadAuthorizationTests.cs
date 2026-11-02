@@ -114,6 +114,7 @@ public sealed class LegacyFileUploadAuthorizationTests
                 services.AddSingleton<IMachineRequestBlobClient, UnusedMachineRequestBlobClient>();
                 services.AddScoped<MachineRequestStorageService>();
             });
+            builder.UseExplicitOfflinePostgreSqlBootstrapConfiguration();
         }
     }
 

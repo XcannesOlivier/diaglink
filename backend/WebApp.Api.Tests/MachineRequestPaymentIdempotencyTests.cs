@@ -313,6 +313,7 @@ public sealed class MachineRequestPaymentIdempotencyTests
                 services.AddSingleton<IMachineRequestBlobClient, UnusedMachineRequestBlobClient>();
                 services.AddScoped<MachineRequestStorageService>();
             });
+            builder.UseExplicitOfflinePostgreSqlBootstrapConfiguration();
         }
 
         protected override void Dispose(bool disposing)
