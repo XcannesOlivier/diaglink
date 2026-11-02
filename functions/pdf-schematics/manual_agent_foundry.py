@@ -1,8 +1,6 @@
 # Before running the sample:
 #    pip install azure-ai-projects>=2.1.0
 
-import json
-
 from azure.identity import DefaultAzureCredential
 from azure.ai.projects import AIProjectClient
 
