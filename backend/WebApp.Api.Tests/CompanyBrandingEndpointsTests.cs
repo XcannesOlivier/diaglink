@@ -322,7 +322,6 @@ public sealed class CompanyBrandingEndpointsTests
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {
-                    ["ConnectionStrings:DiagLink"] = "Server=(local);Database=company-branding-tests",
                     ["AZURE_STORAGE_CONNECTION_STRING"] = string.Empty,
                 }));
             builder.ConfigureTestServices(services =>
@@ -349,6 +348,7 @@ public sealed class CompanyBrandingEndpointsTests
                         DiagLinkAuthenticationDefaults.Scheme,
                         _ => { });
             });
+            builder.UseExplicitOfflinePostgreSqlBootstrapConfiguration();
         }
     }
 

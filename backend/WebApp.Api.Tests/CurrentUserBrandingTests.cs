@@ -289,7 +289,6 @@ public sealed class CurrentUserBrandingTests
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {
-                    ["ConnectionStrings:DiagLink"] = "Server=(local);Database=current-user-branding-tests",
                     ["AZURE_STORAGE_CONNECTION_STRING"] = string.Empty
                 }));
             builder.ConfigureTestServices(services =>
@@ -316,6 +315,7 @@ public sealed class CurrentUserBrandingTests
                         DiagLinkAuthenticationDefaults.Scheme,
                         _ => { });
             });
+            builder.UseExplicitOfflinePostgreSqlBootstrapConfiguration();
         }
     }
 
