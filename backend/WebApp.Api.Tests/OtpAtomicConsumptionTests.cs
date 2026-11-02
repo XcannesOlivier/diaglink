@@ -286,6 +286,7 @@ public sealed class OtpAtomicConsumptionTests
                 services.AddSingleton<IMachineRequestBlobClient, UnusedMachineRequestBlobClient>();
                 services.AddScoped<MachineRequestStorageService>();
             });
+            builder.UseExplicitOfflinePostgreSqlBootstrapConfiguration();
         }
 
         protected override void Dispose(bool disposing)

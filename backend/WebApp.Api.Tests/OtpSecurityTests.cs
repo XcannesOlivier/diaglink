@@ -249,6 +249,7 @@ public sealed class OtpSecurityTests
                 services.AddSingleton<IMachineRequestBlobClient, UnusedMachineRequestBlobClient>();
                 services.AddScoped<MachineRequestStorageService>();
             });
+            builder.UseExplicitOfflinePostgreSqlBootstrapConfiguration();
         }
     }
 
