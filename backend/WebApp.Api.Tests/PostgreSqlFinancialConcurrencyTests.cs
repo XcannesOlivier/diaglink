@@ -22,19 +22,24 @@ public sealed class PostgreSqlFinancialConcurrencyTests
     }
 
     [TestMethod]
-    public void SqlServerFinancialLocks_ArePreserved()
+    public void PostgreSqlFinancialLocks_ExcludeSqlServerSyntaxAndRemainParameterized()
     {
         var id = Guid.NewGuid();
 
         foreach (var query in new[]
                  {
-                     FinancialRowLocks.SqlServerCompany(id),
-                     FinancialRowLocks.SqlServerMachine(id),
-                     FinancialRowLocks.SqlServerWallet(id)
+                     FinancialRowLocks.PostgreSqlCompany(id),
+                     FinancialRowLocks.PostgreSqlMachine(id),
+                     FinancialRowLocks.PostgreSqlWallet(id)
                  })
         {
-            StringAssert.Contains(query.Format, "WITH (UPDLOCK, HOLDLOCK)");
-            Assert.IsFalse(query.Format.Contains("FOR UPDATE", StringComparison.Ordinal));
+            StringAssert.EndsWith(query.Format, "FOR UPDATE");
+            Assert.IsFalse(query.Format.Contains("UPDLOCK", StringComparison.Ordinal));
+            Assert.IsFalse(query.Format.Contains("HOLDLOCK", StringComparison.Ordinal));
+            Assert.IsFalse(query.Format.Contains("[dbo]", StringComparison.Ordinal));
+            Assert.AreEqual(1, query.ArgumentCount);
+            Assert.AreEqual(id, query.GetArgument(0));
+            StringAssert.Contains(query.Format, "{0}");
         }
     }
 

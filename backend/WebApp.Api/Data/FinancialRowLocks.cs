@@ -13,7 +13,7 @@ internal static class FinancialRowLocks
     internal const string SqliteProvider = "Microsoft.EntityFrameworkCore.Sqlite";
 
     internal static bool IsSupported(DiagLinkDbContext db) =>
-        db.Database.IsSqlServer() || db.Database.IsNpgsql()
+        db.Database.IsNpgsql()
         || string.Equals(db.Database.ProviderName, SqliteProvider, StringComparison.Ordinal);
 
     internal static FormattableString PostgreSqlCompany(Guid companyId) =>
@@ -25,25 +25,11 @@ internal static class FinancialRowLocks
     internal static FormattableString PostgreSqlWallet(Guid companyId) =>
         $"SELECT * FROM \"dbo\".\"CompanyWallets\" WHERE \"CompanyId\" = {companyId} FOR UPDATE";
 
-    internal static FormattableString SqlServerCompany(Guid companyId) =>
-        $"SELECT * FROM [dbo].[Companies] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {companyId}";
-
-    internal static FormattableString SqlServerMachine(Guid machineId) =>
-        $"SELECT * FROM [dbo].[Machines] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {machineId}";
-
-    internal static FormattableString SqlServerWallet(Guid companyId) =>
-        $"SELECT * FROM [dbo].[CompanyWallets] WITH (UPDLOCK, HOLDLOCK) WHERE [CompanyId] = {companyId}";
-
     internal static async Task<Company?> CompanyAsync(
         DiagLinkDbContext db,
         Guid companyId,
         CancellationToken ct)
     {
-        if (db.Database.IsSqlServer())
-            return (await db.Companies
-                .FromSqlInterpolated(SqlServerCompany(companyId))
-                .ToListAsync(ct)).SingleOrDefault();
-
         if (db.Database.IsNpgsql())
             return (await db.Companies.FromSqlInterpolated(PostgreSqlCompany(companyId)).ToListAsync(ct)).SingleOrDefault();
 
@@ -55,11 +41,6 @@ internal static class FinancialRowLocks
         Guid machineId,
         CancellationToken ct)
     {
-        if (db.Database.IsSqlServer())
-            return (await db.Machines
-                .FromSqlInterpolated(SqlServerMachine(machineId))
-                .ToListAsync(ct)).SingleOrDefault();
-
         if (db.Database.IsNpgsql())
             return (await db.Machines.FromSqlInterpolated(PostgreSqlMachine(machineId)).ToListAsync(ct)).SingleOrDefault();
 
@@ -71,11 +52,6 @@ internal static class FinancialRowLocks
         Guid companyId,
         CancellationToken ct)
     {
-        if (db.Database.IsSqlServer())
-            return (await db.CompanyWallets
-                .FromSqlInterpolated(SqlServerWallet(companyId))
-                .ToListAsync(ct)).SingleOrDefault();
-
         if (db.Database.IsNpgsql())
             return (await db.CompanyWallets.FromSqlInterpolated(PostgreSqlWallet(companyId)).ToListAsync(ct)).SingleOrDefault();
 
