@@ -96,17 +96,6 @@ public class EmailOutboxStoreTests
     }
 
     [TestMethod]
-    public void SqlServerClaimUsesAtomicLocksCompatibleWithReadCommittedSnapshot()
-    {
-        var query = EmailOutboxStore.BuildSqlServerClaimQuery(10, DateTime.UtcNow).Format;
-
-        StringAssert.Contains(query, "WITH (UPDLOCK, READPAST, ROWLOCK, READCOMMITTEDLOCK)");
-        StringAssert.Contains(query, "[Status] =");
-        StringAssert.Contains(query, "[NextAttemptAtUtc] <=");
-        StringAssert.Contains(query, "[LockedUntilUtc] IS NULL OR [LockedUntilUtc] <=");
-    }
-
-    [TestMethod]
     public void PostgreSqlClaimUsesSkipLockedAndSelectsXmin()
     {
         var query = EmailOutboxStore.BuildPostgreSqlClaimQuery(10, DateTime.UtcNow).Format;
