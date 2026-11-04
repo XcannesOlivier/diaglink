@@ -758,7 +758,6 @@ public sealed class ClaudeDirectRuntimeManualTests
                     var overrides = new Dictionary<string, string?>();
                     if (offlineValidation)
                     {
-                        overrides["ConnectionStrings:DiagLink"] = "Server=(local);Database=offline-validation";
                         overrides["AZURE_STORAGE_CONNECTION_STRING"] = string.Empty;
                     }
                     configuration.AddInMemoryCollection(overrides);
@@ -824,6 +823,8 @@ public sealed class ClaudeDirectRuntimeManualTests
                     services.AddSingleton<IClaudeDirectChatService>(_ => OfflineClaudeDirectChatService);
                 }
             });
+            if (offlineValidation)
+                builder.UseExplicitOfflinePostgreSqlBootstrapConfiguration();
         }
     }
 

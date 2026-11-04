@@ -383,7 +383,6 @@ public sealed class TechnicalSourceAccessTests
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {
-                    ["ConnectionStrings:DiagLink"] = "Server=(local);Database=technical-source-tests",
                     ["AZURE_STORAGE_CONNECTION_STRING"] = string.Empty
                 }));
             builder.ConfigureTestServices(services =>
@@ -418,6 +417,7 @@ public sealed class TechnicalSourceAccessTests
                         DiagLinkAuthenticationDefaults.Scheme,
                         _ => { });
             });
+            builder.UseExplicitOfflinePostgreSqlBootstrapConfiguration();
         }
     }
 
