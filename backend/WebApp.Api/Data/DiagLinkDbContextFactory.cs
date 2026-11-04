@@ -10,6 +10,8 @@ public sealed class DiagLinkDbContextFactory : IDesignTimeDbContextFactory<DiagL
 {
     public DiagLinkDbContext CreateDbContext(string[] args)
     {
+        var provider = DiagLinkDatabaseConfiguration.NormalizeProvider(
+            Environment.GetEnvironmentVariable(DiagLinkDatabaseConfiguration.ProviderEnvironmentVariable));
         var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DiagLink");
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -21,7 +23,7 @@ public sealed class DiagLinkDbContextFactory : IDesignTimeDbContextFactory<DiagL
         DiagLinkDatabaseConfiguration.Configure(
             optionsBuilder,
             connectionString,
-            Environment.GetEnvironmentVariable(DiagLinkDatabaseConfiguration.ProviderEnvironmentVariable));
+            provider);
 
         return new DiagLinkDbContext(optionsBuilder.Options);
     }

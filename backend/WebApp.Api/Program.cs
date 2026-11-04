@@ -213,16 +213,14 @@ builder.Services.AddSingleton<ClaudeDirectChatAttachmentValidator>();
 builder.Services.AddSingleton<MachineAssistantReadiness>();
 
 // Persistence in the shared 'diaglink' database, with application tables split across the 'dbo' and 'chat' schemas.
-var diagLinkConnectionString = builder.Configuration.GetConnectionString("DiagLink")
-    ?? throw new InvalidOperationException("ConnectionStrings:DiagLink is not configured");
-var diagLinkProvider = builder.Configuration[DiagLinkDatabaseConfiguration.ProviderConfigurationKey];
-if (builder.Environment.IsProduction()
-    && DiagLinkDatabaseConfiguration.NormalizeProvider(diagLinkProvider) == DiagLinkDatabaseConfiguration.PostgreSqlProvider)
+builder.Services.AddDbContext<DiagLinkDbContext>((services, options) =>
 {
-    DiagLinkDatabaseConfiguration.EnsureProductionPostgreSqlTarget(diagLinkConnectionString);
-}
-builder.Services.AddDbContext<DiagLinkDbContext>(options =>
-    DiagLinkDatabaseConfiguration.Configure(options, diagLinkConnectionString, diagLinkProvider));
+    var configuration = services.GetRequiredService<IConfiguration>();
+    var provider = configuration[DiagLinkDatabaseConfiguration.ProviderConfigurationKey];
+    var connectionString = configuration.GetConnectionString("DiagLink")
+        ?? throw new InvalidOperationException("ConnectionStrings:DiagLink is not configured");
+    DiagLinkDatabaseConfiguration.Configure(options, connectionString, provider);
+});
 builder.Services.AddScoped<ConversationHistoryRepository>();
 builder.Services.AddScoped<AiUsageRepository>();
 builder.Services.AddScoped<AiUsageQueryService>();
@@ -314,6 +312,15 @@ builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationH
     }
 
     var app = builder.Build();
+
+_ = DiagLinkDatabaseConfiguration.NormalizeProvider(
+    app.Configuration[DiagLinkDatabaseConfiguration.ProviderConfigurationKey]);
+var diagLinkConnectionString = app.Configuration.GetConnectionString("DiagLink")
+    ?? throw new InvalidOperationException("ConnectionStrings:DiagLink is not configured");
+if (app.Environment.IsProduction())
+{
+    DiagLinkDatabaseConfiguration.EnsureProductionPostgreSqlTarget(diagLinkConnectionString);
+}
 
 // Add exception handling middleware for production
 if (!app.Environment.IsDevelopment())
