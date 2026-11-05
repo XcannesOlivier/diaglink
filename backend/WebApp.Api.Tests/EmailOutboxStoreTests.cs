@@ -79,7 +79,7 @@ public class EmailOutboxStoreTests
         var probe = new ClaimTransactionProbe();
         var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
             .UseSqlite(connection)
-            .ReplaceService<IExecutionStrategyFactory, FinancialExecutionStrategyTests.RetryFactory>()
+            .ReplaceService<IExecutionStrategyFactory, DeterministicTestRetryingExecutionStrategyFactory>()
             .AddInterceptors(probe)
             .Options;
         await using var db = new DiagLinkDbContext(options);
@@ -114,7 +114,7 @@ public class EmailOutboxStoreTests
         var probe = new ClaimTransactionProbe(failFirstCommit: true);
         var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
             .UseSqlite(connection)
-            .ReplaceService<IExecutionStrategyFactory, FinancialExecutionStrategyTests.RetryFactory>()
+            .ReplaceService<IExecutionStrategyFactory, DeterministicTestRetryingExecutionStrategyFactory>()
             .AddInterceptors(probe)
             .Options;
         await using var db = new DiagLinkDbContext(options);
@@ -220,7 +220,7 @@ public class EmailOutboxStoreTests
             TransactionEndEventData eventData, DbTransaction result, CancellationToken cancellationToken = default)
         {
             if (!enabled) return ValueTask.FromResult(result);
-            Assert.IsInstanceOfType<SqlServerRetryingExecutionStrategy>(ExecutionStrategy.Current);
+            Assert.IsInstanceOfType<DeterministicTestRetryingExecutionStrategy>(ExecutionStrategy.Current);
             TransactionCount++;
             return ValueTask.FromResult(result);
         }
