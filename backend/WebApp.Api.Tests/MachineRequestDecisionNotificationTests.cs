@@ -117,14 +117,14 @@ public sealed class MachineRequestDecisionNotificationTests
     }
 
     [TestMethod]
-    public async Task InitialAcceptRunsTransactionInsideSqlServerRetryingExecutionStrategy()
+    public async Task InitialAcceptRunsTransactionInsideDeterministicRetryingExecutionStrategy()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         var probe = new DecisionTransactionProbe();
         var options = new DbContextOptionsBuilder<DiagLinkDbContext>()
             .UseSqlite(connection)
-            .ReplaceService<IExecutionStrategyFactory, FinancialExecutionStrategyTests.RetryFactory>()
+            .ReplaceService<IExecutionStrategyFactory, DeterministicTestRetryingExecutionStrategyFactory>()
             .AddInterceptors(probe)
             .Options;
         await using var db = new DecisionDbContext(options);
@@ -286,7 +286,7 @@ public sealed class MachineRequestDecisionNotificationTests
         public override ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection,
             TransactionEndEventData eventData, DbTransaction result, CancellationToken cancellationToken = default)
         {
-            ObservedRetryingStrategy = ExecutionStrategy.Current is SqlServerRetryingExecutionStrategy;
+            ObservedRetryingStrategy = ExecutionStrategy.Current is DeterministicTestRetryingExecutionStrategy;
             return ValueTask.FromResult(result);
         }
     }
