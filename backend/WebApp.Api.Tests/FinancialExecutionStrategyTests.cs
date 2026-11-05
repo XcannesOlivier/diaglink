@@ -11,17 +11,11 @@ using Fixture = WebApp.Api.Tests.AiCreditConsumptionServiceTests.Fixture;
 
 namespace WebApp.Api.Tests;
 
-// Real SQL Server retry policy, but exclusively SQLite in-memory connections.
-// This tests EF retry boundaries, not SQL Server locking or Azure connectivity.
+// Provider-independent retry policy over exclusively SQLite in-memory connections.
+// This tests EF retry boundaries without database or cloud connectivity.
 [TestClass]
 public class FinancialExecutionStrategyTests
 {
-    public sealed class RetryFactory(ExecutionStrategyDependencies dependencies) : IExecutionStrategyFactory
-    {
-        public IExecutionStrategy Create() => new SqlServerRetryingExecutionStrategy(
-            dependencies, 2, TimeSpan.Zero, null);
-    }
-
     private sealed class Probe(string failure, CancellationTokenSource? cancellation = null) : DbTransactionInterceptor
     {
         public List<Guid> ContextIds { get; } = [];
@@ -42,7 +36,7 @@ public class FinancialExecutionStrategyTests
         public override ValueTask<DbTransaction> TransactionStartedAsync(DbConnection connection,
             TransactionEndEventData eventData, DbTransaction result, CancellationToken cancellationToken = default)
         {
-            Assert.IsInstanceOfType<SqlServerRetryingExecutionStrategy>(ExecutionStrategy.Current);
+            Assert.IsInstanceOfType<DeterministicTestRetryingExecutionStrategy>(ExecutionStrategy.Current);
             Assert.AreEqual(IsolationLevel.Serializable, result.IsolationLevel);
             Assert.IsNotNull(eventData.Context);
             Assert.AreEqual(0, eventData.Context.ChangeTracker.Entries().Count());
@@ -123,7 +117,7 @@ public class FinancialExecutionStrategyTests
         await Prepare(f, service);
         var probe = new Probe(failure);
         var options = new DbContextOptionsBuilder<DiagLinkDbContext>(f.Options)
-            .ReplaceService<IExecutionStrategyFactory, RetryFactory>()
+            .ReplaceService<IExecutionStrategyFactory, DeterministicTestRetryingExecutionStrategyFactory>()
             .AddInterceptors(probe, new SaveProbe(probe)).Options;
         var status = await Run(f, options, service);
         var isPeriod = service is "initial" or "renew";
@@ -164,7 +158,8 @@ public class FinancialExecutionStrategyTests
         using var cancellation = new CancellationTokenSource();
         var probe = new Probe("beforeCommit", cancellation);
         var options = new DbContextOptionsBuilder<DiagLinkDbContext>(f.Options)
-            .ReplaceService<IExecutionStrategyFactory, RetryFactory>().AddInterceptors(probe).Options;
+            .ReplaceService<IExecutionStrategyFactory, DeterministicTestRetryingExecutionStrategyFactory>()
+            .AddInterceptors(probe).Options;
         await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => Run(f, options, service, cancellation.Token));
         Assert.AreEqual(1, probe.ContextIds.Count);
         await using var db = f.Db();
