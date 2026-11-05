@@ -177,10 +177,10 @@ public class AiUsageQueryServiceTests
     }
 
     [TestMethod]
-    public void AggregatesAndLeftJoinsTranslateWithSqlServer()
+    public void AggregatesAndLeftJoinsTranslateWithPostgreSql()
     {
         using var db = new DiagLinkDbContext(new DbContextOptionsBuilder<DiagLinkDbContext>()
-            .UseSqlServer("Server=localhost;Database=translation_only;Integrated Security=true;TrustServerCertificate=true").Options);
+            .UseNpgsql("Host=127.0.0.1;Port=15439;Database=translation_only;Username=test;Password=test").Options);
         var method = typeof(AiUsageQueryService).GetMethod("AggregateBy",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
         foreach (System.Linq.Expressions.Expression<Func<AiUsageRecord, Guid?>> key in
@@ -196,9 +196,13 @@ public class AiUsageQueryServiceTests
             var sql = query.ToQueryString();
             StringAssert.Contains(sql, "GROUP BY");
             StringAssert.Contains(sql, "LEFT JOIN");
-            StringAssert.Contains(sql, "COUNT_BIG");
+            StringAssert.Contains(sql, "count(");
             StringAssert.Contains(sql, "DISTINCT");
-            StringAssert.Contains(sql, "bigint");
+            StringAssert.Contains(sql, "WHERE");
+            StringAssert.Contains(sql, "\"AiUsageRecords\"");
+            StringAssert.Contains(sql, "\"Users\"");
+            StringAssert.Contains(sql, "\"CreatedAtUtc\"");
+            Assert.IsFalse(sql.Contains("COUNT_BIG", StringComparison.Ordinal));
         }
     }
 
