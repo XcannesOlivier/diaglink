@@ -57,7 +57,6 @@ public class DiagLinkDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var isPostgreSql = Database.IsNpgsql();
-        var isSqlServer = Database.IsSqlServer();
 
         modelBuilder.Entity<EmailOutbox>(entity =>
         {
@@ -289,10 +288,7 @@ public class DiagLinkDbContext : DbContext
 
         modelBuilder.Entity<CreditLedgerEntry>(entity =>
         {
-            if (isSqlServer)
-                entity.ToTable("CreditLedger", "dbo", t => t.UseSqlOutputClause(false));
-            else
-                entity.ToTable("CreditLedger", "dbo");
+            entity.ToTable("CreditLedger", "dbo");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.EntryType).IsRequired().HasMaxLength(50);
             entity.Property(e => e.BucketType).IsRequired().HasMaxLength(50);
@@ -442,13 +438,7 @@ public class DiagLinkDbContext : DbContext
                 table.HasCheckConstraint("CK_ConversationMessageVisuals_Page", "[Page] > 0");
                 table.HasCheckConstraint("CK_ConversationMessageVisuals_DisplayOrder", "[DisplayOrder] >= 0");
                 table.HasCheckConstraint("CK_ConversationMessageVisuals_AssetType", "[AssetType] IN ('full', 'tile')");
-                if (Database.IsSqlServer())
-                {
-                    table.HasCheckConstraint(
-                        "CK_ConversationMessageVisuals_RequiredStrings",
-                        "LEN([DocumentId]) > 0 AND LEN([Name]) > 0 AND LEN([AssetKey]) > 0");
-                }
-                else if (isPostgreSql)
+                if (isPostgreSql)
                 {
                     table.HasCheckConstraint(
                         "CK_ConversationMessageVisuals_RequiredStrings",
@@ -473,13 +463,7 @@ public class DiagLinkDbContext : DbContext
                 table.HasCheckConstraint("CK_ConversationMessageSourceReferences_PdfPage", "[PdfPage] > 0");
                 table.HasCheckConstraint("CK_ConversationMessageSourceReferences_TextRange", "[StartIndex] >= 0 AND [EndIndex] > [StartIndex]");
                 table.HasCheckConstraint("CK_ConversationMessageSourceReferences_DisplayOrder", "[DisplayOrder] >= 0");
-                if (Database.IsSqlServer())
-                {
-                    table.HasCheckConstraint(
-                        "CK_ConversationMessageSourceReferences_RequiredStrings",
-                        "LEN([DocumentId]) > 0 AND LEN([DisplayPage]) > 0 AND LEN([Label]) > 0");
-                }
-                else if (isPostgreSql)
+                if (isPostgreSql)
                 {
                     table.HasCheckConstraint(
                         "CK_ConversationMessageSourceReferences_RequiredStrings",
@@ -500,13 +484,7 @@ public class DiagLinkDbContext : DbContext
             entity.ToTable("ConversationMessageWebCitations", Schema, table =>
             {
                 table.HasCheckConstraint("CK_ConversationMessageWebCitations_DisplayOrder", "[DisplayOrder] >= 0");
-                if (Database.IsSqlServer())
-                {
-                    table.HasCheckConstraint(
-                        "CK_ConversationMessageWebCitations_RequiredStrings",
-                        "LEN([Url]) > 0 AND LEN([Label]) > 0");
-                }
-                else if (isPostgreSql)
+                if (isPostgreSql)
                 {
                     table.HasCheckConstraint(
                         "CK_ConversationMessageWebCitations_RequiredStrings",
