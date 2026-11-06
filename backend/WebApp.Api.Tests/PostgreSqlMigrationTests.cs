@@ -14,8 +14,6 @@ public sealed class PostgreSqlMigrationTests
 {
     private const string PostgreSqlConnectionString =
         "Host=localhost;Database=diaglink;Username=test;Password=test";
-    private const string SqlServerConnectionString =
-        "Server=localhost;Database=diaglink;User Id=test;Password=test;TrustServerCertificate=True";
 
     [TestMethod]
     public void PostgreSqlMigration_IsIndependentAndCreatesAllApplicationTables()
@@ -68,24 +66,36 @@ public sealed class PostgreSqlMigrationTests
     }
 
     [TestMethod]
-    public void SqlServerModel_PreservesHistoricalExclusionsAndRowVersion()
+    public void LocalTestModels_PreserveHistoricalExclusionsAndRowVersionFallback()
     {
-        var options = new DbContextOptionsBuilder<DiagLinkDbContext>();
-        DiagLinkDatabaseConfiguration.Configure(options, SqlServerConnectionString, "SqlServer");
-        using var db = new DiagLinkDbContext(options.Options);
-        var designTimeModel = db.GetService<IDesignTimeModel>().Model;
+        using var sqlite = new DiagLinkDbContext(new DbContextOptionsBuilder<DiagLinkDbContext>()
+            .UseSqlite("Data Source=:memory:")
+            .Options);
+        using var inMemory = new DiagLinkDbContext(new DbContextOptionsBuilder<DiagLinkDbContext>()
+            .UseInMemoryDatabase($"local-row-version-{Guid.NewGuid():N}")
+            .Options);
+        var sqliteModel = sqlite.GetService<IDesignTimeModel>().Model;
+        var inMemoryModel = inMemory.GetService<IDesignTimeModel>().Model;
 
-        foreach (var entityType in new[] { typeof(Company), typeof(User), typeof(Machine), typeof(UserMachineAccess) })
+        foreach (var model in new[] { sqliteModel, inMemoryModel })
         {
-            var metadata = designTimeModel.FindEntityType(entityType)!;
-            Assert.IsTrue(metadata.IsTableExcludedFromMigrations());
+            AssertRowVersionFallback(model, typeof(EmailOutbox));
+            AssertRowVersionFallback(model, typeof(MachineRequestPayment));
         }
 
-        foreach (var entityType in new[] { typeof(EmailOutbox), typeof(MachineRequestPayment) })
+        foreach (var (entityType, table) in new[]
+                 {
+                     (typeof(Company), "Companies"),
+                     (typeof(User), "Users"),
+                     (typeof(Machine), "Machines"),
+                     (typeof(UserMachineAccess), "UserMachines")
+                 })
         {
-            var metadata = designTimeModel.FindEntityType(entityType)!;
-            Assert.IsNotNull(metadata.FindProperty("RowVersion"));
-            Assert.IsNull(metadata.FindProperty("PostgreSqlVersion"));
+            var metadata = sqliteModel.FindEntityType(entityType);
+            Assert.IsNotNull(metadata);
+            Assert.AreEqual(table, metadata.GetTableName());
+            Assert.AreEqual("dbo", metadata.GetSchema());
+            Assert.IsTrue(metadata.IsTableExcludedFromMigrations());
         }
     }
 
@@ -105,5 +115,16 @@ public sealed class PostgreSqlMigrationTests
         Assert.IsTrue(version.IsConcurrencyToken);
         Assert.AreEqual(ValueGenerated.OnAddOrUpdate, version.ValueGenerated);
         Assert.AreEqual("xmin", version.GetColumnName());
+    }
+
+    private static void AssertRowVersionFallback(IModel model, Type entityType)
+    {
+        var metadata = model.FindEntityType(entityType);
+        Assert.IsNotNull(metadata);
+        var version = metadata.FindProperty("RowVersion");
+        Assert.IsNotNull(version);
+        Assert.IsTrue(version.IsConcurrencyToken);
+        Assert.AreEqual(ValueGenerated.OnAddOrUpdate, version.ValueGenerated);
+        Assert.IsNull(metadata.FindProperty("PostgreSqlVersion"));
     }
 }
