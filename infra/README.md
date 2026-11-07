@@ -26,7 +26,9 @@ startup/liveness probes.
 
 The templates refer to, but do not create:
 
-- the Azure SQL server/database named by the managed-identity connection string;
+- PostgreSQL 17 and the SSH endpoint hosted on Vultr; both are external to these templates. The
+  backend reaches PostgreSQL through the `postgres-tunnel` sidecar, and its connection is supplied
+  through a Key Vault-referenced Container App secret;
 - the Storage account supplied through `AZURE_STORAGE_CONNECTION_STRING`;
 - the Microsoft Foundry account, its projects and machine Vector Stores;
 - Stripe products, prices, customers, subscriptions and webhook destinations;
@@ -63,6 +65,14 @@ templates. Bicep is the maintainable source.
 | `STRIPE_MACHINE_REQUEST_WEBHOOK_SECRET` | Signed machine-request webhook verification. |
 | `STRIPE_ENABLED` | Enables or disables payment workflows. |
 | `CUSTOM_DOMAIN_NAME` and certificate values | Existing managed-certificate bindings. |
+| `postgresTunnelImageName` | Container image for the declared PostgreSQL tunnel sidecar. |
+| `vultrSshHost`, `vultrSshPort`, `vultrSshUser` | External SSH destination used by the PostgreSQL tunnel. |
+| `postgresqlConnectionStringSecretUri` | Key Vault secret reference for the PostgreSQL connection configuration. |
+| `vultrSshPrivateKeySecretUri` | Key Vault secret reference for the tunnel's private SSH key. |
+| `vultrSshKnownHostsSecretUri` | Key Vault secret reference for the tunnel's pinned `known_hosts` entry. |
+
+`main-app.bicep` sets `Database__Provider=PostgreSql` directly. It is not a secret or an
+operator-selected database provider.
 
 The backend additionally reads `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`,
 `STRIPE_TOPUP_WEBHOOK_SECRET` and `STRIPE_TOPUP_RETURN_URL` for subscription,
@@ -70,10 +80,13 @@ machine-addition and wallet-top-up flows. These values are declared by Bicep so 
 not erase settings that were previously maintained directly on the Container App. Signing secrets
 remain Container App secrets; identifiers and return URLs are ordinary environment values.
 
-The PostgreSQL cutover adds an `autossh` sidecar. Its private key, pinned host key and database
-connection string are Key Vault-backed Container App secrets. See
-[`deployment/POSTGRESQL-CUTOVER.md`](../deployment/POSTGRESQL-CUTOVER.md) for the guarded order of
-operations; do not run `azd provision` until the production schema has been migrated.
+The PostgreSQL cutover is complete, and the declared infrastructure now includes an `autossh`
+sidecar. Its private key, pinned host key and database connection string are Key Vault-backed
+Container App secrets. The
+[`deployment/POSTGRESQL-CUTOVER.md`](../deployment/POSTGRESQL-CUTOVER.md) runbook is retained as a
+historical record and safety reference. A PostgreSQL-configured revision must still not start
+unless the required schema is present and compatible, because background workers access the
+database immediately.
 
 `AI_AGENT_ENDPOINT`, `AI_AGENT_ID` and the optional OBO registration remain in the templates for
 deployment compatibility, but the current application chat runtime is Claude Direct and does not
@@ -107,8 +120,12 @@ not equivalent to the complete `azd` hook workflow.
 
 ## Identity and secrets
 
-- A user-assigned managed identity pulls from ACR, accesses the existing SQL database and receives
-  the declared Foundry/email roles.
+- A user-assigned managed identity is configured for ACR pulls, is selected for the Key
+  Vault-backed Container App secret references, and has Bicep-declared Foundry and Azure
+  Communication Services Email role assignments. Its client ID also supports the optional OBO
+  compatibility path. Effective permissions on external resources, including Key Vault, must be
+  granted separately and cannot be confirmed from these templates alone; the identity does not
+  connect directly to PostgreSQL.
 - OTP, Storage and Stripe values are secure Bicep parameters stored as Container App secrets.
 - ACR admin credentials are disabled.
 - The production container runs as the non-root `app` user.
