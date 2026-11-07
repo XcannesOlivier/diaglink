@@ -1,5 +1,12 @@
 # PostgreSQL production cutover
 
+> [!WARNING]
+> **Historical cutover record.** The PostgreSQL production cutover is complete. This document is
+> retained only for audit history and safety context. Do not execute any command from it against
+> the current production environment unless a separately reviewed and explicitly approved change
+> plan requires it. The migration, initial administrator creation, secret/RBAC changes,
+> provisioning, deployment and Azure SQL retirement steps are not the current operating procedure.
+
 This runbook is intentionally separate from the live `diaglink_test` tests. Every production
 database command is fixed to `diaglink` and requires an explicit confirmation switch.
 
