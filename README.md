@@ -7,13 +7,14 @@ direct runtime. The application is packaged as one container and deployed to Azu
 ## Current architecture
 
 - **Frontend:** React 19, TypeScript, Vite and Fluent UI.
-- **Backend:** ASP.NET Core on .NET 10, Minimal APIs and Entity Framework Core SQL Server.
+- **Backend:** ASP.NET Core on .NET 10, Minimal APIs and Entity Framework Core with Npgsql for
+  PostgreSQL 17.
 - **AI runtime:** Claude Sonnet through the direct Messages API. There is no runtime selector or
   Agent Service fallback.
 - **Machine tools:** a machine-owned Foundry project endpoint, Vector Store ID, Blob prefix and
   `toolbox.json` marker configure Toolbox MCP, File Search and `get_page_image`.
-- **Persistence:** Azure SQL stores users, companies, machines, conversations, usage and billing
-  state. Blob Storage holds uploaded PDFs, branding and technical visual artefacts.
+- **Persistence:** PostgreSQL 17 hosted on Vultr stores users, companies, machines, conversations,
+  usage and billing state. Blob Storage holds uploaded PDFs, branding and technical visual artefacts.
 - **Observability:** backend OpenTelemetry and frontend Application Insights feed a shared Log
   Analytics workspace with 30-day retention.
 
@@ -75,8 +76,10 @@ The detailed invariants and recovery rules are documented in the focused files u
 - .NET 10 SDK
 - Node.js 22 recommended
 - Docker, optional; deployment falls back to an ACR cloud build
-- Access to the existing Foundry, Azure SQL, Blob Storage and Stripe test configuration used by the
-  target environment
+- Access to the existing Foundry, Blob Storage and Stripe test configuration used by the target
+  environment
+- PostgreSQL connection configuration with `Database__Provider=PostgreSql` and the configured
+  PostgreSQL tunnel when required by the target environment
 
 ## Initial configuration and deployment
 
@@ -151,7 +154,7 @@ workspace, Azure Communication Services Email resources and Entra application re
 The deployment also uses existing or separately managed services:
 
 - Microsoft Foundry resources and machine projects;
-- Azure SQL;
+- PostgreSQL 17 hosted on Vultr, reached through the configured PostgreSQL tunnel;
 - Azure Blob Storage supplied through deployment configuration;
 - Stripe test-mode resources and webhook destinations;
 - custom-domain managed certificates named by deployment parameters.
