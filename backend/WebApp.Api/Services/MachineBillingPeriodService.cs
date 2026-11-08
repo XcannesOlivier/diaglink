@@ -30,7 +30,8 @@ public sealed class MachineBillingPeriodService(DbContextOptions<DiagLinkDbConte
     {
         ct.ThrowIfCancellationRequested();
         MachineBillingPeriodResult Fail(string reason) => new() { MachineId=machineId, Status=reason, FailureReason=reason };
-        if (start.Kind == DateTimeKind.Local || end.Kind == DateTimeKind.Local || activation?.Kind == DateTimeKind.Local || end <= start)
+        if (start.Kind != DateTimeKind.Utc || end.Kind != DateTimeKind.Utc
+            || activation.HasValue && activation.Value.Kind != DateTimeKind.Utc || end <= start)
             return Fail("InvalidCycleDates");
         if (activation >= end) return Fail("ActivationOutsideCycle");
         var periodStart = activation.HasValue && activation.Value > start ? activation.Value : start;

@@ -68,12 +68,49 @@ public class MachineBillingPeriodServiceTests
             Assert.AreEqual("ActivationOutsideCycle",(await service.CreateInitialPeriodAsync(f.MachineId,Start.AddDays(28+offset),Start,Start.AddDays(28))).Status);
         foreach(var end in new[]{Start,Start.AddDays(-1)})
             Assert.AreEqual("InvalidCycleDates",(await service.RenewPeriodAsync(f.MachineId,Start,end)).Status);
-        Assert.AreEqual("InvalidCycleDates",(await service.RenewPeriodAsync(f.MachineId,DateTime.SpecifyKind(Start,DateTimeKind.Local),Start.AddDays(28))).Status);
         Assert.AreEqual("MachineNotFound",(await service.CreateInitialPeriodAsync(Guid.NewGuid(),Start,Start,Start.AddDays(28))).Status);
         Assert.AreEqual("PreviousPeriodNotFound",(await service.RenewPeriodAsync(f.MachineId,Start,Start.AddDays(28))).Status);
         await using(var db=f.Db()){(await db.Machines.SingleAsync()).Status="inactive";await db.SaveChangesAsync();}
         Assert.AreEqual("MachineInactive",(await service.CreateInitialPeriodAsync(f.MachineId,Start,Start,Start.AddDays(28))).Status);
         await using var check=f.Db();Assert.AreEqual(0,await check.MachineBillingPeriods.CountAsync());
+    }
+
+    [TestMethod]
+    [DataRow("start", (int)DateTimeKind.Unspecified)]
+    [DataRow("end", (int)DateTimeKind.Unspecified)]
+    [DataRow("activation", (int)DateTimeKind.Unspecified)]
+    [DataRow("start", (int)DateTimeKind.Local)]
+    [DataRow("end", (int)DateTimeKind.Local)]
+    [DataRow("activation", (int)DateTimeKind.Local)]
+    public async Task NonUtcDatesAreRejectedWithoutPeriodSideEffects(string parameter, int kindValue)
+    {
+        await using var f=new Fixture();await Prepare(f,initial:false);
+        Guid periodId;DateTime periodStart;DateTime periodEnd;DateTime updatedAt;
+        decimal budget;decimal used;string status;
+        await using(var before=f.Db())
+        {
+            var period=await before.MachineBillingPeriods.SingleAsync();
+            (periodId,periodStart,periodEnd,updatedAt,budget,used,status)=(period.Id,period.PeriodStartUtc,
+                period.PeriodEndUtc,period.UpdatedAtUtc,period.IncludedAiBudgetRealCost,
+                period.IncludedAiUsedRealCost,period.Status);
+        }
+
+        var kind=(DateTimeKind)kindValue;
+        var validStart=DateTime.SpecifyKind(periodEnd,DateTimeKind.Utc);
+        var validEnd=validStart.AddDays(28);
+        var suppliedStart=parameter=="start"?DateTime.SpecifyKind(validStart,kind):validStart;
+        var suppliedEnd=parameter=="end"?DateTime.SpecifyKind(validEnd,kind):validEnd;
+        var result=parameter=="activation"
+            ? await new MachineBillingPeriodService(f.Options).CreateInitialPeriodAsync(f.MachineId,
+                DateTime.SpecifyKind(validStart,kind),validStart,validEnd)
+            : await new MachineBillingPeriodService(f.Options).RenewPeriodAsync(f.MachineId,suppliedStart,suppliedEnd);
+
+        Assert.AreEqual("InvalidCycleDates",result.Status);
+        await using var after=f.Db();var unchanged=await after.MachineBillingPeriods.SingleAsync();
+        Assert.AreEqual(periodId,unchanged.Id);Assert.AreEqual(periodStart,unchanged.PeriodStartUtc);
+        Assert.AreEqual(periodEnd,unchanged.PeriodEndUtc);Assert.AreEqual(updatedAt,unchanged.UpdatedAtUtc);
+        Assert.AreEqual(budget,unchanged.IncludedAiBudgetRealCost);Assert.AreEqual(used,unchanged.IncludedAiUsedRealCost);
+        Assert.AreEqual(status,unchanged.Status);Assert.AreEqual("Active",unchanged.Status);
     }
 
     [TestMethod]
