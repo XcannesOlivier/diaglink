@@ -31,7 +31,8 @@ public sealed class StripeMachineAdditionService(DbContextOptions<DiagLinkDbCont
             if (invoice.Status != "paid" || invoice.Payment == null) return Result(op, "AwaitingPayment");
             op = await Advance(op, StripeMachineAdditionStage.InvoiceFinalized, ct);
         }
-        return await AddActiveMachineAsync(op.MachineId, DateTime.SpecifyKind(op.ActivatedAtUtc, DateTimeKind.Utc), ct);
+        return await AddActiveMachineAsync(op.MachineId,
+            PersistedUtc(op.ActivatedAtUtc, nameof(op.ActivatedAtUtc)), ct);
     }
 
     public static int CalculateServiceCents(DateTime cycleStartUtc, DateTime cycleEndUtc, DateTime activatedAtUtc)
@@ -172,11 +173,14 @@ public sealed class StripeMachineAdditionService(DbContextOptions<DiagLinkDbCont
                         bool hasHistory;
                         await using (var db = new DiagLinkDbContext(options))
                             hasHistory = await db.MachineBillingPeriods.AnyAsync(p => p.MachineId == machineId, ct);
+                        var persistedActivationUtc = PersistedUtc(op.ActivatedAtUtc, nameof(op.ActivatedAtUtc));
+                        var cycleStartUtc = PersistedUtc(op.CycleStartUtc, nameof(op.CycleStartUtc));
+                        var cycleEndUtc = PersistedUtc(op.CycleEndUtc, nameof(op.CycleEndUtc));
                         var period = hasHistory
-                            ? await periods.RenewPeriodAsync(machineId, op.ActivatedAtUtc, op.CycleEndUtc, ct, op.CompanyId)
-                            : await periods.CreateInitialPeriodAsync(machineId, op.ActivatedAtUtc, op.CycleStartUtc, op.CycleEndUtc, ct, op.CompanyId);
+                            ? await periods.RenewPeriodAsync(machineId, persistedActivationUtc, cycleEndUtc, ct, op.CompanyId)
+                            : await periods.CreateInitialPeriodAsync(machineId, persistedActivationUtc, cycleStartUtc, cycleEndUtc, ct, op.CompanyId);
                         if (!period.Success || period.BillingPeriodId == null || period.IncludedAiBudgetRealCost != 10m
-                            || period.PeriodStartUtc != op.ActivatedAtUtc || period.PeriodEndUtc != op.CycleEndUtc)
+                            || period.PeriodStartUtc != persistedActivationUtc || period.PeriodEndUtc != cycleEndUtc)
                             throw new InvalidOperationException("Initial machine period failed: " + period.Status);
                         existingPeriodId = period.BillingPeriodId;
                     }
@@ -235,4 +239,11 @@ public sealed class StripeMachineAdditionService(DbContextOptions<DiagLinkDbCont
 
     private static StripeMachineAdditionResult Result(StripeMachineAddition op, string status) => new(op.Id, op.MachineId,
         op.MachineBillingPeriodId, op.StripeInvoiceId, op.TargetQuantity, op.AiAmountCents / 100m, op.ServiceAmountCents / 100m, status);
+
+    private static DateTime PersistedUtc(DateTime value, string propertyName) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Unspecified => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        _ => throw new InvalidOperationException($"Persisted {propertyName} must be UTC.")
+    };
 }

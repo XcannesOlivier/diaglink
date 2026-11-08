@@ -43,9 +43,10 @@ public sealed class MachineRequestActivationService(DbContextOptions<DiagLinkDbC
         if (subscription.Id != subscriptionId || subscription.Quantity != activeCount)
             throw new InvalidOperationException("La Subscription Stripe ne couvre pas les machines actives attendues.");
 
+        var activatedAtUtc = PersistedUtc(payment.ActivatedAtUtc.Value, nameof(payment.ActivatedAtUtc));
+        var firstPeriodEndUtc = PersistedUtc(payment.FirstPeriodEndUtc.Value, nameof(payment.FirstPeriodEndUtc));
         var created = await periods.CreateInitialPeriodAsync(payment.MachineId.Value,
-            payment.ActivatedAtUtc.Value, payment.ActivatedAtUtc.Value, payment.FirstPeriodEndUtc.Value,
-            ct, payment.CompanyId.Value);
+            activatedAtUtc, activatedAtUtc, firstPeriodEndUtc, ct, payment.CompanyId.Value);
         if (!created.Success) throw new InvalidOperationException("La période initiale ne peut pas être créée : " + created.Status);
         await ValidatePeriodAsync(payment, ct);
 
@@ -69,4 +70,11 @@ public sealed class MachineRequestActivationService(DbContextOptions<DiagLinkDbC
             || period.Status is not ("Active" or "Closed"))
             throw new InvalidOperationException("La période initiale existante est incohérente.");
     }
+
+    private static DateTime PersistedUtc(DateTime value, string propertyName) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Unspecified => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        _ => throw new InvalidOperationException($"La valeur persistée {propertyName} doit être UTC.")
+    };
 }
