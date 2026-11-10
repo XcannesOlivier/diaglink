@@ -75,8 +75,7 @@ runSubagent(
 
 Build order: React â†’ .NET â†’ Runtime
 
-- Frontend: `deployment/docker/frontend.Dockerfile`
-- Backend: `deployment/docker/backend.Dockerfile`
+- Frontend and backend: `deployment/docker/frontend.Dockerfile` (single multi-stage image)
 - Custom npm registries: Add `.npmrc` to `frontend/` directory
 
 ## AI Foundry Resource Configuration
@@ -189,7 +188,7 @@ COPY backend/ ./backend/
 RUN dotnet publish backend/WebApp.Api/WebApp.Api.csproj -c Release -o /app/publish
 
 # Stage 3: Runtime - Single container serving API + static files
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=backend-builder /app/publish ./
 COPY --from=frontend-builder /app/frontend/dist ./wwwroot
