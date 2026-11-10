@@ -34,7 +34,7 @@ export function StripeMachineAdditionsPanel({ companyId, account, getAccessToken
         if (result.kind === 'unauthorized' && result.diagLinkSessionExpired) onDiagLinkSessionExpired?.();
       }
     });
-    return () => { generation.current++; };
+    return () => { generation.current = current + 1; };
   }, [companyId, getAccessToken, onDiagLinkSessionExpired, revision, externalRevision]);
 
   async function run(machineId: string) {

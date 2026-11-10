@@ -42,6 +42,21 @@ vi.mock('../../views/MachineRequestsView', () => ({
     return <div data-testid="machine-requests-view" data-reset-key={listResetKey}>Liste des demandes</div>;
   },
 }));
+vi.mock('../../views/DiagLinkAdminView', () => ({
+  DiagLinkAdminView: () => <div data-testid="diaglink-admin-view">Administration chargée</div>,
+}));
+vi.mock('../../views/CompaniesView', () => ({
+  CompaniesView: () => <div data-testid="companies-view">Entreprises chargées</div>,
+}));
+vi.mock('../../views/MachinesView', () => ({
+  MachinesView: () => <div data-testid="machines-view">Machines chargées</div>,
+}));
+vi.mock('../../views/CompanyView', () => ({
+  CompanyView: () => <div data-testid="company-view">Crédits chargés</div>,
+}));
+vi.mock('../../views/UsersView', () => ({
+  UsersView: () => <div data-testid="users-view">Utilisateurs chargés</div>,
+}));
 vi.mock('../../core/SupportContactDialog', () => ({
   SupportContactDialog: ({ open, machineId }: { open: boolean; machineId?: string }) =>
     open ? <div role="dialog" data-machine-id={machineId}>Modale support</div> : null,
@@ -214,7 +229,7 @@ describe('AppShell navigation', () => {
       if (previousTheme === null) localStorage.removeItem('ai-foundry-theme');
       else localStorage.setItem('ai-foundry-theme', previousTheme);
     }
-  });
+  }, 10000);
 
   it('opens the administration URL for a Super Admin', () => {
     window.history.replaceState(null, '', '/app/administration');
@@ -222,6 +237,51 @@ describe('AppShell navigation', () => {
     renderAppShell();
     expect(mockDispatch).toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'diaglink-admin' });
     expect(window.location.pathname).toBe('/app/administration');
+  });
+
+  it('loads the administration view when it becomes active', async () => {
+    mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' }, 'diaglink-admin');
+    const container = renderAppShell();
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.querySelector('[data-testid="diaglink-admin-view"]')?.textContent).toBe('Administration chargée');
+  });
+
+  it('loads the companies view when it becomes active', async () => {
+    mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' }, 'companies');
+    const container = renderAppShell();
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.querySelector('[data-testid="companies-view"]')?.textContent).toBe('Entreprises chargées');
+  });
+
+  it.each(['company_admin', 'diaglink_super_admin'] as const)('loads the users view for %s', async role => {
+    mockState = buildState({ userId: 'u1', companyId: 'c1', role }, 'users');
+    const container = renderAppShell();
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.querySelector('[data-testid="users-view"]')?.textContent).toBe('Utilisateurs chargés');
+  });
+
+  it.each(['technician', 'company_admin', 'diaglink_super_admin'] as const)('loads the machines view for %s', async role => {
+    mockState = buildState({ userId: 'u1', companyId: 'c1', role }, 'machines');
+    const container = renderAppShell();
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.querySelector('[data-testid="machines-view"]')?.textContent).toBe('Machines chargées');
+  });
+
+  it('loads the company finance view for company_admin', async () => {
+    mockState = buildState({ userId: 'u1', companyId: 'c1', role: 'company_admin' }, 'company');
+    const container = renderAppShell();
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(container.querySelector('[data-testid="company-view"]')?.textContent).toBe('Crédits chargés');
   });
 
   it('preserves the URL until login and role loading complete', () => {
@@ -258,13 +318,14 @@ describe('AppShell navigation', () => {
     expect(mockDispatch).toHaveBeenLastCalledWith({ type: 'UI_SET_VIEW', view: 'machines' });
   });
 
-  it('returns the active requests view to its list when its desktop tab is selected again', () => {
+  it('returns the active requests view to its list when its desktop tab is selected again', async () => {
     mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' }, 'machine-requests');
     const container = renderAppShell();
     const tab = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.includes('Nouvelles demandes'))!;
 
+    await act(async () => { await Promise.resolve(); });
     expect(container.querySelector('[data-testid="machine-requests-view"]')?.getAttribute('data-reset-key')).toBe('0');
-    act(() => tab.click());
+    await act(async () => tab.click());
 
     expect(container.querySelector('[data-testid="machine-requests-view"]')?.getAttribute('data-reset-key')).toBe('1');
     expect(mockDispatch).not.toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'machine-requests' });
@@ -363,6 +424,7 @@ describe('AppShell navigation', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(updatedUser), { status: 200 }));
     const container = renderAppShell();
+    await vi.waitFor(() => expect(container.textContent).toContain('Personnalisation'));
     const clickAction = (label: string) => {
       const button = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(el => el.textContent === label)!;
       button.click();

@@ -409,13 +409,13 @@ export function MachineRequestsView({
     setActionError(null);
   }, [listResetKey]);
 
-  const handleUnauthorized = (result: {
+  const handleUnauthorized = useCallback((result: {
     kind: string;
     diagLinkSessionExpired?: boolean;
   }) => {
     if (result.kind === "unauthorized" && result.diagLinkSessionExpired)
       onDiagLinkSessionExpired?.();
-  };
+  }, [onDiagLinkSessionExpired]);
 
   const loadArchivedRequests = useCallback(async () => {
     const result = await listArchivedMachineRequests(getAccessToken);
@@ -427,7 +427,7 @@ export function MachineRequestsView({
       handleUnauthorized(result);
       setHistoryError(true);
     }
-  }, [getAccessToken, onDiagLinkSessionExpired]);
+  }, [getAccessToken, handleUnauthorized]);
 
   useEffect(() => { void loadArchivedRequests(); }, [loadArchivedRequests]);
 

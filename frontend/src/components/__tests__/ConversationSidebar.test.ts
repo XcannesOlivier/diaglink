@@ -1,7 +1,8 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConversationSidebar, formatDate } from '../ConversationSidebar';
+import { ConversationSidebar } from '../ConversationSidebar';
+import { formatDate } from '../../utils/conversationDate';
 
 const localDate = (year: number, month: number, day: number, hour: number, minute: number, second = 0) =>
   new Date(year, month - 1, day, hour, minute, second);

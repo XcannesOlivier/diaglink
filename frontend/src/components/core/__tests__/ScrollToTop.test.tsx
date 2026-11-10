@@ -32,8 +32,8 @@ describe('ScrollToTop', () => {
     vi.clearAllMocks();
   });
 
-  it.each(['/', '/commencer', '/contact', '/confidentialite', '/demonstration', '/mentions-legales'])
-    ('scrolls to the top when navigating to public path %s', async target => {
+  it.each(['/', '/commencer', '/contact', '/confidentialite', '/demonstration', '/mentions-legales'])(
+    'scrolls to the top when navigating to public path %s', async target => {
       await act(async () => root.render(
         <MemoryRouter initialEntries={['/source']}>
           <NavigationHarness target={target} />
@@ -43,7 +43,8 @@ describe('ScrollToTop', () => {
 
       await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
       expect(scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 0, left: 0, behavior: 'auto' });
-    });
+    },
+  );
 
   it('does not scroll to the top for a hash change on the landing page', async () => {
     await act(async () => root.render(

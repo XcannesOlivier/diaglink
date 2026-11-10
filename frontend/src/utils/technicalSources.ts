@@ -124,7 +124,8 @@ export function parseTechnicalSources(value: unknown): TechnicalSourceReference[
         (typeof item.documentName !== 'string' ||
           item.documentName.length === 0 ||
           item.documentName.length > 255 ||
-          /[\u0000-\u001f\\/]/.test(item.documentName))) ||
+          Array.from(item.documentName).some(character =>
+            character.charCodeAt(0) <= 0x1f || character === '\\' || character === '/'))) ||
       typeof item.pdfPage !== 'number' || !Number.isSafeInteger(item.pdfPage) || item.pdfPage <= 0 ||
       typeof item.displayPage !== 'string' || item.displayPage.length === 0 ||
       typeof item.label !== 'string' || item.label.length === 0 ||

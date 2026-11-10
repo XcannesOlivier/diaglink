@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { ArrowUpload24Regular } from '@fluentui/react-icons';
 import { authorizationConfirmedMessage, checkoutReturnedMessage, checkoutWindowName, isTrustedCheckoutMessage } from '../../pages/start/checkoutPopup';
@@ -43,15 +43,15 @@ export function AdditionalDocumentsRequestDialog({ open, onOpenChange, machine, 
   const localAmount = calculateAdditionalDocumentsAmountCents(localPages);
   const locked = stage !== null || recoveredRequestId !== null;
 
-  const confirmAuthorized = () => {
+  const confirmAuthorized = useCallback(() => {
     setPhase('authorized'); setError(null); window.focus();
     sessionStorage.removeItem(recoveryStorageKey(machine.id));
     setRecoveredRequestId(null);
     popup.current?.postMessage({ type: authorizationConfirmedMessage }, window.location.origin);
     popup.current?.close();
-  };
+  }, [machine.id]);
 
-  const checkAuthorization = async (poll: boolean) => {
+  const checkAuthorization = useCallback(async (poll: boolean) => {
     const requestId = attempt.current?.stage?.requestId ?? recoveredRequestId; if (!requestId || busy.current) return;
     busy.current = true; setPhase('verifying'); setError(null);
     try {
@@ -71,7 +71,7 @@ export function AdditionalDocumentsRequestDialog({ open, onOpenChange, machine, 
       setPhase('pending');
       setError(caught instanceof Error ? caught.message : 'L’autorisation n’a pas pu être vérifiée.');
     } finally { busy.current = false; }
-  };
+  }, [confirmAuthorized, getAccessToken, machine.id, recoveredRequestId]);
 
   useEffect(() => {
     const receive = (event: MessageEvent) => {
@@ -94,7 +94,7 @@ export function AdditionalDocumentsRequestDialog({ open, onOpenChange, machine, 
     if (!open || !recoveredRequestId || recoveredStatusChecked.current) return;
     recoveredStatusChecked.current = true;
     void checkAuthorization(false);
-  }, [open, recoveredRequestId]);
+  }, [checkAuthorization, open, recoveredRequestId]);
 
   useEffect(() => {
     if (!open) return;

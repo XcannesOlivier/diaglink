@@ -1,18 +1,32 @@
+import { lazy, Suspense } from 'react';
+import { Spinner } from '@fluentui/react-components';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from './components/core/ErrorBoundary';
-import { AuthenticatedApp } from './components/AuthenticatedApp';
 import { useAppAuthentication } from './hooks/useAppAuthentication';
 import { LandingPage } from './pages/landing/LandingPage';
-import { ContactPage } from './pages/contact/ContactPage';
-import { PrivacyPage } from './pages/privacy/PrivacyPage';
-import { LegalNoticePage } from './pages/legal/LegalNoticePage';
-import { ConditionsPage } from './pages/conditions/ConditionsPage';
-import { DemonstrationPage } from './pages/demonstration/DemonstrationPage';
-import { StartPage } from './pages/start/StartPage';
-import { CheckoutReturnPage } from './pages/checkout-return/CheckoutReturnPage';
 import { LoginPage } from './pages/login/LoginPage';
 import { ScrollToTop } from './components/core/ScrollToTop';
 import './App.css';
+
+const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp').then(module => ({
+  default: module.AuthenticatedApp,
+})));
+
+const ContactPage = lazy(() => import('./pages/contact/ContactPage').then(module => ({ default: module.ContactPage })));
+const PrivacyPage = lazy(() => import('./pages/privacy/PrivacyPage').then(module => ({ default: module.PrivacyPage })));
+const LegalNoticePage = lazy(() => import('./pages/legal/LegalNoticePage').then(module => ({ default: module.LegalNoticePage })));
+const ConditionsPage = lazy(() => import('./pages/conditions/ConditionsPage').then(module => ({ default: module.ConditionsPage })));
+const DemonstrationPage = lazy(() => import('./pages/demonstration/DemonstrationPage').then(module => ({ default: module.DemonstrationPage })));
+const StartPage = lazy(() => import('./pages/start/StartPage').then(module => ({ default: module.StartPage })));
+const CheckoutReturnPage = lazy(() => import('./pages/checkout-return/CheckoutReturnPage').then(module => ({ default: module.CheckoutReturnPage })));
+
+const authenticatedAppFallback = (
+  <div className="app-container app-loading"><Spinner size="large" /><p>Chargement...</p></div>
+);
+
+const publicPageFallback = (
+  <div className="app-container app-loading"><Spinner size="large" /><p>Chargement de la page...</p></div>
+);
 
 function App() {
   const authentication = useAppAuthentication();
@@ -25,13 +39,13 @@ function App() {
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<LandingPage isAuthenticated={authentication.isAuthenticated} />} />
-        <Route path="/contact" element={<ContactPage isAuthenticated={authentication.isAuthenticated} />} />
-        <Route path="/confidentialite" element={<PrivacyPage isAuthenticated={authentication.isAuthenticated} />} />
-        <Route path="/mentions-legales" element={<LegalNoticePage isAuthenticated={authentication.isAuthenticated} />} />
-        <Route path="/conditions" element={<ConditionsPage isAuthenticated={authentication.isAuthenticated} />} />
-        <Route path="/demonstration" element={<DemonstrationPage isAuthenticated={authentication.isAuthenticated} />} />
-        <Route path="/commencer" element={<StartPage isAuthenticated={authentication.isAuthenticated} />} />
-        <Route path="/app/checkout-return" element={<CheckoutReturnPage />} />
+        <Route path="/contact" element={<Suspense fallback={publicPageFallback}><ContactPage isAuthenticated={authentication.isAuthenticated} /></Suspense>} />
+        <Route path="/confidentialite" element={<Suspense fallback={publicPageFallback}><PrivacyPage isAuthenticated={authentication.isAuthenticated} /></Suspense>} />
+        <Route path="/mentions-legales" element={<Suspense fallback={publicPageFallback}><LegalNoticePage isAuthenticated={authentication.isAuthenticated} /></Suspense>} />
+        <Route path="/conditions" element={<Suspense fallback={publicPageFallback}><ConditionsPage isAuthenticated={authentication.isAuthenticated} /></Suspense>} />
+        <Route path="/demonstration" element={<Suspense fallback={publicPageFallback}><DemonstrationPage isAuthenticated={authentication.isAuthenticated} /></Suspense>} />
+        <Route path="/commencer" element={<Suspense fallback={publicPageFallback}><StartPage isAuthenticated={authentication.isAuthenticated} /></Suspense>} />
+        <Route path="/app/checkout-return" element={<Suspense fallback={publicPageFallback}><CheckoutReturnPage /></Suspense>} />
         <Route
           path="/login"
           element={
@@ -43,11 +57,13 @@ function App() {
         <Route
           path="/app/*"
           element={
-            authentication.isCheckingSession
-              ? <AuthenticatedApp loadingOnly />
-              : authentication.isAuthenticated
-                ? <AuthenticatedApp onDiagLinkSessionExpired={authentication.expireDiagLinkSession} />
-                : <Navigate to="/login" replace />
+            <Suspense fallback={authenticatedAppFallback}>
+              {authentication.isCheckingSession
+                ? <AuthenticatedApp loadingOnly />
+                : authentication.isAuthenticated
+                  ? <AuthenticatedApp onDiagLinkSessionExpired={authentication.expireDiagLinkSession} />
+                  : <Navigate to="/login" replace />}
+            </Suspense>
           }
         />
         <Route path="/administration" element={<Navigate to="/app/administration" replace />} />

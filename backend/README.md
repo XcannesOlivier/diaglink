@@ -89,8 +89,16 @@ diagnostic events are `ClaudeDirectFileSearchDiagnostics` and
 ```powershell
 dotnet restore backend/WebApp.sln
 dotnet build backend/WebApp.sln --no-restore
-dotnet test backend/WebApp.Api.Tests/WebApp.Api.Tests.csproj --no-build
+dotnet test backend/WebApp.Api.Tests/WebApp.Api.Tests.csproj --no-build -- --filter "TestCategory!=LivePostgreSql&TestCategory!=LivePostgreSqlReadOnly"
 ```
 
-Tests that require Azure services are opt-in through explicit environment flags. The normal test
-suite uses local doubles or in-memory databases and does not deploy resources.
+This default command excludes the controlled PostgreSQL integration categories. Run them
+explicitly, only with the dedicated `diaglink_test` database and its required environment
+configuration:
+
+```powershell
+dotnet test backend/WebApp.Api.Tests/WebApp.Api.Tests.csproj --no-build -- --filter "TestCategory=LivePostgreSql|TestCategory=LivePostgreSqlReadOnly"
+```
+
+Tests that require Azure services are also opt-in through explicit environment flags. The normal
+test suite uses local doubles or in-memory databases and does not deploy resources.

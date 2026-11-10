@@ -7,7 +7,6 @@ vi.mock('../../../utils/apiAuth',()=>({getApiAuthHeaders:async()=>({headers:{}})
 vi.mock('../../../services/companyService',()=>({getCompanies:async()=>({kind:'success',data:[]})}));
 vi.mock('../../../services/machineService',()=>({getMachines:vi.fn(async()=>({kind:'success',data:[]}))}));
 vi.mock('../StripeAdminPanel',()=>({StripeAdminPanel:()=>null}));
-vi.mock('../AiUsagePanel',()=>({AiUsagePanel:()=>null}));
 afterEach(()=>vi.unstubAllGlobals());
 it.each([0,1234.5])('shows cumulative EUR top-ups: %s',async(total)=>{
  const fetch=vi.fn().mockResolvedValue(new Response(JSON.stringify({companies:2,machines:3,users:4,subscriptionsPaidEur:0,includedCreditGrantedEur:0,topUpsAddedEur:total})));vi.stubGlobal('fetch',fetch);

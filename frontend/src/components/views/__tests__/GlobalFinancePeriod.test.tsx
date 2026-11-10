@@ -1,6 +1,7 @@
 import {it,expect,vi} from 'vitest';
 import {act} from 'react';import {createRoot} from 'react-dom/client';
-import {financeBounds,GlobalFinancePeriod} from '../GlobalFinancePeriod';
+import {GlobalFinancePeriod} from '../GlobalFinancePeriod';
+import {financeBounds} from '../../../utils/financePeriod';
 vi.mock('../../../utils/apiAuth',()=>({getApiAuthHeaders:async()=>({headers:{}})}));
 it('uses UTC calendar windows and an inclusive custom end date',()=>{
  const now=new Date('2026-01-15T12:00:00Z');

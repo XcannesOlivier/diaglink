@@ -65,7 +65,7 @@ export function StripeCompanyPanel({ companyId, getAccessToken, onDiagLinkSessio
       }
       finishRefresh('company');
     });
-    return () => { generation.current++; };
+    return () => { generation.current = current + 1; };
   }, [companyId, getAccessToken, onDiagLinkSessionExpired, refreshRevision, finishRefresh]);
   const interventions = [...walletInterventions, ...machineInterventions];
   const amountRemaining = data?.amountRemainingCents ?? 0;

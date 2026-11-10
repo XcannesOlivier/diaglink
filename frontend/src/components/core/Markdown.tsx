@@ -4,17 +4,19 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import copy from 'copy-to-clipboard';
 import { Button } from '@fluentui/react-components';
 import { CopyRegular, CheckmarkRegular } from '@fluentui/react-icons';
-import { memo, useState, useMemo } from 'react';
+import { lazy, memo, Suspense, useState, useMemo } from 'react';
 import { CitationMarker } from '../chat/CitationMarker';
 import { parseContentWithCitations } from '../../utils/citationParser';
 import type { IAnnotation, TechnicalSourceReference } from '../../types/chat';
 import { createTechnicalSourceRemarkPlugin, prepareTechnicalSourceContent } from '../../utils/technicalSources';
 import styles from './Markdown.module.css';
+
+const SyntaxHighlightedCode = lazy(() => import('./SyntaxHighlightedCode').then(module => ({
+  default: module.SyntaxHighlightedCode,
+})));
 
 interface MarkdownProps {
   content: string;
@@ -79,31 +81,9 @@ const CodeBlock = memo<CodeBlockProps>(
             {copied ? 'Copié !' : 'Copier'}
           </Button>
         </div>
-        <SyntaxHighlighter
-          language={language}
-          style={vscDarkPlus}
-          showLineNumbers={true}
-          wrapLines={true}
-          wrapLongLines={true}
-          customStyle={{
-            margin: 0,
-            borderBottomLeftRadius: '6px',
-            borderBottomRightRadius: '6px',
-            fontSize: '0.9em',
-            maxWidth: '100%',
-            overflowX: 'auto',
-          }}
-          codeTagProps={{
-            style: {
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              overflowWrap: 'break-word',
-            }
-          }}
-          PreTag="div"
-        >
-          {content}
-        </SyntaxHighlighter>
+        <Suspense fallback={<pre><code>{content}</code></pre>}>
+          <SyntaxHighlightedCode language={language} content={content} />
+        </Suspense>
       </div>
     );
   }

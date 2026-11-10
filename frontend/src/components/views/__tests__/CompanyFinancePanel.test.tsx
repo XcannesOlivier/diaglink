@@ -1,7 +1,7 @@
 import styles from '../CompanyFinancePanel.module.css';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-﻿import {beforeEach,afterEach,it,expect,vi} from 'vitest';
+import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {act} from 'react';import {createRoot,type Root} from 'react-dom/client';
 import {CompanyFinancePanel} from '../CompanyFinancePanel';
 const {request,consumptionRequest,setCompanyStatus}=vi.hoisted(()=>({request:vi.fn(),consumptionRequest:vi.fn(),setCompanyStatus:vi.fn()}));

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -9,6 +9,7 @@ import {
   Button,
   Text,
   Badge,
+  Spinner,
 } from '@fluentui/react-components';
 import { Dismiss24Regular, Mail24Regular, Settings24Regular } from '@fluentui/react-icons';
 import { CompanyAccentProvider } from './CompanyAccentProvider';
@@ -18,13 +19,6 @@ import { AgentChat } from '../AgentChat';
 import { Navigation } from './Navigation';
 import { UserBadge } from './UserBadge';
 import { CompanyLogo } from './CompanyLogo';
-import { MachinesView } from '../views/MachinesView';
-import { UsersView } from '../views/UsersView';
-import { CompanyView } from '../views/CompanyView';
-import { CompanyBrandingView } from '../views/CompanyBrandingView';
-import { CompaniesView } from '../views/CompaniesView';
-import { DiagLinkAdminView } from '../views/DiagLinkAdminView';
-import { MachineRequestsView } from '../views/MachineRequestsView';
 import { SettingsPanel } from '../core/SettingsPanel';
 import { SupportContactDialog } from '../core/SupportContactDialog';
 import { DiagLinkLogo } from '../core/DiagLinkLogo';
@@ -33,6 +27,34 @@ import type { AppView } from '../../types/navigation';
 import { listMachineRequests, type MachineRequestDetail, type MachineRequestListItem } from '../../services/machineRequestAdminApi';
 import { fetchCurrentUser } from '../../services/currentUserService';
 import { useCompanyBrandingLogo } from '../../hooks/useCompanyBrandingLogo';
+
+const DiagLinkAdminView = lazy(() => import('../views/DiagLinkAdminView').then(module => ({
+  default: module.DiagLinkAdminView,
+})));
+
+const MachineRequestsView = lazy(() => import('../views/MachineRequestsView').then(module => ({
+  default: module.MachineRequestsView,
+})));
+
+const CompaniesView = lazy(() => import('../views/CompaniesView').then(module => ({
+  default: module.CompaniesView,
+})));
+
+const UsersView = lazy(() => import('../views/UsersView').then(module => ({
+  default: module.UsersView,
+})));
+
+const MachinesView = lazy(() => import('../views/MachinesView').then(module => ({
+  default: module.MachinesView,
+})));
+
+const CompanyView = lazy(() => import('../views/CompanyView').then(module => ({
+  default: module.CompanyView,
+})));
+
+const CompanyBrandingView = lazy(() => import('../views/CompanyBrandingView').then(module => ({
+  default: module.CompanyBrandingView,
+})));
 
 const useStyles = makeStyles({
   shell: {
@@ -466,41 +488,57 @@ export const AppShell: React.FC<AppShellProps> = ({
           />
         )}
         {currentView === 'machines' && (
-          <MachinesView currentUser={currentUser} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} />
+          <Suspense fallback={<Spinner label="Chargement des machines…" />}>
+            <MachinesView currentUser={currentUser} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} />
+          </Suspense>
         )}
         {currentView === 'users' && (
-          <UsersView currentUser={currentUser} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} />
+          <Suspense fallback={<Spinner label="Chargement des utilisateurs…" />}>
+            <UsersView currentUser={currentUser} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} />
+          </Suspense>
         )}
         {currentView === 'company' && (
-          <CompanyView machine={state.machine.selected ?? undefined} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired}
-            onReturnToChat={currentUser?.role === 'company_admin' ? () => handleSelectView('chat') : undefined} />
+          <Suspense fallback={<Spinner label="Chargement des crédits et abonnements…" />}>
+            <CompanyView machine={state.machine.selected ?? undefined} getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+              onReturnToChat={currentUser?.role === 'company_admin' ? () => handleSelectView('chat') : undefined} />
+          </Suspense>
         )}
         {currentView === 'personalization' && (
-          <CompanyBrandingView
-            key={currentUser?.companyId}
-            currentUser={currentUser}
-            logoObjectUrl={companyLogoUrl}
-            getAccessToken={getAccessToken}
-            onCurrentUserRefresh={refreshCurrentUser}
-            onDiagLinkSessionExpired={onDiagLinkSessionExpired}
-          />
+          <Suspense fallback={<Spinner label="Chargement de la personnalisation…" />}>
+            <CompanyBrandingView
+              key={currentUser?.companyId}
+              currentUser={currentUser}
+              logoObjectUrl={companyLogoUrl}
+              getAccessToken={getAccessToken}
+              onCurrentUserRefresh={refreshCurrentUser}
+              onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+            />
+          </Suspense>
         )}
         {currentView === 'companies' && (
-          <CompaniesView getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} />
+          <Suspense fallback={<Spinner label="Chargement des entreprises…" />}>
+            <CompaniesView getAccessToken={getAccessToken} onDiagLinkSessionExpired={onDiagLinkSessionExpired} />
+          </Suspense>
         )}
         {currentView === 'machine-requests' && (
-          <MachineRequestsView
-            requests={machineRequests}
-            isLoading={machineRequestsLoading}
-            hasLoadingError={machineRequestsError}
-            getAccessToken={getAccessToken}
-            onRetry={loadMachineRequests}
-            onRequestUpdated={handleMachineRequestUpdated}
-            onDiagLinkSessionExpired={onDiagLinkSessionExpired}
-            listResetKey={machineRequestsListResetKey}
-          />
+          <Suspense fallback={<Spinner label="Chargement des demandes…" />}>
+            <MachineRequestsView
+              requests={machineRequests}
+              isLoading={machineRequestsLoading}
+              hasLoadingError={machineRequestsError}
+              getAccessToken={getAccessToken}
+              onRetry={loadMachineRequests}
+              onRequestUpdated={handleMachineRequestUpdated}
+              onDiagLinkSessionExpired={onDiagLinkSessionExpired}
+              listResetKey={machineRequestsListResetKey}
+            />
+          </Suspense>
         )}
-        {currentView === 'diaglink-admin' && <DiagLinkAdminView onDiagLinkSessionExpired={onDiagLinkSessionExpired} />}
+        {currentView === 'diaglink-admin' && (
+          <Suspense fallback={<Spinner label="Chargement de l’administration…" />}>
+            <DiagLinkAdminView onDiagLinkSessionExpired={onDiagLinkSessionExpired} />
+          </Suspense>
+        )}
       </div>
       {canContactSupport && (
         <SupportContactDialog

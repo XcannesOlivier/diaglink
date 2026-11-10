@@ -14,6 +14,14 @@ Object.defineProperty(window, 'matchMedia', {
     addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } }),
 });
 
+// jsdom logs a "not implemented" error before returning null. Tests that need
+// a real context install their own focused mock.
+Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+  configurable: true,
+  writable: true,
+  value: () => null,
+});
+
 Object.defineProperty(globalThis, 'NodeFilter', {
 	value: nodeFilter,
 	configurable: true,

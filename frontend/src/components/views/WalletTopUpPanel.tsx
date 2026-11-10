@@ -35,7 +35,7 @@ export function WalletTopUpPanel({ companyId, getAccessToken, onDiagLinkSessionE
       }
       onLoadComplete?.();
     });
-    return () => { generation.current++; };
+    return () => { generation.current = current + 1; };
   }, [companyId, getAccessToken, onDiagLinkSessionExpired, revision, onLoadComplete]);
   const incompleteOperations = useMemo(
     () => data?.operations.filter(operation => operation.stage !== 'Completed') ?? [],

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createRoot } from 'react-dom/client';
+import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { MachinesView } from '../MachinesView';
 import type { MachineDto } from '../../../types/machine';
@@ -8,6 +8,13 @@ import type { ApiResult } from '../../../types/apiResult';
 const { getMachinesMock, getCompaniesMock, dispatchMock, inspectPdfFilesMock, addMachineWithDocumentsMock } = vi.hoisted(() => ({
   getMachinesMock: vi.fn(), getCompaniesMock: vi.fn(), dispatchMock: vi.fn(), inspectPdfFilesMock: vi.fn(), addMachineWithDocumentsMock: vi.fn(),
 }));
+
+const roots = new Set<Root>();
+const createTrackedRoot = (container: Element) => {
+  const root = createRoot(container);
+  roots.add(root);
+  return root;
+};
 
 vi.mock('../../../services/machineService', () => ({
   getMachines: getMachinesMock,
@@ -28,7 +35,7 @@ vi.mock('../../../pages/start/pdfSelection', () => ({
 function renderView(): HTMLDivElement {
   const container = document.createElement('div');
   document.body.appendChild(container);
-  const root = createRoot(container);
+  const root = createTrackedRoot(container);
   act(() => {
     root.render(
       <MachinesView
@@ -44,7 +51,7 @@ async function renderAndFlush(result: ApiResult<MachineDto[]>): Promise<HTMLDivE
   getMachinesMock.mockResolvedValue(result);
   const container = document.createElement('div');
   document.body.appendChild(container);
-  const root = createRoot(container);
+  const root = createTrackedRoot(container);
   await act(async () => {
     root.render(
       <MachinesView
@@ -65,7 +72,12 @@ describe('MachinesView', () => {
     inspectPdfFilesMock.mockReset();
     addMachineWithDocumentsMock.mockReset();
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(async () => {
+    await act(async () => roots.forEach(root => root.unmount()));
+    roots.clear();
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+  });
 
   it('shows a loading state before the request resolves', () => {
     getMachinesMock.mockReturnValue(new Promise(() => {}));
@@ -76,7 +88,7 @@ describe('MachinesView', () => {
   it('shows the request action to a company admin but not to a technician', async () => {
     getMachinesMock.mockResolvedValue({ kind: 'success', data: [] });
     const companyContainer = document.createElement('div'); document.body.appendChild(companyContainer);
-    const companyRoot = createRoot(companyContainer);
+    const companyRoot = createTrackedRoot(companyContainer);
     await act(async () => companyRoot.render(<MachinesView currentUser={{ userId: 'u1', companyId: 'c1', role: 'company_admin' }} getAccessToken={async () => 'token'} />));
     expect(companyContainer.textContent).toContain('Demander l’ajout d’une machine');
 
@@ -88,7 +100,7 @@ describe('MachinesView', () => {
     getMachinesMock.mockResolvedValue({ kind: 'success', data: [] });
     getCompaniesMock.mockResolvedValue({ kind: 'success', data: [{ id: 'c1', name: 'Entreprise A', status: 'active' }] });
     const container = document.createElement('div'); document.body.appendChild(container);
-    const root = createRoot(container);
+    const root = createTrackedRoot(container);
     await act(async () => root.render(<MachinesView currentUser={{ userId: 'u1', companyId: 'c0', role: 'diaglink_super_admin' }} getAccessToken={async () => 'token'} />));
     const company = Array.from(container.querySelectorAll('[role="button"]')).find(item => item.textContent?.includes('Entreprise A'))!;
     await act(async () => company.dispatchEvent(new MouseEvent('click', { bubbles: true })));
@@ -105,7 +117,7 @@ describe('MachinesView', () => {
       { id: 'm4', companyId: 'c1', name: 'Machine indisponible', reference: null, status: 'inactive', hasAssistantConfigured: true, isAccessible: false },
     ] });
     const container = document.createElement('div'); document.body.appendChild(container);
-    const root = createRoot(container);
+    const root = createTrackedRoot(container);
     await act(async () => root.render(<MachinesView currentUser={{ userId: 'sa', companyId: 'root', role: 'diaglink_super_admin' }} getAccessToken={async () => 'token'} />));
 
     const companyRow = () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Entreprise A'))!;
@@ -156,7 +168,7 @@ describe('MachinesView', () => {
   it('shows the document request only for a company admin and preserves the Super Admin PDF action', async () => {
     const machines: MachineDto[] = [{ id: 'm1', companyId: 'c1', name: 'Presse P1', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true }];
     getMachinesMock.mockResolvedValue({ kind: 'success', data: machines });
-    const companyContainer = document.createElement('div'); document.body.appendChild(companyContainer); const companyRoot = createRoot(companyContainer);
+    const companyContainer = document.createElement('div'); document.body.appendChild(companyContainer); const companyRoot = createTrackedRoot(companyContainer);
     await act(async () => companyRoot.render(<MachinesView currentUser={{ userId: 'u1', companyId: 'c1', role: 'company_admin' }} getAccessToken={async () => 'token'} />));
     await act(async () => companyContainer.querySelector('[role="button"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(companyContainer.textContent).toContain('Demander l’ajout de documents');
@@ -167,7 +179,7 @@ describe('MachinesView', () => {
     expect(technicianContainer.textContent).not.toContain('Demander l’ajout de documents');
 
     getCompaniesMock.mockResolvedValue({ kind: 'success', data: [{ id: 'c1', name: 'Entreprise A', status: 'active' }] });
-    const adminContainer = document.createElement('div'); document.body.appendChild(adminContainer); const adminRoot = createRoot(adminContainer);
+    const adminContainer = document.createElement('div'); document.body.appendChild(adminContainer); const adminRoot = createTrackedRoot(adminContainer);
     await act(async () => adminRoot.render(<MachinesView currentUser={{ userId: 'sa', companyId: 'root', role: 'diaglink_super_admin' }} getAccessToken={async () => 'token'} />));
     const company = [...adminContainer.querySelectorAll('[role="button"]')].find(item => item.textContent?.includes('Entreprise A'))!;
     await act(async () => company.dispatchEvent(new MouseEvent('click', { bubbles: true })));
@@ -183,7 +195,7 @@ describe('MachinesView', () => {
     getMachinesMock.mockResolvedValue({kind:'success',data:machines});
 
     for(const role of ['technician','company_admin'] as const){
-      const container=document.createElement('div');document.body.appendChild(container);const root=createRoot(container);
+      const container=document.createElement('div');document.body.appendChild(container);const root=createTrackedRoot(container);
       await act(async()=>root.render(<MachinesView currentUser={{userId:'u1',companyId:'c1',role}} getAccessToken={async()=> 'token'}/>));
       await act(async()=>container.querySelector('[role="button"]')?.dispatchEvent(new MouseEvent('click',{bubbles:true})));
       expect(container.textContent).not.toContain('Budget IA inclus disponible.');expect(container.textContent).toContain('StatutActive');
@@ -194,7 +206,7 @@ describe('MachinesView', () => {
     }
 
     getCompaniesMock.mockResolvedValue({kind:'success',data:[{id:'c1',name:'Entreprise A',status:'active'}]});
-    const container=document.createElement('div');document.body.appendChild(container);const root=createRoot(container);
+    const container=document.createElement('div');document.body.appendChild(container);const root=createTrackedRoot(container);
     await act(async()=>root.render(<MachinesView currentUser={{userId:'sa',companyId:'root',role:'diaglink_super_admin'}} getAccessToken={async()=> 'token'}/>));
     await act(async()=>[...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item=>item.textContent?.includes('Entreprise A'))!.click());
     await act(async()=>[...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item=>item.textContent?.includes('Compresseur Test Alpha'))!.click());
@@ -207,7 +219,7 @@ describe('MachinesView', () => {
   it('keeps the document request dialog open while clicking and selecting through its file picker', async () => {
     const machines: MachineDto[] = [{ id: 'm1', companyId: 'c1', name: 'Presse P1', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true }];
     getMachinesMock.mockResolvedValue({ kind: 'success', data: machines });
-    const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+    const container = document.createElement('div'); document.body.appendChild(container); const root = createTrackedRoot(container);
     await act(async () => root.render(<MachinesView currentUser={{ userId: 'u1', companyId: 'c1', role: 'company_admin' }} getAccessToken={async () => 'token'} />));
     await act(async () => container.querySelector('[role="button"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     const open = [...container.querySelectorAll('button')].find(item => item.textContent === 'Demander l’ajout de documents')!;
@@ -247,7 +259,7 @@ describe('MachinesView', () => {
     getCompaniesMock.mockResolvedValue({ kind: 'success', data: [{ id: 'c1', name: 'Entreprise A', status: 'active' }] });
     let finishUpload!: (value: { kind: 'success'; data: unknown }) => void;
     addMachineWithDocumentsMock.mockReturnValue(new Promise(resolve => { finishUpload = resolve; }));
-    const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+    const container = document.createElement('div'); document.body.appendChild(container); const root = createTrackedRoot(container);
     await act(async () => root.render(<MachinesView currentUser={{ userId: 'sa', companyId: 'root', role: 'diaglink_super_admin' }} getAccessToken={async () => 'token'} />));
     await act(async () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Entreprise A'))!.click());
     await act(async () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Presse P1'))!.click());
@@ -279,7 +291,7 @@ describe('MachinesView', () => {
     const machines: MachineDto[] = [{ id: 'm1', companyId: 'c1', name: 'Presse P1', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true }];
     getMachinesMock.mockResolvedValue({ kind: 'success', data: machines });
     getCompaniesMock.mockResolvedValue({ kind: 'success', data: [{ id: 'c1', name: 'Entreprise A', status: 'active' }] });
-    const container = document.createElement('div'); document.body.appendChild(container); const root = createRoot(container);
+    const container = document.createElement('div'); document.body.appendChild(container); const root = createTrackedRoot(container);
     await act(async () => root.render(<MachinesView currentUser={{ userId: 'sa', companyId: 'root', role: 'diaglink_super_admin' }} getAccessToken={async () => 'token'} />));
     await act(async () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Entreprise A'))!.click());
     await act(async () => [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(item => item.textContent?.includes('Presse P1'))!.click());

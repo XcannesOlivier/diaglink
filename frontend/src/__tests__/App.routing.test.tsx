@@ -36,6 +36,13 @@ async function renderAt(path: string) {
   await act(async () => {
     root?.render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
   });
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
+  await vi.waitFor(
+    () => expect(container?.textContent).not.toContain('Chargement de la page...'),
+    { timeout: 5000 },
+  );
 }
 
 afterEach(async () => {

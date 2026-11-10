@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Markdown } from '../Markdown';
 
 describe('Markdown links', () => {
@@ -37,4 +37,20 @@ describe('Markdown links', () => {
     expect(link?.target).toBe('_blank');
     expect(link?.rel).toBe('noopener noreferrer');
   });
+
+  it('loads syntax highlighting only when a supported code language is rendered', async () => {
+    await act(async () => root.render(
+      <Markdown content={'```javascript\nconst answer = 42;\n```'} />,
+    ));
+
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+
+    await vi.waitFor(() => {
+      const tokens = [...container.querySelectorAll<HTMLElement>('.token')];
+      expect(tokens.map(token => token.textContent).join('')).toContain('const');
+      expect(tokens.some(token => token.style.color.length > 0)).toBe(true);
+    }, { timeout: 15000 });
+  }, 30000);
 });

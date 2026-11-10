@@ -1,9 +1,15 @@
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdditionalMachineRequestDialog } from '../AdditionalMachineRequestDialog';
 
 const api = vi.hoisted(() => ({ create: vi.fn(), wait: vi.fn(), submit: vi.fn() }));
+const roots = new Set<Root>();
+const createTrackedRoot = (container: Element) => {
+  const root = createRoot(container);
+  roots.add(root);
+  return root;
+};
 vi.mock('../../../services/companyMachineRequestPaymentApi', () => ({
   createCompanyMachineRequestPayment: api.create,
   waitForCompanyMachineRequestAuthorization: api.wait,
@@ -20,11 +26,19 @@ describe('AdditionalMachineRequestDialog', () => {
     api.wait.mockReset().mockResolvedValue({ paymentRequestId: 'payment-1', status: 'authorized', amount: 134.12, currency: 'EUR' });
     api.submit.mockReset().mockResolvedValue({ requestId: 'request-1', status: 'pending' });
     vi.stubGlobal('crypto', { randomUUID: vi.fn(() => 'stable-uuid') });
+    vi.spyOn(window, 'focus').mockImplementation(() => undefined);
+  });
+  afterEach(async () => {
+    await act(async () => roots.forEach(root => root.unmount()));
+    roots.clear();
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it('ouvre le sélecteur PDF au clic, avec Entrée et avec Espace sans double activation', async () => {
     const container = document.createElement('div'); document.body.appendChild(container);
-    const root = createRoot(container);
+    const root = createTrackedRoot(container);
     await act(async () => root.render(<AdditionalMachineRequestDialog open onOpenChange={vi.fn()} getAccessToken={async () => 'token'} />));
     const dropzone = document.body.querySelector<HTMLElement>('[role="button"]')!;
     const fileInput = document.body.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -43,16 +57,13 @@ describe('AdditionalMachineRequestDialog', () => {
     expect(space.defaultPrevented).toBe(true);
     expect(clickSpy).toHaveBeenCalledTimes(3);
 
-    await act(async () => root.unmount());
-    container.remove();
   });
 
   it('keeps machine data client-side, opens the named checkout and trusts server polling only', async () => {
     const popup = { location: { href: '' }, closed: false, close: vi.fn(), postMessage: vi.fn() };
     vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window);
-    vi.spyOn(window, 'focus').mockImplementation(() => undefined);
     const container = document.createElement('div'); document.body.appendChild(container);
-    const root = createRoot(container);
+    const root = createTrackedRoot(container);
     await act(async () => root.render(<AdditionalMachineRequestDialog open onOpenChange={vi.fn()} getAccessToken={async () => 'token'} />));
     const inputs = Array.from(document.body.querySelectorAll('input'));
     await act(async () => {
@@ -83,7 +94,7 @@ describe('AdditionalMachineRequestDialog', () => {
     const popup = { location: { href: '' }, closed: false, close: vi.fn(), postMessage: vi.fn() };
     vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window);
     const container = document.createElement('div'); document.body.appendChild(container);
-    const root = createRoot(container);
+    const root = createTrackedRoot(container);
     await act(async () => root.render(<AdditionalMachineRequestDialog open onOpenChange={vi.fn()} getAccessToken={async () => 'token'} />));
     const inputs = Array.from(document.body.querySelectorAll('input'));
     await act(async () => {
@@ -111,7 +122,7 @@ describe('AdditionalMachineRequestDialog', () => {
     const popup = { location: { href: '' }, closed: false, close: vi.fn(), postMessage: vi.fn() };
     vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window);
     const container = document.createElement('div'); document.body.appendChild(container);
-    const root = createRoot(container);
+    const root = createTrackedRoot(container);
     await act(async () => root.render(<AdditionalMachineRequestDialog open onOpenChange={vi.fn()} getAccessToken={async () => 'token'} />));
     window.dispatchEvent(new MessageEvent('message', { origin: 'https://evil.test', source: popup as unknown as Window, data: { type: 'diaglink:machine-request-checkout-returned', status: 'authorized', paymentRequestId: 'secret' } }));
     expect(popup.postMessage).not.toHaveBeenCalled();

@@ -1,7 +1,8 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createPdfJsWasmUrl, TechnicalSourcePdfDialog } from '../TechnicalSourcePdfDialog';
+import { TechnicalSourcePdfDialog } from '../TechnicalSourcePdfDialog';
+import { createPdfJsWasmUrl } from '../../../utils/pdfJs';
 
 const pdf = vi.hoisted(() => ({
   getDocument: vi.fn(),

@@ -1,5 +1,3 @@
-import { PDFDocument } from 'pdf-lib';
-
 export const MAX_PDF_COUNT = 10;
 export const MAX_PDF_BYTES = 200 * 1024 * 1024;
 export const MAX_COMBINED_PDF_BYTES = 200 * 1024 * 1024;
@@ -35,6 +33,7 @@ export async function inspectPdfFiles(files: File[], current: SelectedPdf[], nex
       continue;
     }
     try {
+      const { PDFDocument } = await import('pdf-lib');
       const document = await PDFDocument.load(await file.arrayBuffer(), { updateMetadata: false });
       accepted.push({ id: nextId(), file, pageCount: document.getPageCount() });
       combinedBytes += file.size;

@@ -59,7 +59,7 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
       if(summary.kind==='success')setData(summary.data);else setMessage('Informations financières indisponibles.');
       if(topups.kind!=='success')setMessage('Impossible de charger les recharges. Actualisez avant de réessayer.');
       for(const result of [summary,topups])if(result.kind==='unauthorized'&&result.diagLinkSessionExpired)onDiagLinkSessionExpired?.();
-    });return()=>{generation.current++;};
+    });return()=>{generation.current=current+1;};
   },[companyId,getAccessToken,onDiagLinkSessionExpired,revision]);
   async function recharge(){
     if(lock.current||!data?.rechargeEnabled)return;

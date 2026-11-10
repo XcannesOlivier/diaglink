@@ -22,14 +22,10 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { TechnicalSourceReference } from '../../types/chat';
 import { DialogCloseButton } from '../core/DialogCloseButton';
 import { useTechnicalViewerNavigation } from '../../hooks/useTechnicalViewerNavigation';
+import { createPdfJsWasmUrl } from '../../utils/pdfJs';
 import styles from './TechnicalSourcePdfDialog.module.css';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-
-export function createPdfJsWasmUrl(baseUrl: string) {
-  const normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-  return `${normalizedBaseUrl}pdfjs-wasm/`;
-}
 
 const pdfJsWasmUrl = createPdfJsWasmUrl(import.meta.env.BASE_URL);
 
@@ -57,6 +53,7 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
     maxZoom: 4,
     onZoomChange: setZoom,
   });
+  const { resetView } = navigation;
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setRenderZoom(zoom), 120);
@@ -71,7 +68,7 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
     setDocument(undefined);
     setPageNumber(source.pdfPage);
     setRenderZoom(1);
-    navigation.resetView();
+    resetView();
 
     void loadPdf(source.id, controller.signal)
       .then(blob => blob.arrayBuffer())
@@ -99,7 +96,7 @@ export function TechnicalSourcePdfDialog({ source, loadPdf, onClose }: Technical
       controller.abort();
       void loadingTask?.destroy();
     };
-  }, [loadPdf, navigation.resetView, retry, source.id, source.pdfPage]);
+  }, [loadPdf, resetView, retry, source.id, source.pdfPage]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

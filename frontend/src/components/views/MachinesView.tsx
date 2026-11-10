@@ -210,7 +210,10 @@ export const MachinesView: React.FC<MachinesViewProps> = ({ currentUser, getAcce
   const [documentsRequestDialogOpen, setDocumentsRequestDialogOpen] = useState(false);
   const superAdmin = isSuperAdmin(currentUser);
   const companyAdmin = isCompanyAdmin(currentUser);
-  const fetchMachines = useCallback(() => getMachines(getAccessToken), [getAccessToken, refreshKey]);
+  const fetchMachines = useCallback(() => {
+    void refreshKey; // Changing the key intentionally creates a new loader for useApiResource.
+    return getMachines(getAccessToken);
+  }, [getAccessToken, refreshKey]);
   const state = useApiResource(fetchMachines, onDiagLinkSessionExpired);
   const fetchCompanies = useCallback(() => getCompanies(getAccessToken), [getAccessToken]);
   const companiesState = useApiResource(fetchCompanies, onDiagLinkSessionExpired, superAdmin);

@@ -1,6 +1,6 @@
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkoutReturnedMessage } from '../../../pages/start/checkoutPopup';
 import { AdditionalDocumentsRequestDialog } from '../AdditionalDocumentsRequestDialog';
 
@@ -15,12 +15,18 @@ vi.mock('../../../pages/start/pdfSelection', () => ({
 
 const machine = { id: 'm1', companyId: 'c1', name: 'Compresseur Alpha', reference: null, status: 'active', hasAssistantConfigured: true, isAccessible: true };
 const staged = { requestId: 'r1', paymentRequestId: 'r1', status: 'pending', targetMachineId: 'm1', documentCount: 1, totalPages: 100, amountCents: 2700, currency: 'EUR' };
+const roots = new Set<Root>();
 
 async function renderDialog() {
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host);
+  roots.add(root);
   const onOpenChange = vi.fn();
   await act(async () => root.render(<AdditionalDocumentsRequestDialog open onOpenChange={onOpenChange} machine={machine} getAccessToken={async () => 'token'} />));
   return { host, root, onOpenChange };
+}
+async function unmountRoot(root: Root) {
+  await act(async () => root.unmount());
+  roots.delete(root);
 }
 async function selectPdf(pageCount = 100) {
   const file = new File(['pdf'], 'manual.pdf', { type: 'application/pdf' });
@@ -43,6 +49,12 @@ describe('AdditionalDocumentsRequestDialog', () => {
     vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window); vi.spyOn(window, 'focus').mockImplementation(() => undefined);
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111');
   });
+  afterEach(async () => {
+    await act(async () => roots.forEach(root => root.unmount()));
+    roots.clear();
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
 
   it('ouvre le sélecteur PDF au clic, avec Entrée et avec Espace sans double activation', async () => {
     const rendered = await renderDialog();
@@ -63,7 +75,7 @@ describe('AdditionalDocumentsRequestDialog', () => {
     expect(space.defaultPrevented).toBe(true);
     expect(clickSpy).toHaveBeenCalledTimes(3);
 
-    await act(async () => rendered.root.unmount());
+    await unmountRoot(rendered.root);
     rendered.host.remove();
   });
 
@@ -88,7 +100,7 @@ describe('AdditionalDocumentsRequestDialog', () => {
     }
     expect(clickSpy).not.toHaveBeenCalled();
 
-    await act(async () => rendered.root.unmount());
+    await unmountRoot(rendered.root);
     rendered.host.remove();
   });
 
@@ -110,7 +122,7 @@ describe('AdditionalDocumentsRequestDialog', () => {
     expect(document.body.textContent).toContain(`${pages} × 0,27`);
     expect(document.body.textContent).toContain(total);
     expect(document.body.textContent?.includes('Minimum par demande')).toBe(minimumApplies);
-    await act(async () => rendered.root.unmount()); rendered.host.remove();
+    await unmountRoot(rendered.root); rendered.host.remove();
   });
 
   it('uses the authoritative staged minimum for a one-page checkout', async () => {
@@ -204,7 +216,7 @@ describe('AdditionalDocumentsRequestDialog', () => {
     const key = 'diaglink:additional-documents:m1';
     expect(JSON.parse(sessionStorage.getItem(key)!)).toEqual({ requestId: 'r1', machineId: 'm1' });
     expect(sessionStorage.getItem(key)).not.toContain('manual.pdf');
-    await act(async () => first.root.unmount()); first.host.remove();
+    await unmountRoot(first.root); first.host.remove();
 
     api.get.mockResolvedValue({ status: 'authorized', amount: 27, currency: 'EUR' });
     await renderDialog();
