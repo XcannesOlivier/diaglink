@@ -35,16 +35,6 @@
   outline-offset: 1px;
 }
 
-.feedbackSelected {
-  color: var(--colorBrandForeground1);
-  background-color: var(--colorBrandBackground2);
-}
-
-.feedbackSelected:hover {
-  color: var(--colorBrandForeground1);
-  background-color: var(--colorBrandBackground2Hover);
-}
-
 .copiedTooltip {
   position: absolute;
   bottom: calc(100% + 4px);

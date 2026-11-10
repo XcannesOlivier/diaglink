@@ -372,7 +372,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }))
 .WithName("GetHealth");
 
 // Readiness is deliberately database-backed: the process must not receive traffic until
-// PostgreSQL (or SQL Server during rollback) is reachable. The query is read-only and portable.
+// PostgreSQL is reachable. The query is read-only and portable.
 app.MapGet("/api/health/ready", async (DiagLinkDbContext db, CancellationToken cancellationToken) =>
 {
     try

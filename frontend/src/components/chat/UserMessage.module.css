@@ -99,39 +99,9 @@
   padding: 2px 4px;
 }
 
-/* Wrapper — positions edit button next to the message */
 .userMessageWrapper {
   display: flex;
   justify-content: flex-end;
   align-items: flex-end;
   gap: 4px;
-}
-
-/* Edit button — small icon beside the message */
-.editTrigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--colorNeutralForeground3);
-  cursor: pointer;
-  padding: 0;
-  flex-shrink: 0;
-  margin-bottom: 8px;
-  transition: background-color 0.15s ease, color 0.15s ease;
-  opacity: 0.6;
-}
-
-.editTrigger:hover {
-  background-color: var(--colorNeutralBackground1Hover);
-  color: var(--colorNeutralForeground1);
-}
-
-.editTrigger:focus-visible {
-  outline: 2px solid var(--colorBrandStroke1);
-  outline-offset: 1px;
 }

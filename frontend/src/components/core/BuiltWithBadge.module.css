@@ -9,13 +9,6 @@
   padding: 0;
 }
 
-.logo {
-  display: grid;
-  place-items: center;
-  color: var(--colorBrandForeground1);
-  margin-right: 2px;
-}
-
 .text {
   color: var(--colorNeutralForeground3);
 }

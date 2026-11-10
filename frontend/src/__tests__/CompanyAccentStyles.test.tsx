@@ -12,7 +12,6 @@ describe('authenticated company accent surfaces', () => {
     ['chat/AssistantMessage.module.css', '--colorBrandForegroundLink'],
     ['core/Markdown.module.css', '--colorBrandForeground1'],
     ['chat/MessageActions.module.css', '--colorBrandStroke1'],
-    ['core/BuiltWithBadge.module.css', '--colorBrandForeground1'],
     ['ChatInterface.module.css', '--colorBrandForeground1'],
   ])('uses scoped brand tokens in %s rather than hardcoded brand colors', (path, token) => {
     const css = read(`components/${path}`);

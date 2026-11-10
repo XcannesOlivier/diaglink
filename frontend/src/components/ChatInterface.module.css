@@ -102,16 +102,6 @@
   box-sizing: border-box;
 }
 
-/* Upload spinner container */
-.uploadSpinner {
-  padding: 0.75rem 1rem;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background-color: var(--colorNeutralBackground1);
-  border-top: 1px solid var(--colorNeutralStroke2);
-}
-
 /* Screen reader only content */
 :global(.sr-only) {
   position: absolute;
@@ -123,17 +113,6 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border-width: 0;
-}
-
-/* Error message styling */
-.errorMessage {
-  padding: 1rem;
-  background-color: var(--colorPaletteRedBackground1);
-  color: var(--colorPaletteRedForeground1);
-  border-top: 1px solid var(--colorPaletteRedBorder1);
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
 }
 
 /* Scrollbar styling */
@@ -227,29 +206,6 @@
   .diagLinkLogo {
     height: 30px;
   }
-}
-
-.editBanner {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 16px;
-  font-size: 13px;
-  color: var(--colorNeutralForeground3);
-}
-
-.undoButton {
-  background: none;
-  border: none;
-  color: var(--colorBrandForeground1);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 0;
-  text-decoration: underline;
-}
-
-.undoButton:hover {
-  color: var(--colorBrandForeground2);
 }
 
 /* Mobile: full-width chat, reduced side padding so it stays readable at 320px */

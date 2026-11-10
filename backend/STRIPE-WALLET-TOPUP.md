@@ -54,8 +54,8 @@ n’est dans la transaction ou dans sa stratégie EF de retry.
 
 Les entrées TopUp sont immuables via EF et un trigger SQL UPDATE/DELETE, sans
 modifier les anciennes lignes. Le mapping CreditLedger désactive SQL OUTPUT
-pour la compatibilité trigger. Les tests SQLite vérifient l’immutabilité EF ; le
-trigger et les verrous SQL Server restent à vérifier sur la base cible.
+pour la compatibilité trigger. Les tests SQLite vérifient l’immutabilité EF.
+Le trigger et les verrous PostgreSQL restent à vérifier sur la base de test dédiée.
 
 ## Routes et configuration
 
@@ -94,7 +94,7 @@ Après application séparément autorisée de la migration sur l’environnement
 configurer la destination webhook/version API compatible SDK et ses secrets.
 Créer une recharge, payer dans Checkout avec une carte Stripe test, vérifier
 Completed, un seul ledger et la balance exacte. Redélivrer l’événement, rejouer
-l’opération, tester SCA/échec de paiement et concurrence SQL Server avec débit IA.
+l’opération, tester SCA/échec de paiement et concurrence PostgreSQL avec débit IA.
 Pour un Checkout expiré, ne pas recréer silencieusement le paiement de la même
 opération ; une nouvelle recharge utilise un nouvel UUID explicite.
 

@@ -32,17 +32,3 @@
 .citationMarker:active {
   transform: scale(0.95);
 }
-
-/* Highlight animation when scrolled to */
-.highlight {
-  animation: highlightPulse 2s ease-out;
-}
-
-@keyframes highlightPulse {
-  0% {
-    box-shadow: 0 0 0 4px var(--colorBrandBackground2);
-  }
-  100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
-}
