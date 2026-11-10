@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { makeStyles, mergeClasses } from '@fluentui/react-components';
+import { makeStyles } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   logo: {
@@ -28,7 +28,7 @@ export function CompanyLogo({ logoObjectUrl, companyName, className }: CompanyLo
 
   return (
     <img
-      className={mergeClasses(styles.logo, className)}
+      className={[styles.logo, className].filter(Boolean).join(' ')}
       src={logoObjectUrl}
       alt={companyName?.trim() ? `Logo ${companyName}` : 'Logo de l’entreprise'}
       onError={() => setFailedUrl(logoObjectUrl)}

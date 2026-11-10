@@ -57,6 +57,15 @@ vi.mock('../../views/CompanyView', () => ({
 vi.mock('../../views/UsersView', () => ({
   UsersView: () => <div data-testid="users-view">Utilisateurs chargés</div>,
 }));
+vi.mock('../../AgentChat', () => ({
+  AgentChat: ({ agentName, onOpenMobileMenu }: { agentName: string; onOpenMobileMenu: () => void }) => (
+    <div data-testid="agent-chat">
+      <button type="button" aria-label="Ouvrir le menu" onClick={onOpenMobileMenu}>Menu</button>
+      <img alt="DiagLink" src="/test-diaglink-logo.png" />
+      {agentName}
+    </div>
+  ),
+}));
 vi.mock('../../core/SupportContactDialog', () => ({
   SupportContactDialog: ({ open, machineId }: { open: boolean; machineId?: string }) =>
     open ? <div role="dialog" data-machine-id={machineId}>Modale support</div> : null,
@@ -77,14 +86,13 @@ function buildState(currentUser: CurrentUser | null, currentView: AppState['ui']
   };
 }
 
-function renderAppShell(withThemeProvider = false): HTMLDivElement {
+function renderAppShell(): HTMLDivElement {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   mounted.push({ root, container });
   act(() => {
-    const shell = <AppShell agentId="agent-1" agentName="Assistant Technique" />;
-    root.render(withThemeProvider ? <ThemeProvider>{shell}</ThemeProvider> : shell);
+    root.render(<ThemeProvider><AppShell agentId="agent-1" agentName="Assistant Technique" /></ThemeProvider>);
   });
   return container;
 }
@@ -107,7 +115,7 @@ describe('AppShell navigation', () => {
   beforeEach(() => {
     mockDispatch.mockClear();
     listMachineRequestsMock.mockReset();
-    listMachineRequestsMock.mockResolvedValue({ kind: 'success', data: [] });
+    listMachineRequestsMock.mockImplementation(() => new Promise(() => {}));
     machineRequestsViewState.resetKeys.length = 0;
     fetchCompanyLogoMock.mockReset().mockResolvedValue({ logo: null, diagLinkSessionExpired: false });
     vi.stubGlobal('URL', Object.assign(class extends URL {}, {
@@ -148,7 +156,7 @@ describe('AppShell navigation', () => {
         companyBranding: role === 'diaglink_super_admin' ? null : {
           companyName: 'Acme', accentColor: accent, hasLogo: false, logoVersion: null,
         } });
-      const container = renderAppShell(true);
+      const container = renderAppShell();
       const badge = container.querySelector<HTMLElement>('header .fui-Badge')!;
       const provider = badge.closest('.fui-FluentProvider')!;
       const expectedTheme = theme === 'Dark' ? darkTheme : lightTheme;
@@ -184,7 +192,7 @@ describe('AppShell navigation', () => {
         companyBranding: role === 'diaglink_super_admin' ? null : {
           companyName: 'Acme', accentColor: accent, hasLogo: false, logoVersion: null,
         } });
-      const container = renderAppShell(true);
+      const container = renderAppShell();
       const providers = Array.from(container.querySelectorAll('.fui-FluentProvider'));
       const shell = container.querySelector('header')!;
       const openSettings = container.querySelector<HTMLButtonElement>('button[aria-label="Paramètres"]')!;
@@ -291,7 +299,9 @@ describe('AppShell navigation', () => {
     expect(mockDispatch).not.toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'diaglink-admin' });
     expect(window.location.pathname).toBe('/app/administration');
     mockState = buildState({ userId: 'u3', companyId: 'c1', role: 'diaglink_super_admin' });
-    act(() => mounted[0].root.render(<AppShell agentId="agent-1" agentName="Assistant Technique" />));
+    act(() => mounted[0].root.render(
+      <ThemeProvider><AppShell agentId="agent-1" agentName="Assistant Technique" /></ThemeProvider>,
+    ));
     expect(mockDispatch).toHaveBeenCalledWith({ type: 'UI_SET_VIEW', view: 'diaglink-admin' });
   });
 
@@ -424,7 +434,10 @@ describe('AppShell navigation', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(updatedUser), { status: 200 }));
     const container = renderAppShell();
-    await vi.waitFor(() => expect(container.textContent).toContain('Personnalisation'));
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+    expect(container.textContent).toContain('Personnalisation');
     const clickAction = (label: string) => {
       const button = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(el => el.textContent === label)!;
       button.click();
@@ -521,8 +534,9 @@ describe('AppShell navigation', () => {
 
     const container = renderAppShell();
 
-    expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--diaglink-company-accent')).toBe('#12AB34');
-    expect(container.firstElementChild?.hasAttribute('data-company-accent')).toBe(true);
+    const shell = container.querySelector('header')!.parentElement!;
+    expect(shell.style.getPropertyValue('--diaglink-company-accent')).toBe('#12AB34');
+    expect(shell.hasAttribute('data-company-accent')).toBe(true);
   });
 
   it('falls back to the current DiagLink accent token', () => {
@@ -535,8 +549,9 @@ describe('AppShell navigation', () => {
 
     const container = renderAppShell();
 
-    expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--diaglink-company-accent')).toBe('var(--colorBrandForeground1)');
-    expect(container.firstElementChild?.hasAttribute('data-company-accent')).toBe(false);
+    const shell = container.querySelector('header')!.parentElement!;
+    expect(shell.style.getPropertyValue('--diaglink-company-accent')).toBe('var(--colorBrandForeground1)');
+    expect(shell.hasAttribute('data-company-accent')).toBe(false);
   });
 
   it.each(['company_admin', 'technician'] as const)('places the cached logo after the desktop role for %s', role => {
@@ -646,7 +661,9 @@ describe('AppShell navigation', () => {
     expect(document.body.querySelector('img[alt="DiagLink"]')).not.toBeNull();
 
     mockState = { ...mockState, branding: { ...mockState.branding, logoObjectUrl: 'blob:replacement' } };
-    act(() => mounted[0].root.render(<AppShell agentId="agent-1" agentName="Assistant Technique" />));
+    act(() => mounted[0].root.render(
+      <ThemeProvider><AppShell agentId="agent-1" agentName="Assistant Technique" /></ThemeProvider>,
+    ));
     expect(document.body.querySelectorAll('img[src="blob:replacement"]')).toHaveLength(2);
     expect(fetchCompanyLogoMock).not.toHaveBeenCalled();
   });

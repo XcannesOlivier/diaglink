@@ -146,9 +146,10 @@ describe('MachineRequestsView', () => {
   it('shares one stable desktop grid between headers, active requests and history rows', () => {
     const source = readFileSync(resolve('src/components/views/MachineRequestsView.tsx'), 'utf8');
     expect(source.match(/const requestTableColumns/g)).toHaveLength(1);
-    expect(source.match(/gridTemplateColumns: requestTableColumns/g)).toHaveLength(1);
-    expect(source).toContain('mergeClasses(styles.listHeader, styles.requestTableGrid)');
-    expect(source).toContain('mergeClasses(styles.requestRow, styles.requestTableGrid,');
+    expect(source.match(/gridTemplateColumns: requestTableColumns/g)).toHaveLength(2);
+    expect(source).toContain('className={styles.listHeader}');
+    expect(source).toContain('className={styles.requestRow}');
+    expect(source).toContain('data-pending={request.status === "pending" || undefined}');
     expect(source).toContain('minmax(150px,.9fr)');
     expect(source).not.toContain('110px auto');
     expect(source).toContain('paddingLeft: `calc(${tokens.spacingHorizontalM} - 3px)`');

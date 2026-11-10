@@ -1,6 +1,6 @@
 import { useContext, useMemo, useRef, type CSSProperties, type ReactNode } from 'react';
 import {
-  makeStyles, mergeClasses, shorthands, tokens, typographyStyles, type ButtonState, type FluentProviderProps,
+  makeStyles, shorthands, tokens, typographyStyles, type ButtonState, type FluentProviderProps,
   useFluentProvider_unstable, useFluentProviderStyles_unstable,
   useFluentProviderContextValues_unstable, renderFluentProvider_unstable,
 } from '@fluentui/react-components';
@@ -36,8 +36,8 @@ function useCompanyButtonStyles(state: unknown) {
   const semanticStyles = useSemanticStyles();
   if (!isButtonState(state) || !accent || state.disabled || state.disabledFocusable) return;
   if ('data-company-accent-exempt' in state.root && state.root['data-company-accent-exempt']) {
-    state.root.className = mergeClasses(state.root.className, semanticStyles.icon,
-      state.appearance === 'primary' ? semanticStyles.destructive : undefined);
+    state.root.className = [state.root.className, semanticStyles.icon,
+      state.appearance === 'primary' ? semanticStyles.destructive : undefined].filter(Boolean).join(' ');
   }
 }
 
@@ -58,7 +58,7 @@ function ScopedFluentProvider(props: FluentProviderProps) {
   const contextValues = useFluentProviderContextValues_unstable(state);
   const portalStyles = usePortalStyles();
   // Portals inherit tokens and typography, never the shell's layout or opaque background.
-  contextValues.themeClassName = mergeClasses(state.themeClassName, portalStyles.typography);
+  contextValues.themeClassName = [state.themeClassName, portalStyles.typography].filter(Boolean).join(' ');
   return renderFluentProvider_unstable(state, contextValues);
 }
 

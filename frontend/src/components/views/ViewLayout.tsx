@@ -1,5 +1,5 @@
 import React from 'react';
-import { makeStyles, mergeClasses, tokens, Text, Spinner } from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Spinner } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   root: {
@@ -59,9 +59,12 @@ interface ViewRootProps {
 /** Shared header + scroll container for the real (non-placeholder) DiagLink views. */
 export const ViewRoot: React.FC<ViewRootProps> = ({ title, titleAs = 'span', subtitle, headerAction, headerClassName, children }) => {
   const styles = useStyles();
+  const headerClasses = [styles.header, headerAction ? styles.headerWithAction : undefined, headerClassName]
+    .filter(Boolean)
+    .join(' ');
   return (
     <div className={styles.root}>
-      <div className={mergeClasses(styles.header, !!headerAction && styles.headerWithAction, headerClassName)}>
+      <div className={headerClasses}>
         <div>
         <Text as={titleAs} className={styles.title}>{title}</Text>
         {subtitle && <Text className={styles.subtitle}>{subtitle}</Text>}

@@ -271,6 +271,10 @@ const useStyles = makeStyles({
   fullWidthButton: {
     width: '100%',
   },
+  fullWidthDangerButton: {
+    width: '100%',
+    color: tokens.colorPaletteRedForeground1,
+  },
 });
 
 interface UsersViewProps {
@@ -958,7 +962,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                                 <Button
                                   appearance="subtle"
                                   icon={<DeleteRegular />}
-                                  className={`${styles.dangerButton} ${styles.fullWidthButton}`}
+                                  className={styles.fullWidthDangerButton}
                                 data-company-accent-exempt
                                   onClick={() => openDeleteDialog(user)}
                                 >
@@ -978,7 +982,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                               <Button
                                 appearance="outline"
                                 icon={<DeleteRegular />}
-                                className={`${styles.dangerButton} ${styles.fullWidthButton}`}
+                                className={styles.fullWidthDangerButton}
                           data-company-accent-exempt
                                 onClick={() => openPermanentDeleteDialog(user)}
                               >
@@ -1265,7 +1269,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                           <Button
                             appearance="subtle"
                             icon={<DeleteRegular />}
-                            className={`${styles.dangerButton} ${styles.fullWidthButton}`}
+                            className={styles.fullWidthDangerButton}
                             data-company-accent-exempt
                             onClick={() => openDeleteDialog(user)}
                           >
@@ -1285,7 +1289,7 @@ export const UsersView: React.FC<UsersViewProps> = ({ currentUser, getAccessToke
                         <Button
                           appearance="outline"
                           icon={<DeleteRegular />}
-                          className={`${styles.dangerButton} ${styles.fullWidthButton}`}
+                          className={styles.fullWidthDangerButton}
                            data-company-accent-exempt
                           onClick={() => openPermanentDeleteDialog(user)}
                         >

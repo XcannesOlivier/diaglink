@@ -90,9 +90,6 @@ const useStyles = makeStyles({
   deleteButton: {
     flexShrink: 0,
     opacity: 0,
-    '.conversation-item:hover &, .conversation-item:focus-within &': {
-      opacity: 1,
-    },
     ':focus': {
       opacity: 1,
     },

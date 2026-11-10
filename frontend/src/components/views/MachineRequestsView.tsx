@@ -13,7 +13,6 @@ import {
   Spinner,
   Text,
   makeStyles,
-  mergeClasses,
   tokens,
 } from "@fluentui/react-components";
 import {
@@ -61,8 +60,6 @@ const useStyles = makeStyles({
     display: "none",
     padding: `0 calc(${tokens.spacingHorizontalM} + 1px)`,
     color: tokens.colorNeutralForeground3,
-  },
-  requestTableGrid: {
     "@media (min-width: 1024px)": {
       display: "grid",
       gridTemplateColumns: requestTableColumns,
@@ -82,10 +79,16 @@ const useStyles = makeStyles({
       gridTemplateColumns: "minmax(0,1fr)",
       gap: tokens.spacingVerticalS,
     },
-  },
-  waitingRow: {
-    borderLeft: `4px solid ${tokens.colorPaletteYellowBorderActive}`,
-    paddingLeft: `calc(${tokens.spacingHorizontalM} - 3px)`,
+    "@media (min-width: 1024px)": {
+      display: "grid",
+      gridTemplateColumns: requestTableColumns,
+      alignItems: "center",
+      gap: tokens.spacingHorizontalM,
+    },
+    "&[data-pending]": {
+      borderLeft: `4px solid ${tokens.colorPaletteYellowBorderActive}`,
+      paddingLeft: `calc(${tokens.spacingHorizontalM} - 3px)`,
+    },
   },
   mobileLabel: {
     color: tokens.colorNeutralForeground3,
@@ -149,9 +152,17 @@ const useStyles = makeStyles({
       gap: tokens.spacingVerticalS,
     },
   },
-  fullWidth: {
+  fullWidthDetailCard: {
+    padding: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalM,
+    minWidth: 0,
+    maxWidth: "100%",
     gridColumn: "1 / -1",
-    "@media (max-width: 800px)": { gridColumn: "auto" },
+    "@media (max-width: 800px)": {
+      padding: tokens.spacingVerticalM,
+      gap: tokens.spacingVerticalS,
+      gridColumn: "auto",
+    },
   },
   cardTitle: {
     fontSize: tokens.fontSizeBase400,
@@ -856,7 +867,7 @@ export function MachineRequestsView({
               </>}
             </dl>
           </Card>
-          <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+          <Card className={styles.fullWidthDetailCard}>
             <Text className={styles.cardTitle}>Documentation</Text>
             <ul className={styles.documents}>
               {request.documents.map((document) => (
@@ -896,7 +907,7 @@ export function MachineRequestsView({
               </Text>
             </div>
           </Card>
-          <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+          <Card className={styles.fullWidthDetailCard}>
             <Text className={styles.cardTitle}>Tarification</Text>
             {request.requestKind === "additionalDocuments" ? (
               <dl className={styles.detailList}>
@@ -944,7 +955,7 @@ export function MachineRequestsView({
             )}
           </Card>
           {request.payment && (
-            <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+            <Card className={styles.fullWidthDetailCard}>
               <Text className={styles.cardTitle}>Paiement</Text>
               <Text>
                 {request.payment.status === "captured"
@@ -985,14 +996,14 @@ export function MachineRequestsView({
           {request.requestKind === "additionalDocuments" &&
             request.status === "treated" &&
             request.payment?.status === "captured" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text weight="semibold">Documents reçus</Text>
               </Card>
             )}
           {request.status === "treated" &&
             request.payment?.status === "captured" &&
             request.preparationStatus === "ready" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text weight="semibold">
                   {request.requestKind === "additionalDocuments"
                     ? "Documents intégrés"
@@ -1004,7 +1015,7 @@ export function MachineRequestsView({
           {request.status === "treated" &&
             request.payment?.status === "captured" &&
             request.preparationStatus !== "ready" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text>
                   {request.requestKind === "additionalDocuments"
                     ? "À utiliser uniquement lorsque les nouveaux documents ont été intégrés."
@@ -1021,21 +1032,21 @@ export function MachineRequestsView({
           {request.requestKind === "additionalDocuments" &&
             request.status === "rejected" &&
             request.payment?.status === "cancelled" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text weight="semibold">Autorisation annulée</Text>
               </Card>
             )}
           {request.requestKind === "additionalDocuments" &&
             request.status === "rejected" &&
             request.payment?.status === "abandoned" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text weight="semibold">Demande abandonnée avant autorisation</Text>
               </Card>
             )}
           {request.requestKind === "additionalMachine" &&
             request.payment?.status === "captured" &&
             request.payment.provisioningStage === "businessEntitiesCreated" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text weight="semibold">
                   Machine créée — provisioning à finaliser
                 </Text>
@@ -1053,7 +1064,7 @@ export function MachineRequestsView({
           {requestKind === "initialMachine" &&
             request.payment?.status === "captured" &&
             request.payment.provisioningStage && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text className={styles.cardTitle}>Provisionnement</Text>
                 {request.payment.provisioningStage === "amountFinalized" ? (
                   <>
@@ -1152,7 +1163,7 @@ export function MachineRequestsView({
           {requestKind === "initialMachine" &&
             request.payment?.status === "captured" &&
             request.payment.provisioningStage === "businessEntitiesCreated" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text>
                   Facturation : <strong>À préparer</strong>
                 </Text>
@@ -1175,7 +1186,7 @@ export function MachineRequestsView({
               "initialPeriodCreated",
               "completed",
             ].includes(request.payment.provisioningStage) && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text weight="semibold">
                   Facturation :{" "}
                   {request.requestKind === "additionalMachine"
@@ -1187,7 +1198,7 @@ export function MachineRequestsView({
           {request.requestKind !== "additionalDocuments" &&
             request.payment?.status === "captured" &&
             request.payment.provisioningStage === "customerLinked" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text>
                   Abonnement : <strong>À configurer</strong>
                 </Text>
@@ -1209,7 +1220,7 @@ export function MachineRequestsView({
               "initialPeriodCreated",
               "completed",
             ].includes(request.payment.provisioningStage) && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text weight="semibold">
                   {request.requestKind === "additionalMachine" &&
                   request.payment.provisioningStage === "subscriptionCreated"
@@ -1221,7 +1232,7 @@ export function MachineRequestsView({
           {request.requestKind !== "additionalDocuments" &&
             request.payment?.status === "captured" &&
             request.payment.provisioningStage === "subscriptionCreated" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text>
                   Activation : <strong>À finaliser</strong>
                 </Text>
@@ -1242,7 +1253,7 @@ export function MachineRequestsView({
           {request.requestKind !== "additionalDocuments" &&
             request.payment?.status === "captured" &&
             request.payment.provisioningStage === "initialPeriodCreated" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text>
                   {request.requestKind === "additionalMachine" ? (
                     "Période initiale créée — activation à finaliser"
@@ -1270,7 +1281,7 @@ export function MachineRequestsView({
           {request.requestKind !== "additionalDocuments" &&
             request.payment?.status === "captured" &&
             request.payment.provisioningStage === "completed" && (
-              <Card className={`${styles.detailCard} ${styles.fullWidth}`}>
+              <Card className={styles.fullWidthDetailCard}>
                 <Text weight="semibold">Activation : Machine activée</Text>
                 <Text>
                   {request.requestKind === "additionalMachine"
@@ -1320,12 +1331,13 @@ export function MachineRequestsView({
   }
 
   const renderRequestList = (items: MachineRequestListItem[]) => <>
-    <div className={mergeClasses(styles.listHeader, styles.requestTableGrid)}>
+    <div className={styles.listHeader}>
       <Text>Date</Text><Text>Entreprise</Text><Text>Demandeur</Text><Text>Machine</Text>
       <Text>PDF</Text><Text>Pages</Text><Text>Préparation</Text><Text>Statut</Text>
     </div>
     <div className={styles.list}>
-      {items.map(request => <Card key={request.requestId} className={mergeClasses(styles.requestRow, styles.requestTableGrid, request.status === "pending" && styles.waitingRow)}>
+      {items.map(request => <Card key={request.requestId} className={styles.requestRow}
+        data-pending={request.status === "pending" || undefined}>
         <span className={`${styles.cell} ${styles.dateCell}`}><span data-mobile-field="date"><span className={styles.mobileLabel}>Date :</span>{date.format(new Date(request.createdAt))}</span><span className={styles.requestType} data-mobile-field="type"><span className={styles.compactOnlyLabel}>Type de demande :</span><Text size={200}>{requestKindLabel(request.requestKind)}</Text></span></span>
         <span className={`${styles.cell} ${styles.companyCell}`} data-mobile-field="company"><span className={styles.mobileLabel}>Entreprise :</span>{request.company}</span>
         <span className={`${styles.cell} ${styles.desktopOnly}`}><span className={styles.mobileLabel}>Demandeur :</span>{request.firstName} {request.lastName}<br/><Text size={200}>{request.email}<br/>{request.phone}</Text></span>
