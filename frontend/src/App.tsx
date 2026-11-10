@@ -4,12 +4,15 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from './components/core/ErrorBoundary';
 import { useAppAuthentication } from './hooks/useAppAuthentication';
 import { LandingPage } from './pages/landing/LandingPage';
-import { LoginPage } from './pages/login/LoginPage';
 import { ScrollToTop } from './components/core/ScrollToTop';
 import './App.css';
 
 const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp').then(module => ({
   default: module.AuthenticatedApp,
+})));
+
+const LoginPage = lazy(() => import('./pages/login/LoginPage').then(module => ({
+  default: module.LoginPage,
 })));
 
 const ContactPage = lazy(() => import('./pages/contact/ContactPage').then(module => ({ default: module.ContactPage })));
@@ -51,7 +54,7 @@ function App() {
           element={
             !isInstallShortcutRequest && !authentication.isCheckingSession && authentication.isAuthenticated
               ? <Navigate to="/app" replace />
-              : <LoginPage {...authentication} />
+              : <Suspense fallback={publicPageFallback}><LoginPage {...authentication} /></Suspense>
           }
         />
         <Route

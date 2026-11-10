@@ -2,7 +2,6 @@ import { Suspense, lazy, memo, useMemo, useCallback, useState } from 'react';
 import { Dialog, DialogBody, DialogSurface, DialogTitle, Spinner, Tooltip, Text } from '@fluentui/react-components';
 import { CopilotMessage } from '@fluentui-copilot/react-copilot-chat';
 import { DocumentRegular, GlobeRegular, OpenRegular, ArrowSyncRegular } from '@fluentui/react-icons';
-import { Markdown } from '../core/Markdown';
 import { MessageActions } from './MessageActions';
 import { TechnicalVisualGallery } from './TechnicalVisualGallery';
 import { DialogCloseButton } from '../core/DialogCloseButton';
@@ -14,6 +13,10 @@ import styles from './AssistantMessage.module.css';
 
 const TechnicalSourcePdfDialog = lazy(() => import('./TechnicalSourcePdfDialog').then(module => ({
   default: module.TechnicalSourcePdfDialog,
+})));
+
+const Markdown = lazy(() => import('../core/Markdown').then(module => ({
+  default: module.Markdown,
 })));
 
 function getToolUseLabel(toolName: string): string {

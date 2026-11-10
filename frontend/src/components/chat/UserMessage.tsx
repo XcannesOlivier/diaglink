@@ -1,10 +1,13 @@
-import { Suspense, memo } from 'react';
+import { Suspense, lazy, memo } from 'react';
 import { Spinner, Badge } from '@fluentui/react-components';
 import { Attach24Regular, ImageRegular } from '@fluentui/react-icons';
 import { UserMessage as CopilotUserMessage } from '@fluentui-copilot/react-copilot-chat';
-import { Markdown } from '../core/Markdown';
 import type { IChatItem } from '../../types/chat';
 import styles from './UserMessage.module.css';
+
+const Markdown = lazy(() => import('../core/Markdown').then(module => ({
+  default: module.Markdown,
+})));
 
 interface UserMessageProps {
   message: IChatItem;
