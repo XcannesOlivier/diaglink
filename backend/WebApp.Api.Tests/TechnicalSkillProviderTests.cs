@@ -104,12 +104,12 @@ public sealed class TechnicalSkillProviderTests
     }
 
     [TestMethod]
-    public void BuildOutput_ContainsBothPromptsAndExactlyThirteenApprovedSkills()
+    public void BuildOutput_ContainsSinglePromptAndExactlyThirteenApprovedSkills()
     {
         var promptsDirectory = Path.Combine(AppContext.BaseDirectory, "Prompts");
 
-        Assert.IsTrue(File.Exists(Path.Combine(promptsDirectory, "TechnicalAssistantPrompt.claude-direct.txt")));
         Assert.IsTrue(File.Exists(Path.Combine(promptsDirectory, "TechnicalAssistantPrompt.claude-direct.skills.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(promptsDirectory, "TechnicalAssistantPrompt.claude-direct.txt")));
 
         var actualSkillFiles = Directory
             .EnumerateFiles(Path.Combine(promptsDirectory, "Skills"), "SKILL.md", SearchOption.AllDirectories)

@@ -25,7 +25,7 @@ public static class CompanyFinanceEndpoints
         group.MapGet("/consumption", ReadConsumptionAsync);
         group.MapPost("/invoice-payment", InvoicePaymentAsync);
         group.MapGet("/topups", ReadTopUpsAsync);
-        group.MapPost("/topups", StartAsync);
+        group.MapPost("/topups", () => Results.Forbid());
         app.MapPost("/api/company/stripe/machines/{machineId:guid}/status", SetMachineStatusAsync)
             .RequireAuthorization("CompanyAdminOnly");
     }
@@ -102,7 +102,7 @@ public static class CompanyFinanceEndpoints
         return Results.Ok(new CompanyFinanceSummary(remaining,wallet?.Balance??0,account?.SubscriptionStatus,
             account?.CurrentPeriodEndUtc is DateTime end ? DateTime.SpecifyKind(end,DateTimeKind.Utc) : null,
             account?.CancelAtPeriodEnd??false,account?.LatestInvoiceStatus=="open" && account.AmountRemainingCents>0 ? account.AmountRemainingCents/100m : null,
-            CompanyWalletTopUpService.Configured(settings) && (wallet==null || wallet.Currency=="EUR"),credit?.Status,credit?.Allowed==false?credit.Message:null)
+            false,credit?.Status,credit?.Allowed==false?credit.Message:null)
         {
             MachineCreditResetUtc = periods.Count == 1 && periods[0].Status == "Active"
                 ? DateTime.SpecifyKind(periods[0].PeriodEndUtc, DateTimeKind.Utc) : null

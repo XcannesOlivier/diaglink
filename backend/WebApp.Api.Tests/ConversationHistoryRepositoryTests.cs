@@ -762,7 +762,7 @@ public class ConversationHistoryRepositoryTests
     }
 
     [TestMethod]
-    public async Task AddAssistantMessageAsync_PersistsAndReturnsSourcesWithoutPrivateFields()
+    public async Task AddAssistantMessageAsync_PersistsDocumentIdentityWithoutBlobFields()
     {
         var dbName = Guid.NewGuid().ToString();
         await SeedEmptyConversationAsync(dbName, "conv-sources", "user-A");
@@ -791,12 +791,12 @@ public class ConversationHistoryRepositoryTests
         Assert.AreEqual(source.PdfPage, persisted.PdfPage);
         Assert.IsTrue(result.Sources.Single().Id > 0);
         CollectionAssert.AreEqual(result.Sources.ToList(), historyMessage.Sources.ToList());
-        Assert.IsNull(typeof(ConversationMessageSourceReferenceInfo).GetProperty("DocumentId"));
+        Assert.AreEqual(source.DocumentId, result.Sources.Single().DocumentId);
         Assert.IsNull(typeof(ConversationMessageSourceReferenceInfo).GetProperty("SourceBlob"));
         var json = System.Text.Json.JsonSerializer.Serialize(
             historyMessage.Sources,
             new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
-        Assert.IsFalse(json.Contains("documentId", StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(json.Contains("documentId", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(json.Contains("sourceBlob", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(json.Contains("https://", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(json.Contains("sig=", StringComparison.OrdinalIgnoreCase));

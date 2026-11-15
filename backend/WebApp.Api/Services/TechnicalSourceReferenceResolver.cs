@@ -52,10 +52,6 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
             return [];
         }
 
-        // Visuals are intentionally not documentary provenance: an image may have been
-        // consulted for another part of the answer. Only File Search results establish
-        // document/page evidence for citations.
-        _ = visuals;
         var currentDocumentIds = allowedDocumentIds
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
@@ -103,10 +99,8 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
             .Where(item => currentPageMaps.ContainsKey(item.DocumentId))
             .ToArray();
         var resolutions = new Dictionary<PageMention, ResolvedMention>();
-        var isSingleDocument = currentDocumentIds.Length == 1;
-
-        ResolvePhysicalGroups(mentions, currentPageMaps, evidence, isSingleDocument, resolutions);
-        ResolveDisplayMentions(mentions, currentPageMaps, evidence, isSingleDocument, resolutions);
+        ResolvePhysicalGroups(mentions, currentPageMaps, evidence, visuals, resolutions);
+        ResolveDisplayMentions(mentions, currentPageMaps, evidence, resolutions);
         ResolveFromHistoricalEvidence(
             mentions,
             pageMaps,
@@ -133,7 +127,7 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
             {
                 DocumentName = pageMaps[resolution.DocumentId].DocumentName,
                 VersionToken = pageMaps[resolution.DocumentId].VersionToken,
-                PageKind = mention.PageKind
+                PageKind = resolution.PageKind
             });
         }
 
@@ -201,7 +195,8 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
                 {
                     resolutions[mention] = new(
                         documentId,
-                        int.Parse(mention.Page, CultureInfo.InvariantCulture));
+                        int.Parse(mention.Page, CultureInfo.InvariantCulture),
+                        TechnicalSourcePageKind.Pdf);
                 }
             }
         }
@@ -273,7 +268,7 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
         IReadOnlyList<PageMention> mentions,
         IReadOnlyDictionary<string, TechnicalPageMapResolution> pageMaps,
         IReadOnlyCollection<TechnicalDocumentPageEvidence> evidence,
-        bool isSingleDocument,
+        IReadOnlyCollection<TechnicalVisualReference> visuals,
         IDictionary<PageMention, ResolvedMention> resolutions)
     {
         foreach (var group in mentions
@@ -295,18 +290,38 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
                             proof.PdfPage == page))
                     .Select(item => item.Key)
                     .ToArray();
+                var visualDocuments = pageMaps
+                    .Where(item =>
+                        item.Value.PdfPages.Contains(page) &&
+                        visuals.Any(visual =>
+                            string.Equals(visual.DocumentId, item.Key, StringComparison.Ordinal) &&
+                            visual.Page == page))
+                    .Select(item => item.Key)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                var pageDocuments = pageMaps
+                    .Where(item => item.Value.PdfPages.Contains(page))
+                    .Select(item => item.Key)
+                    .ToArray();
 
-                string? documentId = evidencedDocuments.Length == 1
+                var hasConflictingVisual = evidencedDocuments.Length == 1 &&
+                    visualDocuments.Any(documentId =>
+                        !string.Equals(documentId, evidencedDocuments[0], StringComparison.Ordinal));
+                string? documentId = evidencedDocuments.Length == 1 && !hasConflictingVisual
                     ? evidencedDocuments[0]
-                    : evidencedDocuments.Length == 0 && isSingleDocument && pageMaps.Count == 1
-                        ? pageMaps.Keys.Single()
-                        : null;
+                    : evidencedDocuments.Length > 0
+                        ? null
+                        : mention.CitationAnchor is null && visualDocuments.Length == 1
+                            ? visualDocuments[0]
+                            : visualDocuments.Length == 0 && pageDocuments.Length == 1
+                                ? pageDocuments[0]
+                                : null;
                 if (documentId is null || !pageMaps[documentId].PdfPages.Contains(page))
                 {
                     continue;
                 }
 
-                resolutions.Add(mention, new(documentId, page));
+                resolutions.Add(mention, new(documentId, page, TechnicalSourcePageKind.Pdf));
             }
         }
     }
@@ -315,7 +330,6 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
         IEnumerable<PageMention> mentions,
         IReadOnlyDictionary<string, TechnicalPageMapResolution> pageMaps,
         IReadOnlyCollection<TechnicalDocumentPageEvidence> evidence,
-        bool isSingleDocument,
         IDictionary<PageMention, ResolvedMention> resolutions)
     {
         foreach (var mention in mentions.Where(mention => mention.PageKind == TechnicalSourcePageKind.Display))
@@ -333,11 +347,49 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
                     (mention.CitationAnchor is null || evidence.Any(proof =>
                         string.Equals(proof.DocumentId, candidate.DocumentId, StringComparison.Ordinal) &&
                         EvidenceContainsCitationAnchor(proof, mention.CitationAnchor))))
+                .Distinct()
                 .ToArray();
 
-            var resolution = evidencedCandidates.Length == 1
-                ? evidencedCandidates[0]
-                : evidencedCandidates.Length == 0 && isSingleDocument && candidates.Length == 1
+            ResolvedMention[] physicalEvidenceCandidates = [];
+            var hasNumericPage = int.TryParse(
+                mention.Page,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var physicalPage) && physicalPage > 0;
+            if (mention.IsDocumentarySourceLine && hasNumericPage)
+            {
+                // File Search page markers are physical PDF pages. The model can still render
+                // the trusted value as `p. N`; reinterpret that shorthand only on the explicit
+                // documentary source line and only from physical-page evidence.
+                physicalEvidenceCandidates = pageMaps
+                    .Where(item =>
+                        item.Value.PdfPages.Contains(physicalPage) &&
+                        evidence.Any(proof =>
+                            string.Equals(proof.DocumentId, item.Key, StringComparison.Ordinal) &&
+                            proof.PdfPage == physicalPage &&
+                            (mention.CitationAnchor is null ||
+                             EvidenceContainsCitationAnchor(proof, mention.CitationAnchor))))
+                    .Select(item => new ResolvedMention(
+                        item.Key,
+                        physicalPage,
+                        TechnicalSourcePageKind.Pdf))
+                    .Distinct()
+                    .ToArray();
+            }
+
+            // Evidence is authoritative. A physical `Page: N` proof must beat an unrelated
+            // document whose printed page happens to be N. Conflicting proved destinations stay
+            // ambiguous; a unique page-map fallback is used only when no proof resolves the label.
+            var evidencedDestinations = evidencedCandidates
+                .Concat(physicalEvidenceCandidates)
+                .GroupBy(candidate => (candidate.DocumentId, candidate.PdfPage))
+                .Select(group => group.FirstOrDefault(candidate => candidate.PageKind == TechnicalSourcePageKind.Pdf) ?? group.First())
+                .ToArray();
+            var hasPhysicalEvidenceForMention = hasNumericPage &&
+                evidence.Any(proof => proof.PdfPage == physicalPage);
+            ResolvedMention? resolution = evidencedDestinations.Length == 1
+                ? evidencedDestinations[0]
+                : evidencedDestinations.Length == 0 && !hasPhysicalEvidenceForMention && candidates.Length == 1
                     ? candidates[0]
                     : null;
             if (resolution is not null)
@@ -515,6 +567,7 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
         lineStart = lineStart < 0 ? 0 : lineStart + 1;
         var prefix = text[lineStart..startIndex];
         var isPhysical = PdfPageHeadingPattern().IsMatch(prefix);
+        var isDocumentarySourceLine = DocumentarySourceLineHeadingPattern().IsMatch(prefix);
         var anchorMatch = CitationAnchorAtEndPattern().Match(prefix);
         var citationAnchor = anchorMatch.Success &&
             anchorMatch.Groups["anchor"].Value.Any(char.IsLetter) &&
@@ -528,7 +581,8 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
             endIndex,
             isPhysical ? TechnicalSourcePageKind.Pdf : TechnicalSourcePageKind.Display,
             isPhysical ? lineStart : startIndex,
-            citationAnchor);
+            citationAnchor,
+            isDocumentarySourceLine);
     }
 
     private static bool EvidenceContainsCitationAnchor(
@@ -558,6 +612,11 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
     private static partial Regex PdfPageHeadingPattern();
 
     [GeneratedRegex(
+        @"^\s*(?:#{1,6}\s*)?(?:[-*]\s+)?(?:\*\*|__)?\s*(?:📄\s*)?(?:\*\*|__)?\s*(?:sources?|r[eé]f[eé]rences?)(?:\s+constructeur)?\s*(?:\*\*|__)?\s*:",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex DocumentarySourceLineHeadingPattern();
+
+    [GeneratedRegex(
         @"\bpages?\s+PDF\s*:\s*(?:p\.\s*)?(?<page>[0-9]+(?:-[0-9]+)?)(?![0-9])",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex PhysicalPagePattern();
@@ -580,7 +639,11 @@ public sealed partial class TechnicalSourceReferenceResolver(TechnicalPageMapRes
         int EndIndex,
         TechnicalSourcePageKind PageKind,
         int GroupStartIndex,
-        string? CitationAnchor);
+        string? CitationAnchor,
+        bool IsDocumentarySourceLine);
 
-    private sealed record ResolvedMention(string DocumentId, int PdfPage);
+    private sealed record ResolvedMention(
+        string DocumentId,
+        int PdfPage,
+        TechnicalSourcePageKind PageKind = TechnicalSourcePageKind.Display);
 }

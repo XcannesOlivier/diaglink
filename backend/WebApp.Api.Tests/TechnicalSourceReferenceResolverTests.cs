@@ -281,7 +281,7 @@ public sealed class TechnicalSourceReferenceResolverTests
     }
 
     [TestMethod]
-    public async Task MultipleDocumentsDoNotResolveUniqueDisplayedPageWithoutEvidence()
+    public async Task MultipleDocumentsResolveUniqueDisplayedPageWithoutExtraEvidence()
     {
         var fixture = Fixture.WithDocuments(
             (DocumentId, Fixture.PageMap(DocumentId, """{"pdfPage":72,"displayPage":"70","source":"ExtractedText"}""")),
@@ -294,8 +294,172 @@ public sealed class TechnicalSourceReferenceResolverTests
             [DocumentId, "another-manual", "parts-catalog"],
             default);
 
-        Assert.IsEmpty(references);
+        var reference = references.Single();
+        Assert.AreEqual("parts-catalog", reference.DocumentId);
+        Assert.AreEqual(9, reference.PdfPage);
         Assert.AreEqual(3, fixture.Reader.OpenCount);
+    }
+
+    [TestMethod]
+    public async Task MultipleDocumentsResolveUniquePhysicalPageWithoutExtraEvidence()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("manual-a", Fixture.PageMap("manual-a", """{"pdfPage":214,"displayPage":null,"source":"ExtractedText"}""")),
+            ("manual-b", Fixture.PageMap("manual-b", """{"pdfPage":670,"displayPage":null,"source":"ExtractedText"}""")));
+
+        var references = await fixture.Resolver.ResolveAsync(
+            "Source : Page PDF : 670", BlobPrefix, ["manual-a", "manual-b"], [], [], default);
+
+        var reference = references.Single();
+        Assert.AreEqual("manual-b", reference.DocumentId);
+        Assert.AreEqual(670, reference.PdfPage);
+        Assert.AreEqual(TechnicalSourcePageKind.Pdf, reference.PageKind);
+    }
+
+    [TestMethod]
+    public async Task FileSearchPhysicalPagesRemainLinkableOnSourceLineWhenModelWritesShortPageLabels()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("catalog", Fixture.PageMap("catalog", """
+                {"pdfPage":246,"displayPage":"244","source":"ExtractedText"},
+                {"pdfPage":248,"displayPage":"4-78","source":"ExtractedText"}
+                """)),
+            ("workshop", Fixture.PageMap("workshop", """
+                {"pdfPage":243,"displayPage":"241","source":"ExtractedText"},
+                {"pdfPage":254,"displayPage":"252","source":"ExtractedText"}
+                """)));
+        const string text = """
+            - Catalogue pièces, Fig. 2105 (p. 248)
+            - Manuel d'atelier, p. 243
+            - Manuel d'atelier, p. 254
+            - Manuel d'utilisation, p. 248
+            Source : p. 246 (Fig. 2100), p. 248 (Fig. 2105), p. 243, p. 254, p. 248
+            """;
+
+        var references = await fixture.Resolver.ResolveAsync(
+            text,
+            BlobPrefix,
+            ["catalog", "workshop"],
+            [
+                new("catalog", 246, "Document ID: catalog\nPage: 246"),
+                new("catalog", 248, "Document ID: catalog\nPage: 248"),
+                new("workshop", 243, "Document ID: workshop\nPage: 243"),
+                new("workshop", 254, "Document ID: workshop\nPage: 254")
+            ],
+            [],
+            default);
+
+        var sourceLineStart = text.IndexOf("Source :", StringComparison.Ordinal);
+
+        Assert.HasCount(5, references);
+        Assert.IsTrue(references.All(reference => reference.PageKind == TechnicalSourcePageKind.Pdf));
+        CollectionAssert.AreEqual(
+            new[] { 246, 248, 243, 254, 248 },
+            references.Select(reference => reference.PdfPage).ToArray());
+        Assert.IsTrue(references.All(reference => reference.StartIndex > sourceLineStart));
+        Assert.IsTrue(references.Where(reference => reference.PdfPage is 246 or 248)
+            .All(reference => reference.DocumentId == "catalog"));
+        Assert.IsTrue(references.Where(reference => reference.PdfPage is 243 or 254)
+            .All(reference => reference.DocumentId == "workshop"));
+    }
+
+    [TestMethod]
+    public async Task PhysicalEvidenceDoesNotRewriteShortPageLabelOutsideDocumentarySourceLine()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("catalog", Fixture.PageMap("catalog", """{"pdfPage":248,"displayPage":"4-78","source":"ExtractedText"}""")));
+
+        var references = await fixture.Resolver.ResolveAsync(
+            "Manuel d'utilisation, p. 248",
+            BlobPrefix,
+            ["catalog"],
+            [new("catalog", 248, "Document ID: catalog\nPage: 248")],
+            [],
+            default);
+
+        Assert.IsEmpty(references);
+    }
+
+    [TestMethod]
+    public async Task PageNumberEvidenceIsTreatedAsPhysicalPage()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("manual", Fixture.PageMap("manual", """{"pdfPage":248,"displayPage":"244","source":"ExtractedText"}""")),
+            ("other-manual", Fixture.PageMap("other-manual", """{"pdfPage":248,"displayPage":"240","source":"ExtractedText"}""")));
+        var physicalEvidence = new TechnicalDocumentPageEvidence(
+            "manual",
+            248,
+            "Document ID: manual\nPage number: 248");
+
+        var shortLabelReferences = await fixture.Resolver.ResolveAsync(
+            "Source : p. 248", BlobPrefix, ["manual", "other-manual"], [physicalEvidence], [], default);
+        var explicitPhysicalReferences = await fixture.Resolver.ResolveAsync(
+            "Source : Page PDF : 248", BlobPrefix, ["manual", "other-manual"], [physicalEvidence], [], default);
+
+        Assert.AreEqual("manual", shortLabelReferences.Single().DocumentId);
+        Assert.AreEqual(TechnicalSourcePageKind.Pdf, shortLabelReferences.Single().PageKind);
+        Assert.AreEqual("manual", explicitPhysicalReferences.Single().DocumentId);
+        Assert.AreEqual(TechnicalSourcePageKind.Pdf, explicitPhysicalReferences.Single().PageKind);
+    }
+
+    [TestMethod]
+    public async Task PhysicalSourceEvidenceBeatsUnprovedDisplayedPageInAnotherDocument()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("catalog", Fixture.PageMap("catalog", """{"pdfPage":246,"displayPage":"244","source":"ExtractedText"}""")),
+            ("workshop", Fixture.PageMap("workshop", """{"pdfPage":300,"displayPage":"246","source":"ExtractedText"}""")));
+
+        var references = await fixture.Resolver.ResolveAsync(
+            "Source : p. 246",
+            BlobPrefix,
+            ["catalog", "workshop"],
+            [new("catalog", 246, "Document ID: catalog\nPage: 246")],
+            [],
+            default);
+
+        var reference = references.Single();
+        Assert.AreEqual("catalog", reference.DocumentId);
+        Assert.AreEqual(246, reference.PdfPage);
+        Assert.AreEqual(TechnicalSourcePageKind.Pdf, reference.PageKind);
+    }
+
+    [TestMethod]
+    public async Task PhysicalEvidenceCannotBeReusedAsPrintedPageEvidence()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("catalog", Fixture.PageMap("catalog", """{"pdfPage":246,"displayPage":"244","source":"ExtractedText"}""")),
+            ("workshop", Fixture.PageMap("workshop", """{"pdfPage":300,"displayPage":"246","source":"ExtractedText"}""")));
+
+        var references = await fixture.Resolver.ResolveAsync(
+            "Source : p. 246",
+            BlobPrefix,
+            ["catalog", "workshop"],
+            [new("workshop", 246, "Document ID: workshop\nPage number: 246")],
+            [],
+            default);
+
+        Assert.IsEmpty(references);
+    }
+
+    [TestMethod]
+    public async Task SamePhysicalPageProvedForTwoDocumentsRemainsAmbiguous()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("catalog", Fixture.PageMap("catalog", """{"pdfPage":248,"displayPage":"244","source":"ExtractedText"}""")),
+            ("operator", Fixture.PageMap("operator", """{"pdfPage":248,"displayPage":"4-78","source":"ExtractedText"}""")));
+
+        var references = await fixture.Resolver.ResolveAsync(
+            "Source : p. 248",
+            BlobPrefix,
+            ["catalog", "operator"],
+            [
+                new("catalog", 248, "Document ID: catalog\nPage: 248"),
+                new("operator", 248, "Document ID: operator\nPage: 248")
+            ],
+            [],
+            default);
+
+        Assert.IsEmpty(references);
     }
 
     [TestMethod]
@@ -630,14 +794,14 @@ public sealed class TechnicalSourceReferenceResolverTests
     }
 
     [TestMethod]
-    public async Task PhysicalCitationWithThreeDocumentsRequiresConfirmedDocumentPagePair()
+    public async Task PhysicalCitationUsesExactVisualOnlyWhenFileSearchHasNoPagePair()
     {
         var fixture = Fixture.WithDocuments(
             ("dx225-operator", Fixture.PageMap("dx225-operator", """{"pdfPage":20,"displayPage":"16","source":"ExtractedText"}""")),
             ("dx225-workshop", Fixture.PageMap("dx225-workshop", """{"pdfPage":20,"displayPage":"18","source":"ExtractedText"}""")),
             ("dx225-parts", Fixture.PageMap("dx225-parts", """{"pdfPage":20,"displayPage":null,"source":"ExtractedText"}""")));
 
-        var unconfirmed = await fixture.Resolver.ResolveAsync(
+        var visualConfirmed = await fixture.Resolver.ResolveAsync(
             "Page PDF : p. 20",
             BlobPrefix,
             ["dx225-operator", "dx225-workshop", "dx225-parts"],
@@ -651,10 +815,103 @@ public sealed class TechnicalSourceReferenceResolverTests
             [new("dx225-workshop", 20)],
             [new("dx225-parts", 20, "full", null, "parts.png", "dx225-parts/page-00020/parts.png")],
             default);
+        var fileSearchConfirmed = await fixture.Resolver.ResolveAsync(
+            "Page PDF : p. 20",
+            BlobPrefix,
+            ["dx225-operator", "dx225-workshop", "dx225-parts"],
+            [new("dx225-workshop", 20)],
+            [],
+            default);
 
-        Assert.IsEmpty(unconfirmed);
-        Assert.AreEqual("dx225-workshop", confirmed.Single().DocumentId);
-        Assert.AreEqual(TechnicalSourcePageKind.Pdf, confirmed.Single().PageKind);
+        Assert.AreEqual("dx225-parts", visualConfirmed.Single().DocumentId);
+        Assert.IsEmpty(confirmed);
+        Assert.AreEqual("dx225-workshop", fileSearchConfirmed.Single().DocumentId);
+        Assert.AreEqual(TechnicalSourcePageKind.Pdf, fileSearchConfirmed.Single().PageKind);
+    }
+
+    [TestMethod]
+    public async Task PhysicalCitationRequiresOneVisualDocumentButAllowsFullAndTileDuplicates()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("manual-a", Fixture.PageMap("manual-a", """{"pdfPage":20,"displayPage":"18","source":"ExtractedText"}""")),
+            ("manual-b", Fixture.PageMap("manual-b", """{"pdfPage":20,"displayPage":"19","source":"ExtractedText"}""")));
+
+        var duplicateVisuals = await fixture.Resolver.ResolveAsync(
+            "Page PDF : 20",
+            BlobPrefix,
+            ["manual-a", "manual-b"],
+            [],
+            [
+                new("manual-a", 20, "full", null, "full.png", "manual-a/page-00020/full.png"),
+                new("manual-a", 20, "tile", "1", "tile.png", "manual-a/page-00020/tile.png")
+            ],
+            default);
+        var conflictingVisuals = await fixture.Resolver.ResolveAsync(
+            "Page PDF : 20",
+            BlobPrefix,
+            ["manual-a", "manual-b"],
+            [],
+            [
+                new("manual-a", 20, "full", null, "a.png", "manual-a/page-00020/a.png"),
+                new("manual-b", 20, "full", null, "b.png", "manual-b/page-00020/b.png")
+            ],
+            default);
+        var wrongPageVisual = await fixture.Resolver.ResolveAsync(
+            "Page PDF : 20",
+            BlobPrefix,
+            ["manual-a", "manual-b"],
+            [],
+            [new("manual-a", 21, "full", null, "wrong.png", "manual-a/page-00021/wrong.png")],
+            default);
+
+        Assert.AreEqual("manual-a", duplicateVisuals.Single().DocumentId);
+        Assert.IsEmpty(conflictingVisuals);
+        Assert.IsEmpty(wrongPageVisual);
+    }
+
+    [TestMethod]
+    public async Task ProductionTrackPlanSourcesResolveAcrossOverlappingPhysicalPageMaps()
+    {
+        var fixture = Fixture.WithDocuments(
+            ("dx225-parts", Fixture.PageMap("dx225-parts", """
+                {"pdfPage":234,"displayPage":null,"source":"Unknown"},
+                {"pdfPage":243,"displayPage":"2","source":"ExtractedText"},
+                {"pdfPage":246,"displayPage":null,"source":"Unknown"},
+                {"pdfPage":249,"displayPage":null,"source":"Unknown"},
+                {"pdfPage":258,"displayPage":null,"source":"Unknown"},
+                {"pdfPage":264,"displayPage":null,"source":"Unknown"}
+                """)),
+            ("dx225-workshop", Fixture.PageMap("dx225-workshop", """
+                {"pdfPage":234,"displayPage":"8","source":"ExtractedText"},
+                {"pdfPage":243,"displayPage":"17","source":"ExtractedText"},
+                {"pdfPage":246,"displayPage":"20","source":"ExtractedText"},
+                {"pdfPage":249,"displayPage":"23","source":"ExtractedText"},
+                {"pdfPage":258,"displayPage":"32","source":"ExtractedText"},
+                {"pdfPage":264,"displayPage":"2","source":"ExtractedText"}
+                """)));
+        const string text = "Source : Page PDF : 246, Page PDF : 258, Page PDF : 264, Page PDF : 234, Page PDF : 243";
+
+        var references = await fixture.Resolver.ResolveAsync(
+            text,
+            BlobPrefix,
+            ["dx225-parts", "dx225-workshop"],
+            [
+                new("dx225-parts", 249),
+                new("dx225-parts", 258),
+                new("dx225-parts", 264),
+                new("dx225-workshop", 234),
+                new("dx225-workshop", 243)
+            ],
+            [new("dx225-parts", 246, "full", null, "page.png", "dx225-parts/page-00246/page.png")],
+            default);
+
+        Assert.HasCount(5, references);
+        CollectionAssert.AreEqual(
+            new[] { 246, 258, 264, 234, 243 },
+            references.Select(reference => reference.PdfPage).ToArray());
+        CollectionAssert.AreEqual(
+            new[] { "dx225-parts", "dx225-parts", "dx225-parts", "dx225-workshop", "dx225-workshop" },
+            references.Select(reference => reference.DocumentId).ToArray());
     }
 
     [TestMethod]

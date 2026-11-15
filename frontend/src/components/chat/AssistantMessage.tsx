@@ -74,13 +74,14 @@ function AssistantMessageComponent({
   }, [message.annotations]);
 
   const technicalSourceGroups = useMemo(() => {
-    const groups = new Map<string, { documentName: string; pages: TechnicalSourceReference[] }>();
+    const groups = new Map<string, { key: string; documentName: string; pages: TechnicalSourceReference[] }>();
     message.sources?.forEach((source) => {
       const documentName = source.documentName || 'Document constructeur';
-      let group = groups.get(documentName);
+      const groupKey = source.documentId || `legacy:${documentName}`;
+      let group = groups.get(groupKey);
       if (!group) {
-        group = { documentName, pages: [] };
-        groups.set(documentName, group);
+        group = { key: groupKey, documentName, pages: [] };
+        groups.set(groupKey, group);
       }
       const samePhysicalPage = group.pages.findIndex(page => page.pdfPage === source.pdfPage);
       if (samePhysicalPage < 0) {
@@ -289,7 +290,7 @@ function AssistantMessageComponent({
               <span className={styles.technicalSourcesLabel}>Sources :</span>
               <ul className={styles.technicalSourceList}>
                 {technicalSourceGroups.map(group => (
-                  <li key={group.documentName} className={styles.technicalSourceDocument}>
+                  <li key={group.key} className={styles.technicalSourceDocument}>
                     <span className={styles.technicalSourceName} title={group.documentName}>
                       {group.documentName}
                     </span>

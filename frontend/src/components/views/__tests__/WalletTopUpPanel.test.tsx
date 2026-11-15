@@ -34,6 +34,7 @@ describe('Super Admin wallet consultation', () => {
     read.mockReset();
     start.mockReset();
     read.mockResolvedValue({ kind: 'success', data: overview });
+    localStorage.clear();
     box = document.createElement('div');
     document.body.append(box);
     root = createRoot(box);
@@ -42,6 +43,8 @@ describe('Super Admin wallet consultation', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     box.remove();
+    localStorage.clear();
+    vi.unstubAllGlobals();
   });
 
   async function render() {
@@ -67,16 +70,29 @@ describe('Super Admin wallet consultation', () => {
     expect(toggle.textContent).toBe('Masquer l’historique des recharges');expect(toggle.getAttribute('aria-expanded')).toBe('true');
     await act(async()=>toggle.click());expect(box.querySelector('[aria-label="Détail de l’historique des recharges de crédit"]')).toBeNull();
 
-    expect(box.querySelector('input')).toBeNull();
+    expect(box.querySelector<HTMLInputElement>('input')?.value).toBe('20');
     expect(box.querySelector('a')).toBeNull();
-    expect([...box.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Voir l’historique des recharges']);
-    expect(box.textContent).not.toContain(new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(42.5));
-    expect(box.textContent).not.toContain('1 € payé = 1 € de crédits');
-    expect(box.textContent).not.toContain('Montant libre en euros');
-    expect(box.textContent).not.toContain('Passer au paiement');
+    expect(box.textContent).toContain(new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(42.5));
+    expect(box.textContent).toContain('1 € payé = 1 € de crédits');
+    expect(box.textContent).toContain('Montant libre en euros');
+    expect(box.textContent).toContain('Passer au paiement');
     expect(box.textContent).not.toContain('Reprendre la recharge');
     expect(box.textContent).not.toContain('Réessayer la recharge');
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it('starts an idempotent Stripe checkout and redirects the Super Admin', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { assign });
+    start.mockResolvedValue({ kind: 'success', data: awaiting });
+    await render();
+
+    const button = [...box.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Passer au paiement')!;
+    await act(async () => button.click());
+
+    expect(start).toHaveBeenCalledWith(token, 'c1', expect.any(String), 20);
+    expect(assign).toHaveBeenCalledExactlyOnceWith('https://checkout.stripe.com/c/pay/test');
+    expect(localStorage.getItem('diaglink:wallet-topup:c1')).toBeNull();
   });
 
   it('keeps technical and intervention information read-only', async () => {

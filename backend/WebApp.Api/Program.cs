@@ -1461,7 +1461,12 @@ app.MapPost("/api/chat/stream", async (
             try
             {
                 stageStopwatch.Restart();
-                await historyRepository.AddMessageAsync(conversationId, userObjectId, "user", request.Message, cancellationToken);
+                await historyRepository.AddMessageAsync(
+                    conversationId,
+                    userObjectId,
+                    "user",
+                    request.Message,
+                    cancellationToken);
                 LogStage("UserMessageWriteSql", stageStopwatch.ElapsedMilliseconds, "success");
             }
             catch (Exception ex)

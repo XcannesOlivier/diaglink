@@ -5,6 +5,7 @@ import { parseTechnicalSources, prepareTechnicalSourceContent } from '../technic
 function source(overrides: Partial<TechnicalSourceReference> = {}): TechnicalSourceReference {
   return {
     id: 123,
+    documentId: 'manual-123',
     pdfPage: 74,
     displayPage: '72',
     label: 'p. 72',
@@ -26,6 +27,7 @@ describe('parseTechnicalSources', () => {
     ]);
 
     expect(result.map(item => item.id)).toEqual([123, 124, 125]);
+    expect(result[0].documentId).toBe('manual-123');
     expect(result[2]).not.toHaveProperty('sourceBlob');
   });
 
@@ -33,6 +35,7 @@ describe('parseTechnicalSources', () => {
     expect(parseTechnicalSources(undefined)).toEqual([]);
     expect(parseTechnicalSources([])).toEqual([]);
     expect(parseTechnicalSources([{ id: '123' }])).toEqual([]);
+    expect(parseTechnicalSources([{ ...source(), documentId: '../manual' }])).toEqual([]);
   });
 });
 

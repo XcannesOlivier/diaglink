@@ -11,7 +11,6 @@ import {MachineSubscriptionDialog} from './MachineSubscriptionDialog';
 import {subscriptionStatusLabel} from '../../utils/statusLabels';
 
 const euro=(n:number)=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',maximumFractionDigits:2}).format(n);
-type Pending={requestId:string;amount:number;currency:'EUR'};
 export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionExpired}:{companyId:string;machine?:{id:string;name:string};getAccessToken:()=>Promise<string|null>;onDiagLinkSessionExpired?:()=>void}) {
   const [data,setData]=useState<FinanceSummary|null>(null);
   const [machines,setMachines]=useState<MachineDto[]|null>(null);
@@ -27,7 +26,7 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
   const machinesListId=useId();
   useEffect(()=>{setExpandedMachines(false);setMachineSearch('');setOpenMachines(new Set());setManagedMachine(null);},[companyId]);
   const machineCount=machines?.filter(m=>m.status==='active').length??null;
-  const [message,setMessage]=useState(''),[amount,setAmount]=useState('20'),[busy,setBusy]=useState(false),[revision,setRevision]=useState(0);
+  const [message,setMessage]=useState(''),[busy,setBusy]=useState(false),[revision,setRevision]=useState(0);
   useEffect(()=>{let active=true;setMachines(null);setMachinesError(false);getMachines(getAccessToken).then(result=>{
     if(!active)return;
     if(result.kind==='success')setMachines(result.data.filter(m=>m.companyId===companyId));
@@ -50,8 +49,6 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
     setMessage('Facture indisponible. Actualisez le compte ou réessayez plus tard.');
     if(result.kind==='unauthorized'&&result.diagLinkSessionExpired)onDiagLinkSessionExpired?.();
   }
-  const key=`diaglink:client-topup:${companyId}`;
-  const [pending,setPending]=useState<Pending|null>(()=>{try{const p=JSON.parse(localStorage.getItem(key)||'null');return p&&typeof p.requestId==='string'&&typeof p.amount==='number'&&p.currency==='EUR'?p:null;}catch{return null;}});
   useEffect(()=>{
     const current=++generation.current;setData(null);setMessage('');
     Promise.all([financeRequest<FinanceSummary>(getAccessToken,''),financeRequest<ClientTopUp[]>(getAccessToken,'/topups')]).then(([summary,topups])=>{
@@ -61,25 +58,6 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
       for(const result of [summary,topups])if(result.kind==='unauthorized'&&result.diagLinkSessionExpired)onDiagLinkSessionExpired?.();
     });return()=>{generation.current=current+1;};
   },[companyId,getAccessToken,onDiagLinkSessionExpired,revision]);
-  async function recharge(){
-    if(lock.current||!data?.rechargeEnabled)return;
-    const value=Number(amount.replace(',','.'));
-    if(!pending&&(!/^\d+(?:[.,]\d{1,2})?$/.test(amount)||value<10||value>999999.99)){setMessage('Saisissez au moins 10 €, avec deux décimales au maximum.');return;}
-    const op:Pending=pending??{requestId:crypto.randomUUID(),amount:value,currency:'EUR'};
-    try{localStorage.setItem(key,JSON.stringify(op));}catch{setMessage('Stockage local indisponible. Réessayez plus tard.');return;}
-    setPending(op);lock.current=true;setBusy(true);const current=generation.current;
-    const result=await financeRequest<ClientTopUp>(getAccessToken,'/topups',op);
-    lock.current=false;setBusy(false);if(current!==generation.current)return;
-    if(result.kind==='success'){
-      try{localStorage.removeItem(key);}catch{/* Same key is safe on retry. */}
-      setPending(null);setMessage('');
-      const url=safeUrl(result.data.paymentUrl);
-      if(url){window.location.assign(url);return;}
-      if(result.data.status==='Completed'){setRevision(v=>v+1);return;}
-      setMessage('Paiement indisponible. Veuillez réessayer.');
-    }else{setMessage('Recharge non confirmée. Réessayez la même demande.');if(result.kind==='unauthorized'&&result.diagLinkSessionExpired)onDiagLinkSessionExpired?.();}
-  }
-  function safeUrl(value:string|null){try{const u=new URL(value||'');return u.protocol==='https:'&&u.hostname==='checkout.stripe.com'&&!u.username&&!u.password?u.href:null;}catch{return null;}}
   const normalizedMachineSearch=machineSearch.trim().toLocaleLowerCase('fr-FR');
   const filteredMachines=machines?.filter(machine=>machine.name.toLocaleLowerCase('fr-FR').includes(normalizedMachineSearch))??[];
   const visibleMachines=normalizedMachineSearch||expandedMachines?filteredMachines:filteredMachines.slice(0,5);
@@ -117,12 +95,12 @@ export function CompanyFinancePanel({companyId,getAccessToken,onDiagLinkSessionE
           <div className={styles.recharge}>
             <h4>Ajouter du crédit</h4>
             <div className={`${styles.buttons} ${styles.companyAmountButtons}`}>{[10,20,50,100,200].map(n=>{
-              const selected=Number((pending?String(pending.amount):amount).replace(',','.'))===n;
-              return <Button key={n} appearance={selected?'primary':'secondary'} icon={selected?<CheckmarkRegular/>:undefined} aria-pressed={selected} disabled={busy||!!pending||!data.rechargeEnabled} onClick={()=>setAmount(String(n))}>{n} €</Button>;
+              const selected=n===20;
+              return <Button key={n} appearance={selected?'primary':'secondary'} icon={selected?<CheckmarkRegular/>:undefined} aria-pressed={selected} disabled>{n} €</Button>;
             })}</div>
-            <Field className={styles.amountField} label="Montant libre en euros" hint="Minimum 10 €"><Input className={styles.companyAmountInput} size="large" value={pending?String(pending.amount):amount} disabled={busy||!!pending||!data.rechargeEnabled} onChange={(_,d)=>setAmount(d.value)} inputMode="decimal"/></Field>
-            <Button appearance="primary" disabled={busy||!data.rechargeEnabled} onClick={()=>void recharge()}>{pending?'Réessayer la recharge':'Ajouter du crédit supplémentaire'}</Button>
-            {!data.rechargeEnabled&&<p>La recharge est temporairement indisponible.</p>}
+            <Field className={styles.amountField} label="Montant libre en euros" hint="Minimum 10 €"><Input className={styles.companyAmountInput} size="large" value="20" disabled inputMode="decimal"/></Field>
+            <Button appearance="primary" disabled>Ajouter du crédit supplémentaire</Button>
+            <p>Recharge réservée au Super Admin pendant la phase d’essai.</p>
           </div>
         </article>
       </div>

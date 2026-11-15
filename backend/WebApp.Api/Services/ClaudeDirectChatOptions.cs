@@ -15,7 +15,6 @@ public sealed class ClaudeDirectChatOptions
 
 public sealed class ClaudeDirectSkillOptions
 {
-    public bool Enabled { get; set; }
     public int MaxSkillBytes { get; set; } = 32 * 1024;
 }
 

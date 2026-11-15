@@ -24,6 +24,11 @@ vi.mock('../../core/Markdown', () => ({
     <p data-source-count={sources?.length ?? 0} data-source-label={sources?.[0]?.label}>{content}</p>
   ),
 }));
+vi.mock('../TechnicalSourcePdfDialog', () => ({
+  TechnicalSourcePdfDialog: ({ source }: { source: { id: number; displayPage: string } }) => (
+    <div role="dialog" data-source-id={source.id}>Source page {source.displayPage}</div>
+  ),
+}));
 describe('chat message presentation', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -224,6 +229,32 @@ describe('chat message presentation', () => {
     expect(Array.from(section?.querySelectorAll('button') ?? []).map(button => button.textContent))
       .not.toContain('p. 18');
     expect(section?.querySelector('button')?.hasAttribute('disabled')).toBe(false);
+    await act(async () => section?.querySelector<HTMLButtonElement>('button')?.click());
+    expect(document.body.querySelector('[role="dialog"]')?.getAttribute('data-source-id')).toBe('1');
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('Source page 15');
+  });
+
+  it('keeps documents with the same PDF name in separate source groups', async () => {
+    await act(async () => root.render(
+      <AssistantMessage
+        onLoadTechnicalSource={vi.fn()}
+        message={{
+          id: 'same-document-names',
+          role: 'assistant',
+          content: 'Voir p. 15 et p. 16.',
+          sources: [
+            { id: 11, documentId: 'manual-a', documentName: 'manual.pdf', pdfPage: 17, displayPage: '15', label: 'p. 15', startIndex: 5, endIndex: 10, displayOrder: 0 },
+            { id: 12, documentId: 'manual-b', documentName: 'manual.pdf', pdfPage: 17, displayPage: '16', label: 'p. 16', startIndex: 14, endIndex: 19, displayOrder: 1 },
+          ],
+        }}
+      />,
+    ));
+
+    const section = container.querySelector('section[aria-label="Sources documentaires"]');
+    expect(section?.querySelectorAll('li')).toHaveLength(2);
+    expect(section?.querySelectorAll('button')).toHaveLength(2);
+    expect(Array.from(section?.querySelectorAll('button') ?? []).map(button => button.textContent))
+      .toEqual([expect.stringContaining('p. 15'), expect.stringContaining('p. 16')]);
   });
 
   it('hides a verified historical Claude source line while keeping the structured PDF link', async () => {

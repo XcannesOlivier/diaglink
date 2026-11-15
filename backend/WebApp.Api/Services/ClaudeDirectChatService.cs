@@ -39,7 +39,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
     private static readonly Regex DocumentIdMarkerPattern = new(
         @"\bDocument\s+ID\s*:\s*(?<id>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?=\s|$)",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-    private static readonly Regex PhysicalPageMarkerPattern = new(
+    private static readonly Regex FileSearchPageMarkerPattern = new(
         @"(?im)^\s*(?:PDF\s+)?Page(?:\s+number)?\s*:\s*(?<page>[0-9]{1,5})\s*$",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
@@ -47,7 +47,6 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
     private readonly TokenCredential _credential;
     private readonly ITechnicalVisualBlobReader _blobReader;
     private readonly TechnicalSourceReferenceResolver _sourceReferenceResolver;
-    private readonly ITechnicalAssistantPromptProvider _promptProvider;
     private readonly ITechnicalSkillProvider _skillProvider;
     private readonly ClaudeDirectChatOptions _options;
     private readonly ILogger<ClaudeDirectChatService> _logger;
@@ -57,7 +56,6 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         TokenCredential credential,
         ITechnicalVisualBlobReader blobReader,
         TechnicalSourceReferenceResolver sourceReferenceResolver,
-        ITechnicalAssistantPromptProvider promptProvider,
         ITechnicalSkillProvider skillProvider,
         IOptions<ClaudeDirectChatOptions> options,
         ILogger<ClaudeDirectChatService> logger)
@@ -66,7 +64,6 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         _credential = credential;
         _blobReader = blobReader;
         _sourceReferenceResolver = sourceReferenceResolver;
-        _promptProvider = promptProvider;
         _skillProvider = skillProvider;
         _options = options.Value;
         _logger = logger;
@@ -579,6 +576,19 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                 visuals,
                 request.HistoricalSourceEvidence,
                 cancellationToken));
+            var pageMentionCount = string.IsNullOrEmpty(finalText)
+                ? 0
+                : TechnicalSourceReferenceResolver.FindMentions(finalText).Count;
+            if (sources.Count < pageMentionCount)
+            {
+                _logger.LogWarning(
+                    "Technical source resolution incomplete. Trace={TraceId} PageMentions={PageMentionCount} ResolvedSources={ResolvedSourceCount} Documents={DocumentCount} EvidencePairs={EvidencePairCount}",
+                    usageTraceId,
+                    pageMentionCount,
+                    sources.Count,
+                    fileSearchDocumentIds.Count,
+                    fileSearchPageEvidence.Count);
+            }
             LogPerformance(
                 "TechnicalSourceResolution",
                 sourceResolutionStopwatch.ElapsedMilliseconds,
@@ -781,41 +791,38 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
             }
         };
 
-        if (_options.Skills.Enabled)
+        tools.Add(new Dictionary<string, object?>
         {
-            tools.Add(new Dictionary<string, object?>
+            ["name"] = "load_skill",
+            ["description"] =
+                "Charge les instructions de méthode approuvées d'une ou plusieurs compétences. " +
+                "À appeler dès que la demande relève de leur domaine : panne ou alarme, procédure ou intervention, " +
+                "circuit électrique, hydraulique, pneumatique, graissage ou automate, schéma, pièce, documentation, " +
+                "explication, compte rendu, escalade. Ne pas appeler pour une question générale simple. " +
+                "Plusieurs compétences peuvent être chargées en un seul appel. " +
+                "Ne jamais recharger une compétence déjà disponible dans le tour courant. Compétences : " +
+                string.Join(" ; ", _skillProvider.AvailableSkills.Select(skill => $"{skill.Name} — {skill.Description}")),
+            ["input_schema"] = new Dictionary<string, object?>
             {
-                ["name"] = "load_skill",
-                ["description"] =
-                    "Charge les instructions de méthode approuvées d'une ou plusieurs compétences. " +
-                    "À appeler dès que la demande relève de leur domaine : panne ou alarme, procédure ou intervention, " +
-                    "circuit électrique, hydraulique, pneumatique, graissage ou automate, schéma, pièce, documentation, " +
-                    "explication, compte rendu, escalade. Ne pas appeler pour une question générale simple. " +
-                    "Plusieurs compétences peuvent être chargées en un seul appel. " +
-                    "Ne jamais recharger une compétence déjà disponible dans le tour courant. Compétences : " +
-                    string.Join(" ; ", _skillProvider.AvailableSkills.Select(skill => $"{skill.Name} — {skill.Description}")),
-                ["input_schema"] = new Dictionary<string, object?>
+                ["type"] = "object",
+                ["properties"] = new Dictionary<string, object?>
                 {
-                    ["type"] = "object",
-                    ["properties"] = new Dictionary<string, object?>
+                    ["skill_names"] = new Dictionary<string, object?>
                     {
-                        ["skill_names"] = new Dictionary<string, object?>
+                        ["type"] = "array",
+                        ["items"] = new Dictionary<string, object?>
                         {
-                            ["type"] = "array",
-                            ["items"] = new Dictionary<string, object?>
-                            {
-                                ["type"] = "string",
-                                ["enum"] = _skillProvider.AvailableSkills.Select(skill => skill.Name).ToArray()
-                            },
-                            ["minItems"] = 1,
-                            ["uniqueItems"] = true
-                        }
-                    },
-                    ["required"] = new[] { "skill_names" },
-                    ["additionalProperties"] = false
-                }
-            });
-        }
+                            ["type"] = "string",
+                            ["enum"] = _skillProvider.AvailableSkills.Select(skill => skill.Name).ToArray()
+                        },
+                        ["minItems"] = 1,
+                        ["uniqueItems"] = true
+                    }
+                },
+                ["required"] = new[] { "skill_names" },
+                ["additionalProperties"] = false
+            }
+        });
 
         if (_options.WebSearch.Enabled && webSearchRemaining > 0)
         {
@@ -933,13 +940,6 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
     {
         if (string.Equals(call.Name, "load_skill", StringComparison.Ordinal))
         {
-            if (!_options.Skills.Enabled)
-            {
-                return ErrorToolResult(
-                    call.Id,
-                    AddToolError(errors, "unsupported_tool", "Skills are disabled.", callNumber, call.Id));
-            }
-
             var skillNames = GetStringArray(call.Input, "skill_names");
             var skill = _skillProvider.Load(skillNames, loadedSkills);
             if (!skill.Success)
@@ -1457,9 +1457,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
 
     private string BuildSystemPrompt(ClaudeDirectChatRequest request)
     {
-        var prompt = (_options.Skills.Enabled
-            ? _promptProvider.GetClaudeDirectSkillsPrompt()
-            : request.SystemPrompt)?.Trim() ?? string.Empty;
+        var prompt = request.SystemPrompt?.Trim() ?? string.Empty;
         var machineDescription = request.Machine.Description?.Trim() ?? string.Empty;
         var sections = new List<string>();
 
@@ -1468,7 +1466,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
             sections.Add(prompt);
         }
 
-        if (_options.Skills.Enabled && request.PreloadedSkillNames.Count > 0)
+        if (request.PreloadedSkillNames.Count > 0)
         {
             var availableSkillNames = _skillProvider.AvailableSkills
                 .Select(skill => skill.Name)
@@ -1517,51 +1515,22 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         ISet<string> documentIds,
         ISet<TechnicalDocumentPageEvidence> pageEvidence)
     {
-        var fileSearchToolUseIds = content.EnumerateArray()
-            .Where(block =>
-                GetString(block, "type") == "mcp_tool_use" &&
-                string.Equals(GetString(block, "name"), "file_search", StringComparison.OrdinalIgnoreCase))
-            .Select(block => GetString(block, "id"))
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .ToHashSet(StringComparer.Ordinal);
-
-        foreach (var block in content.EnumerateArray())
+        foreach (var result in ParseFileSearchResults(content))
         {
-            if (GetString(block, "type") != "mcp_tool_result" ||
-                GetBoolean(block, "is_error") == true ||
-                !fileSearchToolUseIds.Contains(GetString(block, "tool_use_id")))
+            if (result.IsError)
             {
                 continue;
             }
 
-            VisitStrings(block, text =>
+            foreach (var documentId in result.DocumentIds)
             {
-                var ids = DocumentIdMarkerPattern.Matches(text)
-                    .Select(match => match.Groups["id"].Value)
-                    .Where(id => DocumentIdPattern.IsMatch(id))
-                    .Distinct(StringComparer.Ordinal)
-                    .ToArray();
-                foreach (var documentId in ids)
-                {
-                    documentIds.Add(documentId);
-                }
+                documentIds.Add(documentId);
+            }
 
-                // A page is trusted only when this individual result string names one document.
-                // Aggregated text naming several documents retains authorization but no page pairing.
-                if (ids.Length != 1)
-                {
-                    return;
-                }
-
-                foreach (Match pageMatch in PhysicalPageMarkerPattern.Matches(text))
-                {
-                    if (int.TryParse(pageMatch.Groups["page"].Value, out var page) && page > 0)
-                    {
-                        pageEvidence.Add(new(ids[0], page, text));
-                    }
-                }
-
-            });
+            foreach (var evidence in result.Evidence)
+            {
+                pageEvidence.Add(evidence);
+            }
         }
     }
 
@@ -1598,6 +1567,24 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
 
     internal static IReadOnlyList<FileSearchDiagnosticResult> CollectFileSearchDiagnostics(JsonElement content)
     {
+        return ParseFileSearchResults(content)
+            .Select(result => new FileSearchDiagnosticResult(
+                result.ResultNumber,
+                result.IsError,
+                result.DocumentIds,
+                result.PageMarkerCount,
+                result.PhysicalPages,
+                result.ManufacturerIds,
+                result.Evidence
+                    .Select(item => new FileSearchDiagnosticPair(item.DocumentId, item.PdfPage))
+                    .Distinct()
+                    .ToArray(),
+                result.Reason))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ParsedFileSearchResult> ParseFileSearchResults(JsonElement content)
+    {
         var fileSearchToolUseIds = content.EnumerateArray()
             .Where(block =>
                 GetString(block, "type") == "mcp_tool_use" &&
@@ -1606,7 +1593,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .ToHashSet(StringComparer.Ordinal);
 
-        var results = new List<FileSearchDiagnosticResult>();
+        var results = new List<ParsedFileSearchResult>();
         var resultNumber = 0;
         foreach (var block in content.EnumerateArray())
         {
@@ -1622,7 +1609,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
             var physicalPages = new HashSet<int>();
             var manufacturerIds = new HashSet<string>(StringComparer.Ordinal);
             var pageMarkerCount = 0;
-            var pairs = new HashSet<FileSearchDiagnosticPair>();
+            var evidence = new HashSet<TechnicalDocumentPageEvidence>();
             var stringCount = 0;
 
             if (!isError)
@@ -1631,13 +1618,15 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                 {
                     stringCount++;
                     var ids = DocumentIdMarkerPattern.Matches(text)
-                        .Select(match => match.Groups["id"].Value)
-                        .Where(id => DocumentIdPattern.IsMatch(id))
-                        .Distinct(StringComparer.Ordinal)
+                        .Select(match => new DocumentMarker(
+                            match.Groups["id"].Value,
+                            match.Index,
+                            match.Index + match.Length))
+                        .Where(marker => DocumentIdPattern.IsMatch(marker.DocumentId))
                         .ToArray();
-                    foreach (var documentId in ids)
+                    foreach (var marker in ids)
                     {
-                        documentIds.Add(documentId);
+                        documentIds.Add(marker.DocumentId);
                     }
 
                     foreach (Match match in ManufacturerIdPattern().Matches(text))
@@ -1645,29 +1634,54 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                         manufacturerIds.Add(match.Value.ToUpperInvariant());
                     }
 
-                    var pages = PhysicalPageMarkerPattern.Matches(text)
-                        .Select(match => int.TryParse(match.Groups["page"].Value, out var page) && page > 0
-                            ? page
-                            : 0)
-                        .Where(page => page > 0)
+                    var pages = FileSearchPageMarkerPattern.Matches(text)
+                        .Select(match =>
+                        {
+                            return new PageMarker(
+                                int.TryParse(match.Groups["page"].Value, out var page) ? page : 0,
+                                match.Index);
+                        })
+                        .Where(marker => marker.PageNumber > 0)
                         .ToArray();
                     pageMarkerCount += pages.Length;
-                    foreach (var page in pages)
+                    foreach (var marker in pages)
                     {
-                        physicalPages.Add(page);
+                        physicalPages.Add(marker.PageNumber);
                     }
 
-                    if (ids.Length == 1)
+                    foreach (var page in pages)
                     {
-                        foreach (var page in pages)
+                        // File Search can aggregate several results into one text value. Associate
+                        // each page with the nearest preceding Document ID, bounded by the next ID.
+                        // A string containing a single ID remains compatible even if the provider
+                        // happens to place its page metadata before that ID.
+                        var owner = ids
+                            .Where(marker => marker.EndIndex <= page.Index)
+                            .OrderByDescending(marker => marker.EndIndex)
+                            .FirstOrDefault();
+                        owner ??= ids.Length == 1 ? ids[0] : null;
+                        if (owner is null)
                         {
-                            pairs.Add(new(ids[0], page));
+                            continue;
+                        }
+
+                        var nextDocumentIndex = ids
+                            .Where(marker => marker.Index > owner.Index)
+                            .Select(marker => marker.Index)
+                            .DefaultIfEmpty(int.MaxValue)
+                            .Min();
+                        if (page.Index < nextDocumentIndex)
+                        {
+                            var evidenceText = ids.Length == 1
+                                ? text
+                                : text[owner.Index..Math.Min(nextDocumentIndex, text.Length)];
+                            evidence.Add(new(owner.DocumentId, page.PageNumber, evidenceText));
                         }
                     }
                 });
             }
 
-            var reason = pairs.Count > 0
+            var reason = evidence.Count > 0
                 ? "none"
                 : isError
                     ? "error_result"
@@ -1688,7 +1702,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                 pageMarkerCount,
                 physicalPages.Order().ToArray(),
                 manufacturerIds.Order(StringComparer.Ordinal).ToArray(),
-                pairs.ToArray(),
+                evidence.ToArray(),
                 reason));
         }
 
@@ -2348,6 +2362,20 @@ else
         int FileSearchResults,
         int FileSearchResultChars,
         int LocalToolUses);
+
+    private sealed record ParsedFileSearchResult(
+        int ResultNumber,
+        bool IsError,
+        IReadOnlyList<string> DocumentIds,
+        int PageMarkerCount,
+        IReadOnlyList<int> PhysicalPages,
+        IReadOnlyList<string> ManufacturerIds,
+        IReadOnlyList<TechnicalDocumentPageEvidence> Evidence,
+        string Reason);
+
+    private sealed record DocumentMarker(string DocumentId, int Index, int EndIndex);
+
+    private sealed record PageMarker(int PageNumber, int Index);
 }
 
 internal sealed record FileSearchDiagnosticResult(

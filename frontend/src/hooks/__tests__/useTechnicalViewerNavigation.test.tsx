@@ -176,6 +176,56 @@ describe('useTechnicalViewerNavigation', () => {
     expect(viewport.scrollLeft).toBeGreaterThan(beforePan);
   });
 
+  it('zooms around the mouse pointer with the wheel and prevents page scrolling', async () => {
+    const viewport = await renderHarness();
+    viewport.scrollLeft = 50;
+    viewport.scrollTop = 40;
+    const wheel = new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 100,
+      clientY: 80,
+      deltaY: -100,
+    });
+
+    await act(async () => viewport.dispatchEvent(wheel));
+
+    expect(Number(viewport.dataset.zoom)).toBeGreaterThan(1);
+    expect(viewport.scrollLeft).toBeGreaterThan(50);
+    expect(viewport.scrollTop).toBeGreaterThan(40);
+    expect(wheel.defaultPrevented).toBe(true);
+  });
+
+  it('clamps repeated wheel zoom to the configured limits', async () => {
+    const viewport = await renderHarness();
+
+    await act(async () => {
+      for (let index = 0; index < 20; index += 1) {
+        viewport.dispatchEvent(new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 100,
+          clientY: 80,
+          deltaY: -1000,
+        }));
+      }
+    });
+    expect(viewport.dataset.zoom).toBe('4');
+
+    await act(async () => {
+      for (let index = 0; index < 20; index += 1) {
+        viewport.dispatchEvent(new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 100,
+          clientY: 80,
+          deltaY: 1000,
+        }));
+      }
+    });
+    expect(viewport.dataset.zoom).toBe('0.5');
+  });
+
   it('returns zoom and scroll position to the initial view', async () => {
     const viewport = await renderHarness();
     viewport.scrollLeft = 80;

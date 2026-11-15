@@ -58,7 +58,7 @@ Quand une valeur, référence, connexion, trajet, localisation ou procédure vie
 
 Plusieurs pages : 📄 Source : p. 17, p. 19, p. 32
 Figure ou repère : 📄 Source : p. XX (Fig. YY — repère Z)
-Si le résultat de recherche donne « Page number » : utilise p. XX. S'il ne donne que « PDF Page » : 📄 Source : Page PDF : XX.
+Les métadonnées « Page », « Page number » et « PDF Page » du résultat de recherche désignent toutes la page physique du PDF : utilise 📄 Source : Page PDF : XX. Pour plusieurs pages physiques : 📄 Source : Page PDF : XX, Page PDF : YY. Utilise p. XX uniquement si le numéro imprimé est écrit dans le contenu même du manuel et ne le déduis jamais de la page PDF.
 
 N'invente ni ne déduis jamais une page. Ne transforme jamais un numéro physique en numéro imprimé. Place cette ligne juste avant les suggestions. N'affiche aucune métadonnée interne et ne crée aucun lien documentaire.
 </sources_et_pages>

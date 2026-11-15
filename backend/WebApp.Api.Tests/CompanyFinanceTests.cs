@@ -62,6 +62,7 @@ public class CompanyFinanceTests
         Assert.AreEqual(DateTimeKind.Utc,summary.MachineCreditResetUtc!.Value.Kind);
         Assert.AreNotEqual(summary.NextDueUtc,summary.MachineCreditResetUtc);
         Assert.AreEqual(8m,summary.MachineCreditRemaining);Assert.AreEqual(20m,summary.WalletBalance);Assert.AreEqual(29.90m,summary.UnpaidInvoiceAmount);Assert.IsTrue(summary.CancelAtPeriodEnd);
+        Assert.IsFalse(summary.RechargeEnabled);
         var json=JsonSerializer.Serialize(summary);Assert.IsFalse(json.Contains("secret_"));Assert.IsFalse(json.Contains("Tokens"));Assert.IsFalse(json.Contains("Ledger"));
         var other=await CompanyFinanceEndpoints.ReadAsync(f.MachineId,Context(Guid.NewGuid()),db,new(db),new(),default);
         Assert.AreEqual(404,((IStatusCodeHttpResult)other).StatusCode);

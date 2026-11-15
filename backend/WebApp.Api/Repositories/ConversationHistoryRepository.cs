@@ -9,8 +9,8 @@ using WebApp.Api.Services;
 namespace WebApp.Api.Repositories;
 
 /// <summary>
-/// Best-effort persistence of Foundry conversations/messages into the 'chat' schema.
-/// Foundry remains the source of truth â€” callers must catch and log failures, never let them break the chat stream.
+/// Persists the SQL conversation history used for display and conversational memory.
+/// Callers keep the live stream available when persistence fails.
 /// </summary>
 public class ConversationHistoryRepository
 {
@@ -152,7 +152,31 @@ public class ConversationHistoryRepository
             return null;
         }
 
-        var now = DateTime.UtcNow;
+        var message = BuildMessage(
+            conversation,
+            role,
+            content,
+            visuals,
+            sources,
+            suggestions,
+            webCitations);
+
+        _db.ConversationMessages.Add(message);
+        conversation.UpdatedAtUtc = message.CreatedAtUtc;
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return ToPersistenceResult(message, sources, suggestions);
+    }
+
+    private static ConversationMessage BuildMessage(
+        Conversation conversation,
+        string role,
+        string content,
+        IReadOnlyList<TechnicalVisualReference> visuals,
+        IReadOnlyList<TechnicalSourceReference> sources,
+        IReadOnlyList<string> suggestions,
+        IReadOnlyList<AnnotationInfo> webCitations)
+    {
         var message = new ConversationMessage
         {
             ConversationId = conversation.Id,
@@ -160,17 +184,13 @@ public class ConversationHistoryRepository
             Content = content,
             SuggestionsJson = suggestions.Count == 0 ? null : JsonSerializer.Serialize(suggestions),
             IsSummarized = false,
-            CreatedAtUtc = now
+            CreatedAtUtc = DateTime.UtcNow
         };
 
         var assetKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var visual in visuals)
         {
-            if (!assetKeys.Add(visual.AssetKey))
-            {
-                continue;
-            }
-
+            if (!assetKeys.Add(visual.AssetKey)) continue;
             message.Visuals.Add(new ConversationMessageVisual
             {
                 DocumentId = visual.DocumentId,
@@ -203,11 +223,7 @@ public class ConversationHistoryRepository
             if (!string.Equals(citation.Type, "uri_citation", StringComparison.Ordinal) ||
                 !TryWebUri(citation.Url, out var citationUri) ||
                 citationUri.AbsoluteUri.Length > 2048 ||
-                !citationUrls.Add(citationUri.AbsoluteUri))
-            {
-                continue;
-            }
-
+                !citationUrls.Add(citationUri.AbsoluteUri)) continue;
             message.WebCitations.Add(new ConversationMessageWebCitation
             {
                 Url = citationUri.AbsoluteUri,
@@ -217,10 +233,14 @@ public class ConversationHistoryRepository
             });
         }
 
-        _db.ConversationMessages.Add(message);
-        conversation.UpdatedAtUtc = now;
+        return message;
+    }
 
-        await _db.SaveChangesAsync(cancellationToken);
+    private static ConversationMessagePersistenceResult ToPersistenceResult(
+        ConversationMessage message,
+        IReadOnlyList<TechnicalSourceReference> sources,
+        IReadOnlyList<string> suggestions)
+    {
         var orderedSources = sources.OrderBy(source => source.DisplayOrder).ToArray();
         return new ConversationMessagePersistenceResult(
             message.Id,
@@ -247,7 +267,10 @@ public class ConversationHistoryRepository
     public Task<int> CountUnsummarizedMessagesAsync(Guid conversationId, CancellationToken cancellationToken)
     {
         return _db.ConversationMessages
-            .CountAsync(m => m.ConversationId == conversationId && !m.IsSummarized, cancellationToken);
+            .CountAsync(m =>
+                m.ConversationId == conversationId &&
+                !m.IsSummarized,
+                cancellationToken);
     }
 
     /// <summary>
@@ -256,31 +279,42 @@ public class ConversationHistoryRepository
     public Task<List<ConversationMessage>> GetUnsummarizedMessagesAsync(Guid conversationId, CancellationToken cancellationToken)
     {
         return _db.ConversationMessages
-            .Where(m => m.ConversationId == conversationId && !m.IsSummarized)
+            .Where(m =>
+                m.ConversationId == conversationId &&
+                !m.IsSummarized)
             .OrderBy(m => m.CreatedAtUtc)
             .ToListAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// Flags the given messages as folded into a technical summary.
-    /// </summary>
-    public Task MarkMessagesSummarizedAsync(IEnumerable<long> messageIds, CancellationToken cancellationToken)
+    public async Task CommitSummaryAsync(
+        Guid conversationId,
+        string technicalSummary,
+        IReadOnlyCollection<long> messageIds,
+        CancellationToken cancellationToken)
     {
-        return _db.ConversationMessages
-            .Where(m => messageIds.Contains(m.Id))
-            .ExecuteUpdateAsync(s => s.SetProperty(m => m.IsSummarized, true), cancellationToken);
-    }
+        var conversation = await _db.Conversations
+            .SingleAsync(item => item.Id == conversationId, cancellationToken);
+        var ids = messageIds.ToHashSet();
+        var messages = await _db.ConversationMessages
+            .Where(message =>
+                message.ConversationId == conversationId &&
+                ids.Contains(message.Id) &&
+                !message.IsSummarized)
+            .ToListAsync(cancellationToken);
+        if (messages.Count != ids.Count)
+        {
+            throw new DbUpdateConcurrencyException("Conversation history changed while its summary was being committed.");
+        }
 
-    /// <summary>
-    /// Updates the conversation's condensed technical summary.
-    /// </summary>
-    public Task UpdateTechnicalSummaryAsync(Guid conversationId, string technicalSummary, CancellationToken cancellationToken)
-    {
-        return _db.Conversations
-            .Where(c => c.Id == conversationId)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(c => c.TechnicalSummary, technicalSummary)
-                .SetProperty(c => c.UpdatedAtUtc, DateTime.UtcNow), cancellationToken);
+        conversation.TechnicalSummary = technicalSummary;
+        conversation.UpdatedAtUtc = DateTime.UtcNow;
+        foreach (var message in messages)
+        {
+            message.IsSummarized = true;
+        }
+
+        // One SaveChanges call keeps the summary and its message flags atomic.
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>
@@ -411,9 +445,7 @@ public class ConversationHistoryRepository
                 c.Id,
                 c.ConversationPublicId,
                 c.CreatedAtUtc,
-                LastActivityAtUtc = c.Messages
-                    .Select(m => (DateTime?)m.CreatedAtUtc)
-                    .Max() ?? c.CreatedAtUtc,
+                LastActivityAtUtc = c.Messages.Select(m => (DateTime?)m.CreatedAtUtc).Max() ?? c.CreatedAtUtc,
                 c.MachineId
             })
             .OrderByDescending(c => c.LastActivityAtUtc)
@@ -430,7 +462,9 @@ public class ConversationHistoryRepository
         // Oldest-first per-conversation user messages, grouped in-memory to pick each conversation's first one.
         var firstUserMessageByConversation = (await _db.ConversationMessages
             .AsNoTracking()
-            .Where(m => conversationIds.Contains(m.ConversationId) && m.Role == "user")
+            .Where(m =>
+                conversationIds.Contains(m.ConversationId) &&
+                m.Role == "user")
             .OrderBy(m => m.CreatedAtUtc)
             .Select(m => new { m.ConversationId, m.Content })
             .ToListAsync(cancellationToken))
@@ -629,6 +663,7 @@ public class ConversationHistoryRepository
         string documentName) => new()
     {
         Id = source.Id,
+        DocumentId = source.DocumentId,
         DocumentName = string.IsNullOrWhiteSpace(documentName) ? source.DocumentId : documentName,
         PdfPage = source.PdfPage,
         DisplayPage = TechnicalSourcePageStorage.PublicDisplayPage(source.DisplayPage),

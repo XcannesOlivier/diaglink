@@ -15,23 +15,17 @@ const consumption={machines:[
  {id:'m',name:'Compresseur',billable:true,hasPaidRights:true,includedQuotaBudget:10,resetUtc:'2026-10-14T00:00:00Z',commercialCredit:.04,users:[{id:'u1',name:'Alice',includedQuotaConsumed:1,commercialCredit:.02}]},
  {id:'i',name:'Inactive',billable:false,hasPaidRights:false,includedQuotaBudget:0,resetUtc:null,commercialCredit:0,users:[]},
 ]};
-it('marks the selected preset with a check and updates it from buttons and free amount',async()=>{
+it('keeps company recharge controls visible but disabled',async()=>{
  request.mockImplementation((_:unknown,path:string)=>Promise.resolve({kind:'success',data:path==='/topups'?[]:summary}));
  await act(async()=>root.render(<CompanyFinancePanel companyId="c" getAccessToken={token}/>));
  const preset=(amount:string)=>[...box.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent===`${amount} €`)!;
  expect(preset('20').getAttribute('aria-pressed')).toBe('true');
  expect(preset('20').querySelector('svg')).not.toBeNull();
- await act(async()=>preset('50').click());
- expect(preset('50').getAttribute('aria-pressed')).toBe('true');
- expect(preset('50').querySelector('svg')).not.toBeNull();
- expect(preset('20').querySelector('svg')).toBeNull();
+ expect([10,20,50,100,200].every(value=>preset(String(value)).disabled)).toBe(true);
  const input=box.querySelector<HTMLInputElement>('[inputmode="decimal"]')!;
- expect(input.value).toBe('50');
- await act(async()=>{
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'35');
-  input.dispatchEvent(new Event('input',{bubbles:true}));
- });
- expect(box.querySelector('[aria-pressed="true"]')).toBeNull();
+ expect(input.value).toBe('20');expect(input.disabled).toBe(true);
+ expect([...box.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Ajouter du crédit supplémentaire')?.disabled).toBe(true);
+ expect(box.textContent).toContain('Recharge réservée au Super Admin');
  expect(request.mock.calls.every(call=>call[2]===undefined)).toBe(true);
 });
 it('scopes the visual polish to company finance and excludes disabled fields',()=>{
@@ -205,25 +199,22 @@ it('never presents included credit as available without an active period, even w
 });
 beforeEach(()=>{request.mockReset();consumptionRequest.mockReset();setCompanyStatus.mockReset();consumptionRequest.mockResolvedValue({kind:'success',data:consumption});localStorage.clear();box=document.createElement('div');document.body.append(box);root=createRoot(box);});
 afterEach(async()=>{await act(async()=>root.unmount());box.remove();localStorage.clear();vi.unstubAllGlobals();});
-it('shows only client financial information and preserves the recharge key after a lost response',async()=>{
- const assign=vi.fn();vi.stubGlobal('location',{assign});
- request.mockImplementation((_:unknown,path:string,body:unknown)=>Promise.resolve(body?{kind:'error'}:{kind:'success',data:path==='/topups'?[]:summary}));
+it('shows only client financial information and never starts a company recharge',async()=>{
+ request.mockImplementation((_:unknown,path:string)=>Promise.resolve({kind:'success',data:path==='/topups'?[]:summary}));
  await act(async()=>root.render(<CompanyFinancePanel companyId="c" machine={{id:'m',name:'Compresseur'}} getAccessToken={token}/>));
  expect(box.textContent).toContain('Compresseur');expect(box.textContent).toContain('Paiement en retard');expect(box.textContent).toContain('Facture impayée');expect(box.textContent).toContain('Crédit IA épuisé');
  expect(box.textContent).not.toMatch(/tokens|modèle|ledger|Stripe|fournisseur/i);
  expect(box.querySelector('progress')?.value).toBe(0);
  expect(box.textContent).not.toContain('100 %');expect(box.querySelector('[aria-label="Quota Compresseur"]')?.textContent).not.toContain('10,00');
  expect(box.textContent).toContain('29,90');expect(box.textContent).toContain('Quota mensuel : Non actif');
- const button=()=>Array.from(box.querySelectorAll('button')).find(b=>b.textContent==='Ajouter du crédit supplémentaire'||b.textContent==='Réessayer la recharge')!;
- await act(async()=>button().click());const first=request.mock.calls.find(c=>c[2])![2];
- request.mockImplementation((_:unknown,path:string,body:unknown)=>Promise.resolve(body?{kind:'success',data:{id:first.requestId,amount:20,status:'Pending',paymentUrl:'https://checkout.stripe.com/test'}}:{kind:'success',data:path==='/topups'?[]:summary}));
- await act(async()=>button().click());expect(request.mock.calls.filter(c=>c[2])[1][2]).toEqual(first);
- expect(assign).toHaveBeenCalledExactlyOnceWith('https://checkout.stripe.com/test');expect(box.querySelector('a')).toBeNull();expect(box.textContent).not.toContain(first.requestId);
+ const button=Array.from(box.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.textContent==='Ajouter du crédit supplémentaire')!;
+ expect(button.disabled).toBe(true);expect(request.mock.calls.every(call=>call[2]===undefined)).toBe(true);
+ expect(box.querySelector('a')).toBeNull();expect(box.textContent).toContain('Recharge réservée au Super Admin');
 });
 it('does not open an unsafe payment URL and handles no selected machine',async()=>{
  request.mockImplementation((_:unknown,path:string)=>Promise.resolve({kind:'success',data:path==='/topups'?[{id:'op',amount:10,status:'Pending',paymentUrl:'https://evil.example'}]:{...summary,machineCreditRemaining:null,rechargeEnabled:false}}));
  await act(async()=>root.render(<CompanyFinancePanel companyId="c" getAccessToken={token}/>));
- expect(box.textContent).toContain('Machines et quotas');expect(box.querySelector('a')).toBeNull();expect(box.textContent).toContain('temporairement indisponible');
+ expect(box.textContent).toContain('Machines et quotas');expect(box.querySelector('a')).toBeNull();expect(box.textContent).toContain('Recharge réservée au Super Admin');
  expect(box.querySelector('progress')?.value).toBe(0);
 });
 it('shows partial consumption without displaying the quota reset date',async()=>{
@@ -234,15 +225,13 @@ it('shows partial consumption without displaying the quota reset date',async()=>
 });
 
 
-it('hides unpaid operations and allows a new recharge without changing the confirmed balance',async()=>{
- const assign=vi.fn();vi.stubGlobal('location',{assign});
- request.mockImplementation((_:unknown,path:string,body:unknown)=>Promise.resolve({kind:'success',data:body?{id:'new',amount:20,status:'AwaitingPayment',paymentUrl:'https://checkout.stripe.com/new'}:path==='/topups'?[{id:'old',amount:10,status:'AwaitingPayment',paymentUrl:'https://checkout.stripe.com/old'}]:summary}));
+it('hides unpaid operations and keeps company recharge disabled',async()=>{
+ request.mockImplementation((_:unknown,path:string)=>Promise.resolve({kind:'success',data:path==='/topups'?[{id:'old',amount:10,status:'AwaitingPayment',paymentUrl:'https://checkout.stripe.com/old'}]:summary}));
  await act(async()=>root.render(<CompanyFinancePanel companyId="c" getAccessToken={token}/>));
  const card=box.querySelector('[aria-label="Crédit supplémentaire"]')!;
  expect(card.textContent).toContain('20,00');expect(card.textContent).not.toContain('en attente');expect(card.textContent).not.toContain('Payer la recharge');expect(card.querySelector('a')).toBeNull();
- await act(async()=>[...card.querySelectorAll('button')].find(b=>b.textContent==='Ajouter du crédit supplémentaire')!.click());
- expect(assign).toHaveBeenCalledExactlyOnceWith('https://checkout.stripe.com/new');
- expect(request.mock.calls.find(c=>c[2])![2].requestId).not.toBe('old');
+ expect([...card.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Ajouter du crédit supplémentaire')?.disabled).toBe(true);
+ expect(request.mock.calls.every(call=>call[2]===undefined)).toBe(true);
  expect(card.textContent).toContain('20,00');expect(card.textContent).not.toContain('en attente');
 });
 

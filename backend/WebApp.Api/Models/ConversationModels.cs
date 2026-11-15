@@ -47,6 +47,7 @@ public record ConversationMessageVisualInfo
 public record ConversationMessageSourceReferenceInfo
 {
     public long Id { get; init; }
+    public string DocumentId { get; init; } = string.Empty;
     public string DocumentName { get; init; } = string.Empty;
     public int PdfPage { get; init; }
     public required string DisplayPage { get; init; }

@@ -258,7 +258,7 @@ describe('ChatService', () => {
       expect(result[0].visuals?.map(visual => visual.id)).toEqual([1, 2]);
       expect(result[0].visuals?.[1]).not.toHaveProperty('assetKey');
       expect(result[0].sources?.map(source => source.id)).toEqual([21, 22]);
-      expect(result[0].sources?.[0]).not.toHaveProperty('documentId');
+      expect(result[0].sources?.[0].documentId).toBe('private');
       expect(result[0].suggestions).toEqual(['Où est le relais ?']);
       expect(result[0].webCitations).toEqual([{
         type: 'uri_citation',

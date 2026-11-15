@@ -666,7 +666,7 @@ public sealed class ClaudeDirectChatServiceTests
 
         using var body = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
         var tools = body.RootElement.GetProperty("tools");
-        Assert.AreEqual(2, tools.GetArrayLength());
+        Assert.AreEqual(3, tools.GetArrayLength());
         CollectionAssert.AreEquivalent(
             new[] { "type", "mcp_server_name" },
             tools[0].EnumerateObject().Select(property => property.Name).ToArray());
@@ -680,7 +680,7 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    public async Task CompleteAsync_EnabledSkillsLoadsApprovedInstructionsAndTracksContinuationUsage()
+    public async Task CompleteAsync_LoadsApprovedSkillInstructionsAndTracksContinuationUsage()
     {
         var options = new ClaudeDirectChatOptions
         {
@@ -688,14 +688,18 @@ public sealed class ClaudeDirectChatServiceTests
             Deployment = "claude-sonnet-5",
             MaxMessageCalls = 4,
             MaxImageBytes = 1024,
-            Skills = new ClaudeDirectSkillOptions { Enabled = true, MaxSkillBytes = 32 * 1024 }
+            Skills = new ClaudeDirectSkillOptions { MaxSkillBytes = 32 * 1024 }
         };
         var fixture = Fixture.CreateWithOptions(
             options,
             SkillToolResponse("diagnostic", "hydraulique", "procedures"),
             DirectResponse("contrôle suivant", 12, 3));
 
-        var result = await fixture.Service.CompleteAsync(Request());
+        var request = Request() with
+        {
+            SystemPrompt = new TechnicalAssistantPromptProvider(AppContext.BaseDirectory).GetClaudeDirectPrompt()
+        };
+        var result = await fixture.Service.CompleteAsync(request);
 
         Assert.AreEqual("contrôle suivant", result.FinalText);
         Assert.HasCount(2, fixture.Handler.Requests);
@@ -727,7 +731,7 @@ public sealed class ClaudeDirectChatServiceTests
             Deployment = "claude-sonnet-5",
             MaxMessageCalls = 12,
             MaxImageBytes = 1024,
-            Skills = new ClaudeDirectSkillOptions { Enabled = true, MaxSkillBytes = 32 * 1024 }
+            Skills = new ClaudeDirectSkillOptions { MaxSkillBytes = 32 * 1024 }
         };
         var fixture = Fixture.CreateWithOptions(
             options,
@@ -746,15 +750,15 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    public async Task CompleteAsync_DisabledSkillsKeepsHistoricalPromptAndOmitsLoadSkill()
+    public async Task CompleteAsync_AlwaysExposesLoadSkill()
     {
         var fixture = Fixture.Create(DirectResponse("ok"));
 
         await fixture.Service.CompleteAsync(Request());
 
         using var body = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
-        Assert.AreEqual(2, body.RootElement.GetProperty("tools").GetArrayLength());
-        Assert.IsFalse(fixture.Handler.Requests.Single().Body.Contains("load_skill", StringComparison.Ordinal));
+        Assert.AreEqual(3, body.RootElement.GetProperty("tools").GetArrayLength());
+        Assert.AreEqual("load_skill", body.RootElement.GetProperty("tools")[2].GetProperty("name").GetString());
         StringAssert.Contains(body.RootElement.GetProperty("system")[0].GetProperty("text").GetString(), "Use File Search before inspecting technical images.");
     }
 
@@ -767,7 +771,7 @@ public sealed class ClaudeDirectChatServiceTests
             Deployment = "claude-sonnet-5",
             MaxMessageCalls = 12,
             MaxImageBytes = 1024,
-            Skills = new ClaudeDirectSkillOptions { Enabled = true, MaxSkillBytes = 32 * 1024 }
+            Skills = new ClaudeDirectSkillOptions { MaxSkillBytes = 32 * 1024 }
         };
         var fixture = Fixture.CreateWithOptions(options, DirectResponse("suite"));
         var request = Request() with { PreloadedSkillNames = ["diagnostic", "hydraulique"] };
@@ -915,7 +919,7 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.HasCount(0, result.Errors);
         using var body = JsonDocument.Parse(fixture.Handler.Requests.Single().Body);
         var tools = body.RootElement.GetProperty("tools");
-        Assert.AreEqual(2, tools.GetArrayLength());
+        Assert.AreEqual(3, tools.GetArrayLength());
         Assert.IsFalse(fixture.Handler.Requests.Single().Body.Contains("web_search", StringComparison.Ordinal));
     }
 
@@ -947,12 +951,13 @@ public sealed class ClaudeDirectChatServiceTests
         var disabledTools = disabledBody.RootElement.GetProperty("tools");
         var enabledTools = enabledBody.RootElement.GetProperty("tools");
 
-        Assert.AreEqual(2, disabledTools.GetArrayLength());
-        Assert.AreEqual(3, enabledTools.GetArrayLength());
+        Assert.AreEqual(3, disabledTools.GetArrayLength());
+        Assert.AreEqual(4, enabledTools.GetArrayLength());
         Assert.AreEqual(disabledTools[0].GetRawText(), enabledTools[0].GetRawText());
         Assert.AreEqual(disabledTools[1].GetRawText(), enabledTools[1].GetRawText());
+        Assert.AreEqual(disabledTools[2].GetRawText(), enabledTools[2].GetRawText());
 
-        var webSearch = enabledTools[2];
+        var webSearch = enabledTools[3];
         CollectionAssert.AreEquivalent(
             new[] { "type", "name", "max_uses", "user_location" },
             webSearch.EnumerateObject().Select(property => property.Name).ToArray());
@@ -995,9 +1000,10 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.HasCount(0, result.Errors);
         using var secondBody = JsonDocument.Parse(fixture.Handler.Requests[1].Body);
         var tools = secondBody.RootElement.GetProperty("tools");
-        Assert.AreEqual(2, tools.GetArrayLength());
+        Assert.AreEqual(3, tools.GetArrayLength());
         Assert.AreEqual("mcp_toolset", tools[0].GetProperty("type").GetString());
         Assert.AreEqual("get_page_image", tools[1].GetProperty("name").GetString());
+        Assert.AreEqual("load_skill", tools[2].GetProperty("name").GetString());
         Assert.IsFalse(fixture.Handler.Requests[1].Body.Contains("web_search", StringComparison.Ordinal));
         Assert.AreEqual(3, result.Usage.WebSearchRequests);
     }
@@ -1139,13 +1145,40 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    public void ExtractFileSearchDocumentEvidence_DoesNotPairPageFromAggregatedMultiDocumentText()
+    public void ExtractFileSearchDocumentEvidence_PairsPagesWithinAggregatedDocumentSections()
     {
         using var document = JsonDocument.Parse("""
         [
           {"type":"mcp_tool_use","id":"search-1","name":"file_search","input":{}},
           {"type":"mcp_tool_result","tool_use_id":"search-1","is_error":false,"content":[
             {"type":"text","text":"Document ID: manual-a\nPage: 20\nDocument ID: manual-b\nPage: 20"}
+          ]}
+        ]
+        """);
+        var documentIds = new HashSet<string>(StringComparer.Ordinal);
+        var evidence = new HashSet<TechnicalDocumentPageEvidence>();
+
+        ClaudeDirectChatService.ExtractFileSearchDocumentEvidence(
+            document.RootElement, documentIds, evidence);
+
+        CollectionAssert.AreEquivalent(new[] { "manual-a", "manual-b" }, documentIds.ToArray());
+        Assert.HasCount(2, evidence);
+        Assert.IsTrue(evidence.Any(item => item.DocumentId == "manual-a" && item.PdfPage == 20));
+        Assert.IsTrue(evidence.Any(item => item.DocumentId == "manual-b" && item.PdfPage == 20));
+        Assert.IsFalse(evidence.Single(item => item.DocumentId == "manual-a").ResultText!
+            .Contains("manual-b", StringComparison.Ordinal));
+        Assert.IsFalse(evidence.Single(item => item.DocumentId == "manual-b").ResultText!
+            .Contains("manual-a", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ExtractFileSearchDocumentEvidence_RejectsPageWithoutUnambiguousDocumentSection()
+    {
+        using var document = JsonDocument.Parse("""
+        [
+          {"type":"mcp_tool_use","id":"search-1","name":"file_search","input":{}},
+          {"type":"mcp_tool_result","tool_use_id":"search-1","is_error":false,"content":[
+            {"type":"text","text":"Page: 20\nDocument ID: manual-a\nDocument ID: manual-b"}
           ]}
         ]
         """);
@@ -1184,7 +1217,7 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    public void FileSearchDiagnostics_ReportsWhyAggregatedResultHasNoPair()
+    public void FileSearchDiagnostics_ReportsPairsFromAggregatedDocumentSections()
     {
         using var document = JsonDocument.Parse("""
         [
@@ -1197,8 +1230,10 @@ public sealed class ClaudeDirectChatServiceTests
 
         var diagnostic = ClaudeDirectChatService.CollectFileSearchDiagnostics(document.RootElement).Single();
 
-        Assert.AreEqual("multiple_document_ids_in_result", diagnostic.Reason);
-        Assert.IsEmpty(diagnostic.Pairs);
+        Assert.AreEqual("none", diagnostic.Reason);
+        Assert.HasCount(2, diagnostic.Pairs);
+        Assert.IsTrue(diagnostic.Pairs.Any(pair => pair.DocumentId == "manual-a" && pair.PdfPage == 285));
+        Assert.IsTrue(diagnostic.Pairs.Any(pair => pair.DocumentId == "manual-b" && pair.PdfPage == 491));
         CollectionAssert.AreEquivalent(new[] { 285, 491 }, diagnostic.PhysicalPages.ToArray());
     }
 
@@ -1324,6 +1359,129 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.IsTrue(result.Sources.All(source => source.DocumentId == partsDocument));
         CollectionAssert.AreEqual(new[] { 20, 21 }, result.Sources.Select(source => source.PdfPage).ToArray());
         Assert.IsTrue(result.Sources.All(source => source.PageKind == TechnicalSourcePageKind.Pdf));
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_LinksDisplayedPagesFromTwoDocumentsInOneAggregatedSearchResult()
+    {
+        const string dimensionsDocument = "dx225-dimensions";
+        const string partsDocument = "dx225-parts";
+        const string finalText = "📄 Source : p. 64 (Fig. 2 — cote M), p. 474";
+        var fixture = Fixture.Create(
+            ToolResponse(
+                documentId: dimensionsDocument,
+                allowedDocumentIds: [dimensionsDocument, partsDocument],
+                page: 66,
+                fileSearchTexts:
+                [
+                    "Document ID: dx225-dimensions\nPage number: 66\nGeneral Dimensions Fig. 2 cote M\n" +
+                    "Document ID: dx225-parts\nPage number: 476\nTRACK SHOE ASS'Y - 700G"
+                ]),
+            DirectResponse(finalText));
+        fixture.BlobReader.PageMapFactory = blobName =>
+        {
+            var documentId = blobName.Contains($"/{dimensionsDocument}/", StringComparison.Ordinal)
+                ? dimensionsDocument
+                : partsDocument;
+            var pages = documentId == dimensionsDocument
+                ? """
+                    {"pdfPage":66,"displayPage":"64","source":"ExtractedText"},
+                    {"pdfPage":475,"displayPage":"474","source":"ExtractedText"}
+                    """
+                : """
+                    {"pdfPage":65,"displayPage":"64","source":"ExtractedText"},
+                    {"pdfPage":476,"displayPage":"474","source":"ExtractedText"}
+                    """;
+            return new MemoryStream(Encoding.UTF8.GetBytes($$"""
+            {
+              "schemaVersion":1,
+              "documentId":"{{documentId}}",
+              "sourceBlob":"company/machine/{{documentId}}.pdf",
+              "pages":[{{pages}}]
+            }
+            """));
+        };
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual(finalText, result.FinalText);
+        Assert.HasCount(2, result.Sources);
+        CollectionAssert.AreEqual(
+            new[] { dimensionsDocument, partsDocument },
+            result.Sources.Select(source => source.DocumentId).ToArray());
+        CollectionAssert.AreEqual(
+            new[] { 66, 476 },
+            result.Sources.Select(source => source.PdfPage).ToArray());
+        CollectionAssert.AreEqual(
+            new[] { "64", "474" },
+            result.Sources.Select(source => source.DisplayPage).ToArray());
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_ResolvesProductionTrackPlanSourcesAcrossOverlappingDocuments()
+    {
+        const string catalogDocument = "dx225-parts";
+        const string workshopDocument = "dx225-workshop";
+        const string finalText = """
+            Voici le plan d'ensemble : Fig. 2100 (page 2100-1, catalogue de pièces).
+            - Tendeur de chenille, Fig. 2130 : p. 258
+            - Galet inférieur, Fig. 2150 : p. 264
+            - Atelier, tension et dépose/repose : p. 234 et p. 243
+            Source : Page PDF : 246, Page PDF : 258, Page PDF : 264, Page PDF : 234, Page PDF : 243
+            """;
+        var fixture = Fixture.Create(
+            ToolResponse(
+                documentId: catalogDocument,
+                allowedDocumentIds: [catalogDocument, workshopDocument],
+                page: 246,
+                fileSearchTexts:
+                [
+                    "Document ID: dx225-parts\nPage number: 249\nPage number: 258\nPage number: 264\nFig. 2100\n" +
+                    "Document ID: dx225-workshop\nPage number: 234\nPage number: 243"
+                ]),
+            DirectResponse(finalText));
+        fixture.BlobReader.PageMapFactory = blobName =>
+        {
+            var documentId = blobName.Contains($"/{catalogDocument}/", StringComparison.Ordinal)
+                ? catalogDocument
+                : workshopDocument;
+            var pages = documentId == catalogDocument
+                ? """
+                    {"pdfPage":234,"displayPage":null,"source":"Unknown"},
+                    {"pdfPage":243,"displayPage":"2","source":"ExtractedText"},
+                    {"pdfPage":246,"displayPage":null,"source":"Unknown"},
+                    {"pdfPage":249,"displayPage":null,"source":"Unknown"},
+                    {"pdfPage":258,"displayPage":null,"source":"Unknown"},
+                    {"pdfPage":264,"displayPage":null,"source":"Unknown"}
+                    """
+                : """
+                    {"pdfPage":234,"displayPage":"8","source":"ExtractedText"},
+                    {"pdfPage":243,"displayPage":"17","source":"ExtractedText"},
+                    {"pdfPage":246,"displayPage":"20","source":"ExtractedText"},
+                    {"pdfPage":249,"displayPage":"23","source":"ExtractedText"},
+                    {"pdfPage":258,"displayPage":"32","source":"ExtractedText"},
+                    {"pdfPage":264,"displayPage":"2","source":"ExtractedText"}
+                    """;
+            return new MemoryStream(Encoding.UTF8.GetBytes($$"""
+            {
+              "schemaVersion":1,
+              "documentId":"{{documentId}}",
+              "sourceBlob":"company/machine/{{documentId}}.pdf",
+              "pages":[{{pages}}]
+            }
+            """));
+        };
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.AreEqual(finalText, result.FinalText);
+        Assert.HasCount(5, result.Sources);
+        CollectionAssert.AreEqual(
+            new[] { 246, 258, 264, 234, 243 },
+            result.Sources.Select(source => source.PdfPage).ToArray());
+        Assert.IsTrue(result.Sources.All(source => source.PageKind == TechnicalSourcePageKind.Pdf));
+        var sourceLineStart = finalText.IndexOf("Source :", StringComparison.Ordinal);
+        Assert.IsTrue(result.Sources.All(source => source.StartIndex > sourceLineStart));
     }
 
     [TestMethod]
@@ -2421,7 +2579,6 @@ public sealed class ClaudeDirectChatServiceTests
                 credential,
                 blobReader,
                 new TechnicalSourceReferenceResolver(pageMapResolver),
-                new TechnicalAssistantPromptProvider(AppContext.BaseDirectory),
                 new TechnicalSkillProvider(AppContext.BaseDirectory, options.Skills),
                 Options.Create(options),
                 logger);

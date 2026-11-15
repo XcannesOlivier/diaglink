@@ -38,7 +38,7 @@ public sealed record HistoricalTechnicalSourceEvidence(
     TechnicalSourcePageKind PageKind,
     string? VersionToken = null);
 
-/// <summary>A document/physical-page pair and its containing individual File Search result.</summary>
+/// <summary>Physical PDF document/page evidence and its containing File Search result.</summary>
 public sealed record TechnicalDocumentPageEvidence(
     string DocumentId,
     int PdfPage,

@@ -69,8 +69,11 @@ public class ConversationSummaryService
         // Capture separately before SQL writes, including unknown usage if the model call fails.
         var newSummary = await _summarizer.SummarizeConversationAsync(existingSummary, toSummarize, cancellationToken, onUsage);
 
-        await _historyRepository.UpdateTechnicalSummaryAsync(conversationId, newSummary.Text, cancellationToken);
-        await _historyRepository.MarkMessagesSummarizedAsync(toSummarize.Select(m => m.Id), cancellationToken);
+        await _historyRepository.CommitSummaryAsync(
+            conversationId,
+            newSummary.Text,
+            toSummarize.Select(message => message.Id).ToArray(),
+            cancellationToken);
 
         _logger.LogInformation(
             "Summarized {Count} older messages into TechnicalSummary for conversation {ConversationId}",

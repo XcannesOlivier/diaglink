@@ -133,6 +133,49 @@ export function useTechnicalViewerNavigation({
     return { x: x - (bounds?.left ?? 0), y: y - (bounds?.top ?? 0) };
   }, [viewportRef]);
 
+  const zoomAroundPoint = useCallback((nextZoom: number, point: Point) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const currentZoom = zoomRef.current;
+    const boundedZoom = clamp(nextZoom, minZoom, maxZoom);
+    if (boundedZoom === currentZoom) return;
+
+    const local = localPoint(point);
+    const contentX = (viewport.scrollLeft + local.x) / currentZoom;
+    const contentY = (viewport.scrollTop + local.y) / currentZoom;
+    zoomRef.current = boundedZoom;
+    onZoomChange(boundedZoom);
+    requestAnimationFrame(() => {
+      scrollWithinBounds(
+        contentX * boundedZoom - local.x,
+        contentY * boundedZoom - local.y,
+      );
+      measurePannable();
+    });
+  }, [localPoint, maxZoom, measurePannable, minZoom, onZoomChange, scrollWithinBounds, viewportRef]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0) return;
+      event.preventDefault();
+      const delta = event.deltaY * (event.deltaMode === 1
+        ? 16
+        : event.deltaMode === 2
+          ? Math.max(1, viewport.clientHeight)
+          : 1);
+      zoomAroundPoint(
+        zoomRef.current * Math.exp(-delta * 0.002),
+        { x: event.clientX, y: event.clientY },
+      );
+    };
+
+    viewport.addEventListener('wheel', onWheel, { passive: false });
+    return () => viewport.removeEventListener('wheel', onWheel);
+  }, [viewportRef, zoomAroundPoint]);
+
   const beginPinch = useCallback(() => {
     const viewport = viewportRef.current;
     const points = [...pointersRef.current.values()];

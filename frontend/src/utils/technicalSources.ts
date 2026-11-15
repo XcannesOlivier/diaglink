@@ -120,6 +120,9 @@ export function parseTechnicalSources(value: unknown): TechnicalSourceReference[
     const item = candidate as Record<string, unknown>;
     if (
       typeof item.id !== 'number' || !Number.isSafeInteger(item.id) || item.id <= 0 ||
+      (item.documentId !== undefined &&
+        (typeof item.documentId !== 'string' ||
+          !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(item.documentId))) ||
       (item.documentName !== undefined &&
         (typeof item.documentName !== 'string' ||
           item.documentName.length === 0 ||
@@ -137,6 +140,7 @@ export function parseTechnicalSources(value: unknown): TechnicalSourceReference[
     if (!byId.has(item.id)) {
       byId.set(item.id, {
         id: item.id,
+        ...(typeof item.documentId === 'string' ? { documentId: item.documentId } : {}),
         ...(typeof item.documentName === 'string' ? { documentName: item.documentName } : {}),
         pdfPage: item.pdfPage,
         displayPage: item.displayPage,

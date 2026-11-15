@@ -29,6 +29,7 @@ export interface TechnicalVisual {
 
 export interface TechnicalSourceReference {
   id: number;
+  documentId?: string;
   documentName?: string;
   pdfPage: number;
   displayPage: string;
