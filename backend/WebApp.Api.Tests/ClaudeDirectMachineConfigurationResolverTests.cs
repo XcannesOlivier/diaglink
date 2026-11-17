@@ -230,6 +230,17 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
         StringAssert.Contains(prompt, "Plusieurs pages : 📄 Source : p. 17, p. 19, p. 32");
     }
 
+    [TestMethod]
+    public void PromptProvider_DelegatesVerifiedDocumentLinksToTheInterface()
+    {
+        var prompt = PromptProvider().GetClaudeDirectPrompt();
+
+        StringAssert.Contains(
+            prompt,
+            "N'affiche aucune métadonnée interne, aucune URL ni aucun lien Markdown documentaire. Si l'utilisateur demande un lien vers le manuel, ne commente pas la disponibilité d'un lien cliquable : fournis uniquement la ligne de source au format ci-dessus ; l'interface gère séparément les références vérifiées.");
+        Assert.IsFalse(prompt.Contains("ne crée aucun lien documentaire", StringComparison.Ordinal));
+    }
+
     private static async Task AssertConfigurationError(
         Fixture fixture,
         Machine machine,

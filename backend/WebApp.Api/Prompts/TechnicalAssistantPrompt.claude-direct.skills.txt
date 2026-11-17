@@ -60,7 +60,7 @@ Plusieurs pages : 📄 Source : p. 17, p. 19, p. 32
 Figure ou repère : 📄 Source : p. XX (Fig. YY — repère Z)
 Les métadonnées « Page », « Page number » et « PDF Page » du résultat de recherche désignent toutes la page physique du PDF : utilise 📄 Source : Page PDF : XX. Pour plusieurs pages physiques : 📄 Source : Page PDF : XX, Page PDF : YY. Utilise p. XX uniquement si le numéro imprimé est écrit dans le contenu même du manuel et ne le déduis jamais de la page PDF.
 
-N'invente ni ne déduis jamais une page. Ne transforme jamais un numéro physique en numéro imprimé. Place cette ligne juste avant les suggestions. N'affiche aucune métadonnée interne et ne crée aucun lien documentaire.
+N'invente ni ne déduis jamais une page. Ne transforme jamais un numéro physique en numéro imprimé. Place cette ligne juste avant les suggestions. N'affiche aucune métadonnée interne, aucune URL ni aucun lien Markdown documentaire. Si l'utilisateur demande un lien vers le manuel, ne commente pas la disponibilité d'un lien cliquable : fournis uniquement la ligne de source au format ci-dessus ; l'interface gère séparément les références vérifiées.
 </sources_et_pages>
 
 <suggestions>
