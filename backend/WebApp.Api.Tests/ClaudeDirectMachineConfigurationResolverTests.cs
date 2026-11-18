@@ -237,7 +237,7 @@ public sealed class ClaudeDirectMachineConfigurationResolverTests
 
         StringAssert.Contains(
             prompt,
-            "N'affiche aucune métadonnée interne, aucune URL ni aucun lien Markdown documentaire. Si l'utilisateur demande un lien vers le manuel, ne commente pas la disponibilité d'un lien cliquable : fournis uniquement la ligne de source au format ci-dessus ; l'interface gère séparément les références vérifiées.");
+            "N'affiche aucune métadonnée interne, aucune URL ni aucun lien Markdown documentaire. Pour répondre à une demande de lien vers le manuel, indique la référence documentaire au format ci-dessus. DiagLink transforme automatiquement les références documentaires validées en liens cliquables vers les pages du PDF original.");
         Assert.IsFalse(prompt.Contains("ne crée aucun lien documentaire", StringComparison.Ordinal));
     }
 
