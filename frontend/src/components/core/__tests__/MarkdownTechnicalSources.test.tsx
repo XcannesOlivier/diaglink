@@ -96,14 +96,32 @@ describe('Markdown technical sources', () => {
     const content = '**Source** : p. 72 (...) et p. 73 (...)';
     const first = content.indexOf('p. 72');
     const second = content.indexOf('p. 73');
-    await render(content, [
+    const sources = [
       { id: 123, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: first, endIndex: first + 5, displayOrder: 0 },
       { id: 124, pdfPage: 75, displayPage: '73', label: 'p. 73', startIndex: second, endIndex: second + 5, displayOrder: 1 },
-    ]);
+    ];
+    const onClick = await render(content, sources);
 
-    expect(host.querySelectorAll('button')).toHaveLength(2);
+    const buttons = host.querySelectorAll<HTMLButtonElement>('button');
+    expect(buttons).toHaveLength(2);
     expect(host.querySelector('strong')?.textContent).toBe('Source');
     expect(host.textContent?.trimEnd()).toBe('Source : p. 72 (...) et p. 73 (...)');
+    await act(async () => buttons[1].click());
+    expect(onClick).toHaveBeenCalledWith(sources[1]);
+  });
+
+  it('keeps an unverified reference visible but not clickable beside a verified reference', async () => {
+    const content = '📄 Source : Page PDF : 74, Page PDF : 999';
+    const verified = content.indexOf('74');
+    await render(content, [
+      { id: 123, pdfPage: 74, displayPage: '72', label: '74', startIndex: verified, endIndex: verified + 2, displayOrder: 0 },
+    ]);
+
+    const buttons = host.querySelectorAll<HTMLButtonElement>('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toBe('74');
+    expect(Array.from(buttons).some(button => button.textContent === '999')).toBe(false);
+    expect(host.textContent?.trimEnd()).toBe(content);
   });
 
   it('keeps UTF-16 offsets aligned after accents, apostrophes, and an emoji', async () => {

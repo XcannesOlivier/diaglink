@@ -20,8 +20,13 @@ vi.mock('@fluentui-copilot/react-copilot-chat', () => ({
 }));
 
 vi.mock('../../core/Markdown', () => ({
-  Markdown: ({ content, sources }: { content: string; sources?: Array<{ label: string }> }) => (
-    <p data-source-count={sources?.length ?? 0} data-source-label={sources?.[0]?.label}>{content}</p>
+  Markdown: ({ content, sources }: { content: string; sources?: Array<{ label: string; startIndex: number; endIndex: number }> }) => (
+    <p
+      data-source-count={sources?.length ?? 0}
+      data-source-label={sources?.[0]?.label}
+      data-source-start={sources?.[0]?.startIndex}
+      data-source-end={sources?.[0]?.endIndex}
+    >{content}</p>
   ),
 }));
 vi.mock('../TechnicalSourcePdfDialog', () => ({
@@ -189,8 +194,8 @@ describe('chat message presentation', () => {
     ));
 
     const markdown = container.querySelector('[data-source-count]');
-    expect(markdown?.getAttribute('data-source-count')).toBe('0');
-    expect(markdown?.textContent).not.toContain('Source: p. 70');
+    expect(markdown?.getAttribute('data-source-count')).toBe('1');
+    expect(markdown?.textContent).toBe('Source: p. 70.');
     expect(container.querySelector('section[aria-label="Sources documentaires"]')?.textContent)
       .toContain('p. 70');
     expect(container.querySelectorAll('section[aria-labelledby="web-sources-mixed-sources"] a')).toHaveLength(1);
@@ -257,7 +262,7 @@ describe('chat message presentation', () => {
       .toEqual([expect.stringContaining('p. 15'), expect.stringContaining('p. 16')]);
   });
 
-  it('hides a verified historical Claude source line while keeping the structured PDF link', async () => {
+  it('keeps a verified historical Claude source line and its original offsets with the structured PDF link', async () => {
     const content = 'Procédure historique.\n📄 Source : p. 16';
     const startIndex = content.indexOf('p. 16');
     await act(async () => root.render(
@@ -281,8 +286,11 @@ describe('chat message presentation', () => {
       />,
     ));
 
-    expect(container.textContent).toContain('Procédure historique.');
-    expect(container.textContent).not.toContain('📄 Source : p. 16');
+    const markdown = container.querySelector('[data-source-count]');
+    expect(markdown?.textContent).toBe(content);
+    expect(markdown?.getAttribute('data-source-count')).toBe('1');
+    expect(markdown?.getAttribute('data-source-start')).toBe(String(startIndex));
+    expect(markdown?.getAttribute('data-source-end')).toBe(String(startIndex + 5));
     expect(container.textContent).toContain('Sources :');
     expect(container.textContent).toContain('Doosan DX225LCA Workshop Manual.pdf');
     expect(container.querySelectorAll('section[aria-label="Sources documentaires"] button')).toHaveLength(1);

@@ -7,7 +7,6 @@ import { TechnicalVisualGallery } from './TechnicalVisualGallery';
 import { DialogCloseButton } from '../core/DialogCloseButton';
 import { useFormatTimestamp } from '../../hooks/useFormatTimestamp';
 import { parseContentWithCitations } from '../../utils/citationParser';
-import { compactVerifiedSourceLines } from '../../utils/technicalSources';
 import type { IChatItem, IAnnotation, TechnicalSourceReference } from '../../types/chat';
 import styles from './AssistantMessage.module.css';
 
@@ -97,11 +96,6 @@ function AssistantMessageComponent({
     return Array.from(groups.values());
   }, [message.sources]);
 
-  const presentedTechnicalContent = useMemo(
-    () => compactVerifiedSourceLines(message.content, message.sources),
-    [message.content, message.sources],
-  );
-  
   // Parse content with citations for consistent numbering between inline and footnotes
   const parsedContent = useMemo(() => {
     if (!hasAnnotations) return null;
@@ -268,10 +262,10 @@ function AssistantMessageComponent({
         <>
           <Suspense fallback={<Spinner size="small" />}>
             <Markdown
-              content={isStreaming ? message.content : presentedTechnicalContent.content}
+              content={message.content}
               annotations={message.annotations}
               onCitationClick={handleCitationClick}
-              sources={isStreaming ? message.sources : presentedTechnicalContent.sources}
+              sources={message.sources}
               onTechnicalSourceClick={onLoadTechnicalSource ? setSelectedSource : undefined}
             />
           </Suspense>

@@ -379,10 +379,12 @@ describe('AgentChat machine-scoped conversation history', () => {
     ];
     mocks.state = makeState('company_admin', 'machine-a', summaries);
     const createdAtUtc = '2026-10-05T14:07:57Z';
-    mocks.getConversationMessages.mockResolvedValue([{ role: 'assistant', content: 'Réponse', createdAtUtc, visuals: [
+    const content = 'Réponse historique.\n📄 Source : p. 72';
+    const startIndex = content.indexOf('p. 72');
+    mocks.getConversationMessages.mockResolvedValue([{ role: 'assistant', content, createdAtUtc, visuals: [
       { id: 12, documentId: 'manual', page: 71, assetType: 'tile', tile: 'r02-c01', name: 'tile.png', displayOrder: 0 },
     ], sources: [
-      { id: 21, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex: 0, endIndex: 5, displayOrder: 0 },
+      { id: 21, pdfPage: 74, displayPage: '72', label: 'p. 72', startIndex, endIndex: startIndex + 5, displayOrder: 0 },
     ], suggestions: ['Où est le relais ?'], webCitations: [
       { type: 'uri_citation', label: 'Documentation constructeur', url: 'https://manufacturer.example/manuals/2544-9024' },
     ] }]);
@@ -392,8 +394,9 @@ describe('AgentChat machine-scoped conversation history', () => {
     expect(mocks.dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: 'CHAT_LOAD_CONVERSATION',
       messages: [expect.objectContaining({
+        content,
         visuals: [expect.objectContaining({ id: 12 })],
-        sources: [expect.objectContaining({ id: 21, pdfPage: 74 })],
+        sources: [expect.objectContaining({ id: 21, pdfPage: 74, startIndex, endIndex: startIndex + 5 })],
         annotations: [expect.objectContaining({ url: 'https://manufacturer.example/manuals/2544-9024' })],
         suggestions: ['Où est le relais ?'],
         more: { time: createdAtUtc },
