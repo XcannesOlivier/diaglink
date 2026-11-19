@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { TechnicalSourceReference } from '../../types/chat';
-import { parseTechnicalSources, prepareTechnicalSourceContent } from '../technicalSources';
+import {
+  hideFullyVerifiedSourceLinesForDisplay,
+  parseTechnicalSources,
+  prepareTechnicalSourceContent,
+} from '../technicalSources';
 
 function source(overrides: Partial<TechnicalSourceReference> = {}): TechnicalSourceReference {
   return {
@@ -36,6 +40,85 @@ describe('parseTechnicalSources', () => {
     expect(parseTechnicalSources([])).toEqual([]);
     expect(parseTechnicalSources([{ id: '123' }])).toEqual([]);
     expect(parseTechnicalSources([{ ...source(), documentId: '../manual' }])).toEqual([]);
+  });
+});
+
+describe('hideFullyVerifiedSourceLinesForDisplay', () => {
+  function reference(
+    content: string,
+    label: string,
+    overrides: Partial<TechnicalSourceReference> = {},
+  ): TechnicalSourceReference {
+    const startIndex = content.indexOf(label);
+    return source({
+      label,
+      startIndex,
+      endIndex: startIndex + label.length,
+      ...overrides,
+    });
+  }
+
+  it('hides a fully verified source-only line without changing its source offsets', () => {
+    const content = 'Diagnostic confirmé.\n📄 Source : Page PDF : 263';
+    const verified = reference(content, '263', { pdfPage: 263, displayPage: '263' });
+    const original = { ...verified };
+
+    expect(hideFullyVerifiedSourceLinesForDisplay(content, [verified]))
+      .toBe('Diagnostic confirmé.\n');
+    expect(verified).toEqual(original);
+  });
+
+  it('hides several verified references on the same source-only line', () => {
+    const content = 'Réponse.\n📄 Sources : p. 58 · p. 59';
+
+    expect(hideFullyVerifiedSourceLinesForDisplay(content, [
+      reference(content, 'p. 58', { pdfPage: 58, displayPage: '58' }),
+      reference(content, 'p. 59', { id: 124, pdfPage: 59, displayPage: '59' }),
+    ])).toBe('Réponse.\n');
+  });
+
+  it('keeps commented and unresolved documentary lines intact', () => {
+    const commented = '📄 Source : Page PDF : 58 (Fig. 019)';
+    const unresolved = '📄 Sources : Page PDF : 58, Page PDF : 999';
+
+    expect(hideFullyVerifiedSourceLinesForDisplay(commented, [
+      reference(commented, '58', { pdfPage: 58, displayPage: '58' }),
+    ])).toBe(commented);
+    expect(hideFullyVerifiedSourceLinesForDisplay(unresolved, [
+      reference(unresolved, '58', { pdfPage: 58, displayPage: '58' }),
+    ])).toBe(unresolved);
+  });
+
+  it('keeps malformed offsets and partially overlapping ranges intact', () => {
+    const content = '📄 Source : p. 58';
+    const verified = reference(content, 'p. 58', { pdfPage: 58, displayPage: '58' });
+
+    expect(hideFullyVerifiedSourceLinesForDisplay(content, [
+      { ...verified, startIndex: 99, endIndex: 104 },
+    ])).toBe(content);
+    expect(hideFullyVerifiedSourceLinesForDisplay(content, [
+      verified,
+      { ...verified, id: 124, label: '. 58', startIndex: verified.startIndex + 1 },
+    ])).toBe(content);
+  });
+
+  it('deduplicates identical ranges without changing the source objects', () => {
+    const content = '📄 Source : p. 58';
+    const first = reference(content, 'p. 58', { pdfPage: 58, displayPage: '58' });
+    const duplicate = { ...first, id: 124 };
+    const originals = [{ ...first }, { ...duplicate }];
+
+    expect(hideFullyVerifiedSourceLinesForDisplay(content, [first, duplicate])).toBe('');
+    expect([first, duplicate]).toEqual(originals);
+  });
+
+  it.each([
+    ['backtick fence', '```text\n📄 Source : p. 58\n```'],
+    ['tilde fence', '~~~text\n📄 Source : p. 58\n~~~'],
+    ['indented block', '    📄 Source : p. 58'],
+  ])('does not transform a source line inside a %s', (_name, content) => {
+    const verified = reference(content, 'p. 58', { pdfPage: 58, displayPage: '58' });
+    expect(hideFullyVerifiedSourceLinesForDisplay(content, [verified])).toBe(content);
   });
 });
 

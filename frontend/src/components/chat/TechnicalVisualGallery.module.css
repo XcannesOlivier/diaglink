@@ -40,6 +40,11 @@
 }
 
 .title {
+  box-sizing: border-box;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 8px 0 8px 16px;
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -149,6 +154,7 @@
   .gallery { grid-template-columns: 1fr; }
   .image { max-height: 240px; }
   .caption { flex-wrap: wrap; }
+  .title { padding-left: max(8px, env(safe-area-inset-left)); }
   .dialog.dialog {
     width: calc(100dvw - max(4px, env(safe-area-inset-left)) - max(4px, env(safe-area-inset-right))) !important;
     height: calc(100dvh - max(4px, env(safe-area-inset-top)) - max(4px, env(safe-area-inset-bottom)));

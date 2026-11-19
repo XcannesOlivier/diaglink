@@ -26,6 +26,121 @@ const documentarySourceLinePattern = /^(\s*(?:#{1,6}\s*)?(?:[-*]\s+)?(?:\*\*|__)
 const documentaryScaffoldingPattern = /\bpages?\s*(?:(?:du\s+)?pdf|physiques?|imprim(?:ée|e)s?)?\s*:/giu;
 
 /**
+ * Builds a completed-message display projection without changing stored
+ * content or source offsets.
+ *
+ * Only complete documentary lines whose remaining content is exclusively
+ * verified documentary scaffolding are hidden. Mixed, commented, unresolved,
+ * malformed, overlapping, or code-block lines remain unchanged.
+ */
+export function hideFullyVerifiedSourceLinesForDisplay(
+  content: string,
+  sources: readonly TechnicalSourceReference[] | undefined,
+): string {
+  const exactSources = (sources ?? [])
+    .filter(source =>
+      source.startIndex >= 0 &&
+      source.endIndex > source.startIndex &&
+      source.endIndex <= content.length &&
+      content.slice(source.startIndex, source.endIndex) === source.label)
+    .sort((left, right) =>
+      left.startIndex - right.startIndex ||
+      left.endIndex - right.endIndex);
+
+  if (exactSources.length === 0) return content;
+
+  const hiddenLines: Array<{ start: number; end: number }> = [];
+  const linePattern = /[^\r\n]*(?:\r\n|\r|\n|$)/g;
+  let fenceCharacter: '`' | '~' | undefined;
+  let fenceLength = 0;
+
+  for (const match of content.matchAll(linePattern)) {
+    const rawLine = match[0];
+    if (!rawLine || match.index === undefined) continue;
+
+    const newline = rawLine.match(/(?:\r\n|\r|\n)$/)?.[0] ?? '';
+    const line = newline ? rawLine.slice(0, -newline.length) : rawLine;
+    const trimmed = line.trimStart();
+
+    if (fenceCharacter) {
+      const closingRun = trimmed.match(
+        fenceCharacter === '`' ? /^`+/ : /^~+/,
+      )?.[0].length ?? 0;
+      if (
+        closingRun >= fenceLength &&
+        trimmed.slice(closingRun).trim().length === 0
+      ) {
+        fenceCharacter = undefined;
+        fenceLength = 0;
+      }
+      continue;
+    }
+
+    const openingFence = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (openingFence) {
+      fenceCharacter = openingFence[1][0] as '`' | '~';
+      fenceLength = openingFence[1].length;
+      continue;
+    }
+
+    // Conservative handling of indented Markdown code blocks.
+    if (/^(?:\t| {4})/.test(line)) continue;
+
+    const prefix = documentarySourceLinePattern.exec(line);
+    if (!prefix) continue;
+
+    const lineStart = match.index;
+    const lineEnd = lineStart + line.length;
+    const sourcesOnLine = exactSources
+      .filter(source =>
+        source.startIndex >= lineStart &&
+        source.endIndex <= lineEnd)
+      .filter((source, index, values) =>
+        index === 0 ||
+        source.startIndex !== values[index - 1].startIndex ||
+        source.endIndex !== values[index - 1].endIndex ||
+        source.label !== values[index - 1].label);
+
+    if (sourcesOnLine.length === 0) continue;
+
+    const hasOverlap = sourcesOnLine.some((source, index) =>
+      index > 0 &&
+      source.startIndex < sourcesOnLine[index - 1].endIndex);
+    if (hasOverlap) continue;
+
+    let residual = line;
+    for (const source of [...sourcesOnLine].sort(
+      (left, right) => right.startIndex - left.startIndex,
+    )) {
+      residual =
+        residual.slice(0, source.startIndex - lineStart) +
+        residual.slice(source.endIndex - lineStart);
+    }
+
+    const substantiveResidual = residual
+      .slice(prefix[0].length)
+      .replace(documentaryScaffoldingPattern, '')
+      .replace(/[\s,;:·|/\\()[\].–—-]/gu, '');
+
+    if (substantiveResidual.length === 0) {
+      // Keep the original newline so surrounding Markdown blocks do not merge.
+      hiddenLines.push({ start: lineStart, end: lineEnd });
+    }
+  }
+
+  let displayContent = content;
+  for (const line of hiddenLines.sort(
+    (left, right) => right.start - left.start,
+  )) {
+    displayContent =
+      displayContent.slice(0, line.start) +
+      displayContent.slice(line.end);
+  }
+
+  return displayContent;
+}
+
+/**
  * Removes only verified references from explicit Claude-generated source lines.
  * Any remaining text is retained as an unverified documentary reference.
  */

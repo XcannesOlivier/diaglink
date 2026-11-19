@@ -194,7 +194,7 @@ describe('chat message presentation', () => {
     ));
 
     const markdown = container.querySelector('[data-source-count]');
-    expect(markdown?.getAttribute('data-source-count')).toBe('1');
+    expect(markdown?.getAttribute('data-source-count')).toBe('0');
     expect(markdown?.textContent).toBe('Source: p. 70.');
     expect(container.querySelector('section[aria-label="Sources documentaires"]')?.textContent)
       .toContain('p. 70');
@@ -262,19 +262,67 @@ describe('chat message presentation', () => {
       .toEqual([expect.stringContaining('p. 15'), expect.stringContaining('p. 16')]);
   });
 
-  it('keeps a verified historical Claude source line and its original offsets with the structured PDF link', async () => {
+  it('hides a completed verified source line while keeping its original offsets and PDF link', async () => {
     const content = 'Procédure historique.\n📄 Source : p. 16';
+    const startIndex = content.indexOf('p. 16');
+    const source = {
+      id: 42,
+      documentName: 'Doosan DX225LCA Workshop Manual.pdf',
+      pdfPage: 18,
+      displayPage: '16',
+      label: 'p. 16',
+      startIndex,
+      endIndex: startIndex + 5,
+      displayOrder: 0,
+    };
+    const originalSource = { ...source };
+    const loadSource = vi.fn();
+    await act(async () => root.render(
+      <AssistantMessage
+        onLoadTechnicalSource={loadSource}
+        message={{
+          id: 'historical-source',
+          role: 'assistant',
+          content,
+          sources: [source],
+        }}
+      />,
+    ));
+
+    const markdown = container.querySelector('[data-source-count]');
+    expect(markdown?.textContent).toBe('Procédure historique.\n');
+    expect(markdown?.getAttribute('data-source-count')).toBe('0');
+    expect(source).toEqual(originalSource);
+    expect(container.textContent).toContain('Sources :');
+    expect(container.textContent).toContain('Doosan DX225LCA Workshop Manual.pdf');
+    const sourceButton = container.querySelector<HTMLButtonElement>(
+      'section[aria-label="Sources documentaires"] button',
+    );
+    expect(sourceButton?.disabled).toBe(false);
+    await act(async () => sourceButton?.click());
+    expect(document.body.querySelector('[role="dialog"]')?.getAttribute('data-source-id')).toBe('42');
+  });
+
+  it('keeps documentary lines intact when annotations are present', async () => {
+    const content = 'Réponse annotée.\n📄 Source : p. 16';
     const startIndex = content.indexOf('p. 16');
     await act(async () => root.render(
       <AssistantMessage
         onLoadTechnicalSource={vi.fn()}
         message={{
-          id: 'historical-source',
+          id: 'annotated-source',
           role: 'assistant',
           content,
+          annotations: [{
+            type: 'uri_citation',
+            label: 'Documentation publique',
+            url: 'https://example.test/documentation',
+            startIndex: 0,
+            endIndex: 7,
+          }],
           sources: [{
-            id: 42,
-            documentName: 'Doosan DX225LCA Workshop Manual.pdf',
+            id: 43,
+            documentName: 'manual.pdf',
             pdfPage: 18,
             displayPage: '16',
             label: 'p. 16',
@@ -286,19 +334,14 @@ describe('chat message presentation', () => {
       />,
     ));
 
-    const markdown = container.querySelector('[data-source-count]');
-    expect(markdown?.textContent).toBe(content);
-    expect(markdown?.getAttribute('data-source-count')).toBe('1');
-    expect(markdown?.getAttribute('data-source-start')).toBe(String(startIndex));
-    expect(markdown?.getAttribute('data-source-end')).toBe(String(startIndex + 5));
-    expect(container.textContent).toContain('Sources :');
-    expect(container.textContent).toContain('Doosan DX225LCA Workshop Manual.pdf');
-    expect(container.querySelectorAll('section[aria-label="Sources documentaires"] button')).toHaveLength(1);
+    expect(container.querySelector('[data-source-count]')?.textContent).toBe(content);
+    expect(container.querySelector('section[aria-label="Sources documentaires"]')).not.toBeNull();
   });
 
-  it('keeps the Claude source line visible until streaming is complete', async () => {
+  it('keeps a late source line visible while streaming and projects it only with the completed section', async () => {
     const content = 'Réponse en cours.\n📄 Source : p. 16';
     const startIndex = content.indexOf('p. 16');
+    const source = { id: 7, documentName: 'manual.pdf', pdfPage: 18, displayPage: '16', label: 'p. 16', startIndex, endIndex: startIndex + 5, displayOrder: 0 };
     await act(async () => root.render(
       <AssistantMessage
         isStreaming
@@ -306,12 +349,42 @@ describe('chat message presentation', () => {
           id: 'streaming-source',
           role: 'assistant',
           content,
-          sources: [{ id: 7, documentName: 'manual.pdf', pdfPage: 18, displayPage: '16', label: 'p. 16', startIndex, endIndex: startIndex + 5, displayOrder: 0 }],
+          sources: [],
         }}
       />,
     ));
 
     expect(container.textContent).toContain('📄 Source : p. 16');
+    expect(container.querySelector('section[aria-label="Sources documentaires"]')).toBeNull();
+
+    await act(async () => root.render(
+      <AssistantMessage
+        isStreaming
+        message={{ id: 'streaming-source', role: 'assistant', content, sources: [source] }}
+      />,
+    ));
+    expect(container.textContent).toContain('📄 Source : p. 16');
+    expect(container.querySelector('section[aria-label="Sources documentaires"]')).toBeNull();
+
+    await act(async () => root.render(
+      <AssistantMessage
+        onLoadTechnicalSource={vi.fn()}
+        message={{ id: 'streaming-source', role: 'assistant', content, sources: [source] }}
+      />,
+    ));
+    expect(container.querySelector('[data-source-count]')?.textContent).toBe('Réponse en cours.\n');
+    expect(container.querySelector('section[aria-label="Sources documentaires"]')).not.toBeNull();
+  });
+
+  it('keeps the original documentary line when no Sources section is available', async () => {
+    const content = 'Réponse historique.\n📄 Source : p. 16';
+    await act(async () => root.render(
+      <AssistantMessage
+        message={{ id: 'source-without-section', role: 'assistant', content, sources: [] }}
+      />,
+    ));
+
+    expect(container.querySelector('[data-source-count]')?.textContent).toBe(content);
     expect(container.querySelector('section[aria-label="Sources documentaires"]')).toBeNull();
   });
 
