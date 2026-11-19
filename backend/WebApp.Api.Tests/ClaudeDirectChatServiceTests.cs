@@ -1601,21 +1601,42 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    public async Task CompleteAsync_DoesNotProbeRequestedDocumentTwiceWhenExactImageIsMissing()
+    public async Task CompleteAsync_ExplicitAuthorizedDocumentDoesNotSubstituteAnotherExistingPage()
     {
         var fixture = Fixture.Create(
             ToolResponse(documentId: "manual-a", allowedDocumentIds: ["manual-a", "manual-b"]),
+            DirectResponse("not found handled"));
+        fixture.BlobReader.StreamFactory = blobName =>
+            blobName.Contains("/manual-b/", StringComparison.Ordinal)
+                ? new MemoryStream([137, 80, 78, 71, 13, 10, 26, 10, 1])
+                : null;
+
+        var result = await fixture.Service.CompleteAsync(Request());
+
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.HasCount(0, result.Visuals);
+        Assert.AreEqual(ClaudeDirectDocumentResolutionMode.NotFound, result.DocumentResolutions.Single().ResolutionMode);
+        Assert.HasCount(1, fixture.BlobReader.RequestedNames);
+        Assert.IsTrue(fixture.BlobReader.RequestedNames.Single().Contains("/manual-a/", StringComparison.Ordinal));
+        Assert.IsFalse(fixture.BlobReader.RequestedNames.Any(name =>
+            name.Contains("/manual-b/", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_ExplicitUniqueDocumentWithMissingImageIsOpenedOnlyOnce()
+    {
+        var fixture = Fixture.Create(
+            ToolResponse(documentId: "manual-a", allowedDocumentIds: ["manual-a"]),
             DirectResponse("not found handled"));
         fixture.BlobReader.StreamFactory = _ => null;
 
         var result = await fixture.Service.CompleteAsync(Request());
 
         Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
-        Assert.HasCount(2, fixture.BlobReader.RequestedNames);
-        Assert.AreEqual(1, fixture.BlobReader.RequestedNames.Count(name =>
-            name.Contains("/manual-a/", StringComparison.Ordinal)));
-        Assert.AreEqual(1, fixture.BlobReader.RequestedNames.Count(name =>
-            name.Contains("/manual-b/", StringComparison.Ordinal)));
+        Assert.HasCount(0, result.Visuals);
+        Assert.AreEqual(ClaudeDirectDocumentResolutionMode.NotFound, result.DocumentResolutions.Single().ResolutionMode);
+        Assert.HasCount(1, fixture.BlobReader.RequestedNames);
+        Assert.IsTrue(fixture.BlobReader.RequestedNames.Single().Contains("/manual-a/", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -1649,26 +1670,426 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    public async Task CompleteAsync_DocumentOutsideMcpSetIsNeverProbed()
+    public async Task CompleteAsync_ExplicitDocumentOutsideMcpSetIsRejectedWithoutSubstitution()
     {
         var fixture = Fixture.Create(
             ToolResponse(documentId: "outside", allowedDocumentIds: ["manual-a", "manual-b"]),
             DirectResponse("not found handled"));
-        fixture.BlobReader.StreamFactory = _ => null;
 
         var result = await fixture.Service.CompleteAsync(Request());
 
-        Assert.IsFalse(fixture.BlobReader.RequestedNames.Any(name => name.Contains("/outside/", StringComparison.Ordinal)));
-        CollectionAssert.AreEquivalent(
-            new[] { "manual-a", "manual-b" },
-            fixture.BlobReader.RequestedNames
-                .Select(name => name.Split('/')[2])
-                .ToArray());
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
         Assert.AreEqual(ClaudeDirectDocumentResolutionMode.NotFound, result.DocumentResolutions.Single().ResolutionMode);
     }
 
     [TestMethod]
-    public async Task CompleteAsync_AllowedDocumentExtractionCannotEscapeMachineBlobPrefix()
+    public async Task CompleteAsync_Test4ReusesVersionedHistoricalPageWithoutCurrentFileSearch()
+    {
+        const string documentId = "dx225-parts";
+        const string sourceVersion = "etag-v1";
+        const string finalText = "Vue éclatée du démarreur. Page PDF : 58. Liste des pièces : Page PDF : 59.";
+        var versionToken = TechnicalSourcePageStorage.CreateVersionToken(sourceVersion);
+        var fixture = Fixture.Create(
+            ImageToolResponse(documentId, page: 58),
+            DirectResponse(finalText));
+        fixture.BlobReader.PageMapFactory = _ => VersionedPageMap(
+            documentId,
+            sourceVersion,
+            58,
+            59);
+        fixture.BlobReader.PdfVersionFactory = (_, _) => Task.FromResult<string?>(sourceVersion);
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(documentId, 58, "58", TechnicalSourcePageKind.Pdf, versionToken),
+                new(documentId, 59, "59", TechnicalSourcePageKind.Pdf, versionToken)
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.IsEmpty(result.McpCalls);
+        Assert.HasCount(1, result.Visuals);
+        Assert.AreEqual(documentId, result.Visuals.Single().DocumentId);
+        Assert.AreEqual($"{documentId}/page-00058/{documentId}_page-00058-full.png", result.Visuals.Single().AssetKey);
+        Assert.HasCount(2, result.Sources);
+        CollectionAssert.AreEqual(new[] { 58, 59 }, result.Sources.Select(source => source.PdfPage).ToArray());
+        Assert.IsTrue(result.Sources.All(source => source.DocumentId == documentId));
+        Assert.HasCount(1, fixture.BlobReader.RequestedPdfVersions);
+        Assert.AreEqual($"company/machine/{documentId}.pdf", fixture.BlobReader.RequestedPdfVersions.Single());
+        Assert.HasCount(0, result.Errors);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_CurrentFileSearchDocumentTakesPriorityOverHistoricalEvidence()
+    {
+        const string currentDocument = "current-manual";
+        const string historicalDocument = "historical-manual";
+        var fixture = Fixture.Create(
+            ToolResponse(documentId: currentDocument, allowedDocumentIds: [currentDocument], page: 58),
+            DirectResponse("done"));
+        fixture.BlobReader.PageMapFactory = _ =>
+            throw new AssertFailedException("Historical page maps must not be read when File Search recognized a document.");
+        fixture.BlobReader.PdfVersionFactory = (_, _) =>
+            throw new AssertFailedException("Historical PDF versions must not be read when File Search recognized a document.");
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(
+                    historicalDocument,
+                    58,
+                    "58",
+                    TechnicalSourcePageKind.Pdf,
+                    TechnicalSourcePageStorage.CreateVersionToken("historical-etag"))
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.AreEqual(currentDocument, result.Visuals.Single().DocumentId);
+        Assert.IsEmpty(fixture.BlobReader.RequestedPageMaps);
+        Assert.IsEmpty(fixture.BlobReader.RequestedPdfVersions);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_CurrentFileSearchSetPreventsExplicitHistoricalOverride()
+    {
+        const string currentDocument = "current-manual";
+        const string historicalDocument = "historical-manual";
+        const string sourceVersion = "historical-etag";
+        var fixture = Fixture.Create(
+            ToolResponse(
+                documentId: historicalDocument,
+                allowedDocumentIds: [currentDocument],
+                page: 58),
+            DirectResponse("image unavailable"));
+        fixture.BlobReader.PageMapFactory = _ =>
+            throw new AssertFailedException("Historical evidence must not override a non-empty File Search set.");
+        fixture.BlobReader.PdfVersionFactory = (_, _) =>
+            throw new AssertFailedException("Historical evidence must not override a non-empty File Search set.");
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(
+                    historicalDocument,
+                    58,
+                    "58",
+                    TechnicalSourcePageKind.Pdf,
+                    TechnicalSourcePageStorage.CreateVersionToken(sourceVersion))
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.IsEmpty(fixture.BlobReader.RequestedPageMaps);
+        Assert.IsEmpty(fixture.BlobReader.RequestedPdfVersions);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_HistoricalEvidenceWithoutVersionIsRejectedWithoutStorageProbe()
+    {
+        const string documentId = "historical-manual";
+        var fixture = Fixture.Create(
+            ImageToolResponse(documentId, page: 58),
+            DirectResponse("image unavailable"));
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(documentId, 58, "58", TechnicalSourcePageKind.Pdf)
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.IsEmpty(fixture.BlobReader.RequestedPageMaps);
+        Assert.IsEmpty(fixture.BlobReader.RequestedPdfVersions);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_HistoricalEvidenceCannotAuthorizeAnotherPhysicalPage()
+    {
+        const string documentId = "historical-manual";
+        const string sourceVersion = "etag-v1";
+        var fixture = Fixture.Create(
+            ImageToolResponse(documentId, page: 58),
+            DirectResponse("image unavailable"));
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(
+                    documentId,
+                    59,
+                    "59",
+                    TechnicalSourcePageKind.Pdf,
+                    TechnicalSourcePageStorage.CreateVersionToken(sourceVersion))
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.IsEmpty(fixture.BlobReader.RequestedPageMaps);
+        Assert.IsEmpty(fixture.BlobReader.RequestedPdfVersions);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_HistoricalEvidenceIsRejectedWhenCurrentPdfVersionDiffers()
+    {
+        const string documentId = "historical-manual";
+        const string historicalVersion = "etag-v1";
+        var fixture = Fixture.Create(
+            ImageToolResponse(documentId, page: 58),
+            DirectResponse("image unavailable"));
+        fixture.BlobReader.PageMapFactory = _ => VersionedPageMap(
+            documentId,
+            historicalVersion,
+            58);
+        fixture.BlobReader.PdfVersionFactory = (_, _) => Task.FromResult<string?>("etag-v2");
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(
+                    documentId,
+                    58,
+                    "58",
+                    TechnicalSourcePageKind.Pdf,
+                    TechnicalSourcePageStorage.CreateVersionToken(historicalVersion))
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.HasCount(1, fixture.BlobReader.RequestedPdfVersions);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_HistoricalEvidenceIsRejectedWhenSourcePdfWasDeleted()
+    {
+        const string documentId = "historical-manual";
+        const string sourceVersion = "etag-v1";
+        var fixture = Fixture.Create(
+            ImageToolResponse(documentId, page: 58),
+            DirectResponse("image unavailable"));
+        fixture.BlobReader.PageMapFactory = _ => VersionedPageMap(
+            documentId,
+            sourceVersion,
+            58);
+        fixture.BlobReader.PdfVersionFactory = (_, _) => Task.FromResult<string?>(null);
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(
+                    documentId,
+                    58,
+                    "58",
+                    TechnicalSourcePageKind.Pdf,
+                    TechnicalSourcePageStorage.CreateVersionToken(sourceVersion))
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.HasCount(1, fixture.BlobReader.RequestedPdfVersions);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_HistoricalEvidenceIsRejectedWhenPageMapVersionDiffers()
+    {
+        const string documentId = "historical-manual";
+        const string historicalVersion = "etag-v1";
+        const string pageMapVersion = "etag-v2";
+        var fixture = Fixture.Create(
+            ImageToolResponse(documentId, page: 58),
+            DirectResponse("image unavailable"));
+        fixture.BlobReader.PageMapFactory = _ => VersionedPageMap(
+            documentId,
+            pageMapVersion,
+            58);
+        fixture.BlobReader.PdfVersionFactory = (_, _) =>
+            throw new AssertFailedException("The PDF ETag must not be read after a page-map token mismatch.");
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(
+                    documentId,
+                    58,
+                    "58",
+                    TechnicalSourcePageKind.Pdf,
+                    TechnicalSourcePageStorage.CreateVersionToken(historicalVersion))
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.IsEmpty(fixture.BlobReader.RequestedPdfVersions);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_HistoricalEvidenceIsRejectedWhenPageMapHasNoVersion()
+    {
+        const string documentId = "historical-manual";
+        var fixture = Fixture.Create(
+            ImageToolResponse(documentId, page: 58),
+            DirectResponse("image unavailable"));
+        fixture.BlobReader.PageMapFactory = _ => PageMap(documentId, "58", 58);
+        fixture.BlobReader.PdfVersionFactory = (_, _) =>
+            throw new AssertFailedException("An unversioned page map must be rejected before reading the PDF ETag.");
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(
+                    documentId,
+                    58,
+                    "58",
+                    TechnicalSourcePageKind.Pdf,
+                    TechnicalSourcePageStorage.CreateVersionToken("etag-v1"))
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.IsEmpty(fixture.BlobReader.RequestedPdfVersions);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_ExplicitUnauthorizedHistoricalDocumentDoesNotSubstituteAnotherDocument()
+    {
+        const string authorizedDocument = "historical-authorized";
+        const string requestedDocument = "historical-requested";
+        const string sourceVersion = "etag-v1";
+        var fixture = Fixture.Create(
+            ImageToolResponse(requestedDocument, page: 58),
+            DirectResponse("image unavailable"));
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(
+                    authorizedDocument,
+                    58,
+                    "58",
+                    TechnicalSourcePageKind.Pdf,
+                    TechnicalSourcePageStorage.CreateVersionToken(sourceVersion))
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.IsEmpty(fixture.BlobReader.RequestedPageMaps);
+        Assert.IsEmpty(fixture.BlobReader.RequestedPdfVersions);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_AmbiguousHistoricalDocumentsAreRejectedBeforeImageProbe()
+    {
+        const string sourceVersion = "etag-v1";
+        var token = TechnicalSourcePageStorage.CreateVersionToken(sourceVersion);
+        var documents = new[] { "historical-a", "historical-b" };
+        var fixture = Fixture.Create(
+            ImageToolResponse(documentId: null, page: 58),
+            DirectResponse("image ambiguous"));
+        fixture.BlobReader.PageMapFactory = blobName => VersionedPageMap(
+            documents.Single(document => blobName.Contains($"/{document}/", StringComparison.Ordinal)),
+            sourceVersion,
+            58);
+        fixture.BlobReader.PdfVersionFactory = (_, _) => Task.FromResult<string?>(sourceVersion);
+        var request = Request() with
+        {
+            HistoricalSourceEvidence = documents
+                .Select(document => new HistoricalTechnicalSourceEvidence(
+                    document,
+                    58,
+                    "58",
+                    TechnicalSourcePageKind.Pdf,
+                    token))
+                .ToArray()
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "document_ambiguous"));
+        Assert.HasCount(2, fixture.BlobReader.RequestedPdfVersions);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+    }
+
+    [TestMethod]
+    [DataRow(401, "AuthenticationFailed")]
+    [DataRow(403, "AuthorizationPermissionMismatch")]
+    public async Task CompleteAsync_HistoricalPdfAuthorizationFailureRemainsDiagnosable(
+        int status,
+        string azureErrorCode)
+    {
+        const string documentId = "historical-manual";
+        const string sourceVersion = "etag-v1";
+        var fixture = Fixture.Create(
+            ImageToolResponse(documentId, page: 58),
+            DirectResponse("image unavailable"));
+        fixture.BlobReader.PageMapFactory = _ => VersionedPageMap(
+            documentId,
+            sourceVersion,
+            58);
+        fixture.BlobReader.PdfVersionFactory = (_, _) => Task.FromException<string?>(
+            new RequestFailedException(status, "Simulated failure.", azureErrorCode, null));
+        var request = Request() with
+        {
+            HistoricalSourceEvidence =
+            [
+                new(
+                    documentId,
+                    58,
+                    "58",
+                    TechnicalSourcePageKind.Pdf,
+                    TechnicalSourcePageStorage.CreateVersionToken(sourceVersion))
+            ]
+        };
+
+        var result = await fixture.Service.CompleteAsync(request);
+
+        Assert.HasCount(0, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_read_failed"));
+        var logs = string.Join('\n', fixture.Logger.Messages);
+        Assert.IsTrue(logs.Contains($"HttpStatus={status}", StringComparison.Ordinal));
+        Assert.IsTrue(logs.Contains($"AzureErrorCode={azureErrorCode}", StringComparison.Ordinal));
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+    }
+
+    [TestMethod]
+    public async Task CompleteAsync_InvalidExplicitDocumentCannotEscapeOrSubstituteAllowedDocument()
     {
         var fixture = Fixture.Create(
             ToolResponse(documentId: "../../outside", allowedDocumentIds: ["../../outside", DocumentId]),
@@ -1679,7 +2100,10 @@ public sealed class ClaudeDirectChatServiceTests
         Assert.IsTrue(fixture.BlobReader.RequestedNames.All(name =>
             name.StartsWith("company/machine/", StringComparison.Ordinal) &&
             !name.Contains("..", StringComparison.Ordinal)));
-        Assert.AreEqual(DocumentId, result.DocumentResolutions.Single().ResolvedDocumentId);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
+        Assert.IsNull(result.DocumentResolutions.Single().ResolvedDocumentId);
+        Assert.AreEqual(ClaudeDirectDocumentResolutionMode.NotFound, result.DocumentResolutions.Single().ResolutionMode);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "invalid_image_request"));
     }
 
     [TestMethod]
@@ -1692,7 +2116,7 @@ public sealed class ClaudeDirectChatServiceTests
         var result = await fixture.Service.CompleteAsync(Request());
 
         Assert.HasCount(0, fixture.BlobReader.RequestedNames);
-        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "invalid_image_request"));
     }
 
     [TestMethod]
@@ -2080,7 +2504,7 @@ public sealed class ClaudeDirectChatServiceTests
     }
 
     [TestMethod]
-    public async Task CompleteAsync_WrongDocumentIdUsesUniqueMcpDocumentWithoutRetry()
+    public async Task CompleteAsync_WrongExplicitDocumentIdDoesNotUseUniqueMcpDocument()
     {
         var fixture = Fixture.Create(
             ToolResponse(documentId: "DX10z"),
@@ -2089,17 +2513,13 @@ public sealed class ClaudeDirectChatServiceTests
         var result = await fixture.Service.CompleteAsync(Request());
 
         Assert.AreEqual("done", result.FinalText);
-        Assert.HasCount(0, result.Errors);
-        Assert.HasCount(1, result.Visuals);
+        Assert.IsTrue(result.Errors.Any(error => error.Code == "blob_not_found"));
+        Assert.HasCount(0, result.Visuals);
         Assert.HasCount(2, fixture.Handler.Requests);
         Assert.AreEqual("DX10z", result.DocumentResolutions.Single().RequestedDocumentId);
-        Assert.AreEqual(DocumentId, result.DocumentResolutions.Single().ResolvedDocumentId);
-        Assert.AreEqual(
-            ClaudeDirectDocumentResolutionMode.UniqueMcpDocument,
-            result.DocumentResolutions.Single().ResolutionMode);
-        Assert.AreEqual(
-            $"{DocumentId}/page-00075/{DocumentId}_page-00075-full.png",
-            result.Visuals.Single().AssetKey);
+        Assert.IsNull(result.DocumentResolutions.Single().ResolvedDocumentId);
+        Assert.AreEqual(ClaudeDirectDocumentResolutionMode.NotFound, result.DocumentResolutions.Single().ResolutionMode);
+        Assert.IsEmpty(fixture.BlobReader.RequestedNames);
     }
 
     [TestMethod]
@@ -2352,6 +2772,24 @@ public sealed class ClaudeDirectChatServiceTests
         }
         """));
 
+    private static Stream VersionedPageMap(
+        string documentId,
+        string sourceVersion,
+        params int[] pdfPages)
+    {
+        var pages = string.Join(',', pdfPages.Select(page =>
+            $$"""{"pdfPage":{{page}},"displayPage":null,"source":"ExtractedText"}"""));
+        return new MemoryStream(Encoding.UTF8.GetBytes($$"""
+        {
+            "schemaVersion":1,
+            "documentId":"{{documentId}}",
+            "sourceBlob":"company/machine/{{documentId}}.pdf",
+            "sourceETag":"{{sourceVersion}}",
+            "pages":[{{pages}}]
+        }
+        """));
+    }
+
     private static HttpResponseMessage CacheUsageResponse(
         string text,
         long input,
@@ -2509,6 +2947,36 @@ public sealed class ClaudeDirectChatServiceTests
         }));
     }
 
+    private static HttpResponseMessage ImageToolResponse(
+        string? documentId,
+        int page,
+        string assetType = "full",
+        string? tile = null)
+    {
+        var input = new Dictionary<string, object?>
+        {
+            ["page"] = page,
+            ["asset_type"] = assetType,
+            ["tile"] = tile
+        };
+        if (documentId is not null)
+        {
+            input["document_id"] = documentId;
+        }
+
+        return JsonResponse(JsonSerializer.Serialize(new
+        {
+            id = "msg-image-tool",
+            model = "claude-sonnet-5",
+            stop_reason = "tool_use",
+            content = new object[]
+            {
+                new { type = "tool_use", id = "tool-1", name = "get_page_image", input }
+            },
+            usage = new { input_tokens = 10, output_tokens = 2 }
+        }));
+    }
+
     private static HttpResponseMessage SkillToolResponse(params string[] skillNames) =>
         JsonResponse(JsonSerializer.Serialize(new
         {
@@ -2578,6 +3046,7 @@ public sealed class ClaudeDirectChatServiceTests
                 new SingleClientFactory(new HttpClient(handler)),
                 credential,
                 blobReader,
+                pageMapResolver,
                 new TechnicalSourceReferenceResolver(pageMapResolver),
                 new TechnicalSkillProvider(AppContext.BaseDirectory, options.Skills),
                 Options.Create(options),
@@ -2639,6 +3108,8 @@ public sealed class ClaudeDirectChatServiceTests
         public List<string> RequestedNames { get; } = [];
         public Func<string, Stream?> PageMapFactory { get; set; } = _ => null;
         public List<string> RequestedPageMaps { get; } = [];
+        public Func<string, CancellationToken, Task<string?>>? PdfVersionFactory { get; set; }
+        public List<string> RequestedPdfVersions { get; } = [];
         public Func<string, CancellationToken, Task<Stream?>>? OpenFactory { get; set; }
 
         public Task<Stream?> OpenReadAsync(string blobName, CancellationToken cancellationToken)
@@ -2657,6 +3128,14 @@ public sealed class ClaudeDirectChatServiceTests
 
         public Task<Stream?> OpenPdfAsync(string blobName, CancellationToken cancellationToken) =>
             Task.FromResult<Stream?>(null);
+
+        public Task<string?> GetPdfVersionAsync(string blobName, CancellationToken cancellationToken)
+        {
+            RequestedPdfVersions.Add(blobName);
+            return PdfVersionFactory is null
+                ? Task.FromResult<string?>(null)
+                : PdfVersionFactory(blobName, cancellationToken);
+        }
     }
 
     private sealed class InterruptingReadStream : Stream

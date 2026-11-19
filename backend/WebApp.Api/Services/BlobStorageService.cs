@@ -136,19 +136,33 @@ public class BlobStorageService : ITechnicalVisualBlobReader, ITechnicalDocument
     public Task<Stream?> OpenPdfAsync(string blobName, CancellationToken cancellationToken) =>
         OpenPrivateDocumentAssetAsync(blobName, ".pdf", cancellationToken);
 
+    public async Task<string?> GetPdfVersionAsync(string blobName, CancellationToken cancellationToken)
+    {
+        if (!IsSafePrivateDocumentAssetName(blobName, ".pdf"))
+        {
+            return null;
+        }
+
+        try
+        {
+            var properties = await _client
+                .GetBlobContainerClient("documents")
+                .GetBlobClient(blobName)
+                .GetPropertiesAsync(cancellationToken: cancellationToken);
+            return properties.Value.ETag.ToString();
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == StatusCodes.Status404NotFound)
+        {
+            return null;
+        }
+    }
+
     private async Task<Stream?> OpenPrivateDocumentAssetAsync(
         string blobName,
         string requiredSuffix,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(blobName) ||
-            blobName.StartsWith('/') ||
-            blobName.StartsWith('\\') ||
-            blobName.Contains("..", StringComparison.Ordinal) ||
-            blobName.Contains('\\') ||
-            blobName.Any(char.IsControl) ||
-            !blobName.EndsWith(requiredSuffix, StringComparison.OrdinalIgnoreCase) ||
-            Uri.TryCreate(blobName, UriKind.Absolute, out _))
+        if (!IsSafePrivateDocumentAssetName(blobName, requiredSuffix))
         {
             return null;
         }
@@ -165,6 +179,16 @@ public class BlobStorageService : ITechnicalVisualBlobReader, ITechnicalDocument
             return null;
         }
     }
+
+    private static bool IsSafePrivateDocumentAssetName(string? blobName, string requiredSuffix) =>
+        !string.IsNullOrWhiteSpace(blobName) &&
+        !blobName.StartsWith('/') &&
+        !blobName.StartsWith('\\') &&
+        !blobName.Contains("..", StringComparison.Ordinal) &&
+        !blobName.Contains('\\') &&
+        !blobName.Any(char.IsControl) &&
+        blobName.EndsWith(requiredSuffix, StringComparison.OrdinalIgnoreCase) &&
+        !Uri.TryCreate(blobName, UriKind.Absolute, out _);
 
     private static bool IsPdfName(string name) =>
         name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)

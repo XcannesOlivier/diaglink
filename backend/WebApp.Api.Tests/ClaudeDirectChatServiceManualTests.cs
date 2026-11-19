@@ -57,6 +57,7 @@ public sealed class ClaudeDirectChatServiceManualTests
             new ManualHttpClientFactory(httpClient),
             credential,
             blobReader,
+            pageMapResolver,
             new TechnicalSourceReferenceResolver(pageMapResolver),
             new TechnicalSkillProvider(AppContext.BaseDirectory, new ClaudeDirectSkillOptions()),
             Options.Create(new ClaudeDirectChatOptions

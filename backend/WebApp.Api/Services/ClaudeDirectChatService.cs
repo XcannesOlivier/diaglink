@@ -46,6 +46,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TokenCredential _credential;
     private readonly ITechnicalVisualBlobReader _blobReader;
+    private readonly TechnicalPageMapResolver _pageMapResolver;
     private readonly TechnicalSourceReferenceResolver _sourceReferenceResolver;
     private readonly ITechnicalSkillProvider _skillProvider;
     private readonly ClaudeDirectChatOptions _options;
@@ -55,6 +56,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         IHttpClientFactory httpClientFactory,
         TokenCredential credential,
         ITechnicalVisualBlobReader blobReader,
+        TechnicalPageMapResolver pageMapResolver,
         TechnicalSourceReferenceResolver sourceReferenceResolver,
         ITechnicalSkillProvider skillProvider,
         IOptions<ClaudeDirectChatOptions> options,
@@ -63,6 +65,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         _httpClientFactory = httpClientFactory;
         _credential = credential;
         _blobReader = blobReader;
+        _pageMapResolver = pageMapResolver;
         _sourceReferenceResolver = sourceReferenceResolver;
         _skillProvider = skillProvider;
         _options = options.Value;
@@ -527,6 +530,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                             request.Machine,
                             localCall,
                             allowedDocumentIds,
+                            request.HistoricalSourceEvidence,
                             visuals,
                             documentResolutions,
                             errors,
@@ -929,6 +933,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         ClaudeDirectMachineContext machine,
         LocalToolCall call,
         IReadOnlySet<string> allowedDocumentIds,
+        IReadOnlyList<HistoricalTechnicalSourceEvidence> historicalSourceEvidence,
         List<TechnicalVisualReference> visuals,
         List<ClaudeDirectDocumentResolution> documentResolutions,
         List<ClaudeDirectError> errors,
@@ -994,6 +999,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
                 machine.BlobPrefix,
                 validatedImageRequest,
                 allowedDocumentIds,
+                historicalSourceEvidence,
                 callNumber,
                 traceId,
                 cancellationToken);
@@ -1184,6 +1190,7 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         string blobPrefix,
         ImageRequest request,
         IReadOnlySet<string> allowedDocumentIds,
+        IReadOnlyList<HistoricalTechnicalSourceEvidence> historicalSourceEvidence,
         int callNumber,
         string traceId,
         CancellationToken cancellationToken)
@@ -1209,59 +1216,113 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
             return stream is null ? null : (visual, stream);
         }
 
-        if (!string.IsNullOrWhiteSpace(request.RequestedDocumentId) &&
-            allowedDocumentIds.Contains(request.RequestedDocumentId))
+        if (allowedDocumentIds.Count > 0)
         {
-            var exact = await TryOpenAsync(request.RequestedDocumentId);
-            if (exact is not null)
+            if (!string.IsNullOrWhiteSpace(request.RequestedDocumentId))
             {
-                return new(exact.Value.Visual, exact.Value.Stream, ClaudeDirectDocumentResolutionMode.Exact);
+                if (!allowedDocumentIds.Contains(request.RequestedDocumentId))
+                {
+                    return new(null, null, ClaudeDirectDocumentResolutionMode.NotFound);
+                }
+
+                var exact = await TryOpenAsync(request.RequestedDocumentId);
+                if (exact is not null)
+                {
+                    return new(exact.Value.Visual, exact.Value.Stream, ClaudeDirectDocumentResolutionMode.Exact);
+                }
+
+                return new(null, null, ClaudeDirectDocumentResolutionMode.NotFound);
             }
+
+            if (allowedDocumentIds.Count == 1)
+            {
+                var documentId = allowedDocumentIds.Single();
+                var match = await TryOpenAsync(documentId);
+                return match is null
+                    ? new(null, null, ClaudeDirectDocumentResolutionMode.NotFound)
+                    : new(match.Value.Visual, match.Value.Stream, ClaudeDirectDocumentResolutionMode.UniqueMcpDocument);
+            }
+
+            var matches = new List<(TechnicalVisualReference Visual, Stream Stream)>();
+            foreach (var documentId in allowedDocumentIds.Order(StringComparer.Ordinal))
+            {
+                var match = await TryOpenAsync(documentId);
+                if (match is not null)
+                {
+                    matches.Add(match.Value);
+                }
+            }
+
+            if (matches.Count == 1)
+            {
+                return new(
+                    matches[0].Visual,
+                    matches[0].Stream,
+                    ClaudeDirectDocumentResolutionMode.UniqueExistingPage);
+            }
+
+            foreach (var match in matches)
+            {
+                await match.Stream.DisposeAsync();
+            }
+
+            return new(
+                null,
+                null,
+                matches.Count > 1
+                    ? ClaudeDirectDocumentResolutionMode.Ambiguous
+                    : ClaudeDirectDocumentResolutionMode.NotFound);
         }
 
-        if (allowedDocumentIds.Count == 0)
+        var historicalCandidates = new List<string>();
+        foreach (var document in historicalSourceEvidence
+            .Where(source =>
+                source.PdfPage == request.Page &&
+                !string.IsNullOrEmpty(source.VersionToken) &&
+                DocumentIdPattern.IsMatch(source.DocumentId) &&
+                (string.IsNullOrWhiteSpace(request.RequestedDocumentId) ||
+                    string.Equals(source.DocumentId, request.RequestedDocumentId, StringComparison.Ordinal)))
+            .GroupBy(source => source.DocumentId, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            var pageMap = await _pageMapResolver.ResolveAsync(
+                blobPrefix,
+                document.Key,
+                [],
+                cancellationToken);
+            if (pageMap is null ||
+                string.IsNullOrEmpty(pageMap.VersionToken) ||
+                !pageMap.PdfPages.Contains(request.Page) ||
+                !document.Any(source =>
+                    string.Equals(source.VersionToken, pageMap.VersionToken, StringComparison.Ordinal)) ||
+                !await _pageMapResolver.HasCurrentSourceVersionAsync(pageMap, cancellationToken))
+            {
+                continue;
+            }
+
+            historicalCandidates.Add(document.Key);
+        }
+
+        if (historicalCandidates.Count == 0)
         {
             return new(null, null, ClaudeDirectDocumentResolutionMode.NotFound);
         }
 
-        if (allowedDocumentIds.Count == 1)
+        if (historicalCandidates.Count > 1)
         {
-            var documentId = allowedDocumentIds.Single();
-            var match = await TryOpenAsync(documentId);
-            return match is null
-                ? new(null, null, ClaudeDirectDocumentResolutionMode.NotFound)
-                : new(match.Value.Visual, match.Value.Stream, ClaudeDirectDocumentResolutionMode.UniqueMcpDocument);
+            return new(null, null, ClaudeDirectDocumentResolutionMode.Ambiguous);
         }
 
-        var matches = new List<(TechnicalVisualReference Visual, Stream Stream)>();
-        foreach (var documentId in allowedDocumentIds.Order(StringComparer.Ordinal))
-        {
-            var match = await TryOpenAsync(documentId);
-            if (match is not null)
-            {
-                matches.Add(match.Value);
-            }
-        }
-
-        if (matches.Count == 1)
-        {
-            return new(
-                matches[0].Visual,
-                matches[0].Stream,
-                ClaudeDirectDocumentResolutionMode.UniqueExistingPage);
-        }
-
-        foreach (var match in matches)
-        {
-            await match.Stream.DisposeAsync();
-        }
-
-        return new(
-            null,
-            null,
-            matches.Count > 1
-                ? ClaudeDirectDocumentResolutionMode.Ambiguous
-                : ClaudeDirectDocumentResolutionMode.NotFound);
+        var historicalDocumentId = historicalCandidates[0];
+        var historicalMatch = await TryOpenAsync(historicalDocumentId);
+        return historicalMatch is null
+            ? new(null, null, ClaudeDirectDocumentResolutionMode.NotFound)
+            : new(
+                historicalMatch.Value.Visual,
+                historicalMatch.Value.Stream,
+                string.IsNullOrWhiteSpace(request.RequestedDocumentId)
+                    ? ClaudeDirectDocumentResolutionMode.UniqueExistingPage
+                    : ClaudeDirectDocumentResolutionMode.Exact);
     }
 
     private async Task<Stream?> OpenVisualAsync(
@@ -1413,6 +1474,12 @@ public sealed partial class ClaudeDirectChatService : IClaudeDirectChatService
         var documentId = GetString(input, "document_id");
         var assetType = GetString(input, "asset_type");
         var tile = GetString(input, "tile");
+        if (documentId is not null && !DocumentIdPattern.IsMatch(documentId))
+        {
+            error = "document_id must be omitted or contain only letters, digits, dots, underscores, and hyphens.";
+            return false;
+        }
+
         if (!input.TryGetProperty("page", out var pageElement) ||
             !pageElement.TryGetInt32(out var page) ||
             page is < 1 or > 99999)

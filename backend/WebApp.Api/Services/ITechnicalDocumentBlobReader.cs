@@ -5,4 +5,5 @@ public interface ITechnicalDocumentBlobReader
 {
     Task<Stream?> OpenPageMapAsync(string blobName, CancellationToken cancellationToken);
     Task<Stream?> OpenPdfAsync(string blobName, CancellationToken cancellationToken);
+    Task<string?> GetPdfVersionAsync(string blobName, CancellationToken cancellationToken);
 }

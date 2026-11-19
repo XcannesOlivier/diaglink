@@ -92,6 +92,58 @@ public sealed class BlobStorageServiceImageTests
         Assert.IsEmpty(transport.Methods);
     }
 
+    [TestMethod]
+    public async Task GetPdfVersionAsync_ReturnsCurrentETagWithOneHeadRequest()
+    {
+        var transport = new RecordingHandler((request, _) =>
+            Task.FromResult(Response(request, HttpStatusCode.OK, [])));
+        var service = CreateService(transport);
+
+        var version = await service.GetPdfVersionAsync("company/machine/manual.pdf", default);
+
+        Assert.AreEqual("\"test-etag\"", version);
+        CollectionAssert.AreEqual(new[] { HttpMethod.Head }, transport.Methods);
+    }
+
+    [TestMethod]
+    public async Task GetPdfVersionAsync_NotFoundReturnsNull()
+    {
+        var transport = new RecordingHandler((request, _) => Task.FromResult(
+            ErrorResponse(request, HttpStatusCode.NotFound, "BlobNotFound")));
+        var service = CreateService(transport);
+
+        Assert.IsNull(await service.GetPdfVersionAsync("company/machine/missing.pdf", default));
+        CollectionAssert.AreEqual(new[] { HttpMethod.Head }, transport.Methods);
+    }
+
+    [TestMethod]
+    [DataRow(401, "AuthenticationFailed")]
+    [DataRow(403, "AuthorizationPermissionMismatch")]
+    public async Task GetPdfVersionAsync_AuthorizationErrorsArePropagated(int status, string errorCode)
+    {
+        var transport = new RecordingHandler((request, _) => Task.FromResult(
+            ErrorResponse(request, (HttpStatusCode)status, errorCode)));
+        var service = CreateService(transport);
+
+        var exception = await Assert.ThrowsExactlyAsync<RequestFailedException>(() =>
+            service.GetPdfVersionAsync("company/machine/manual.pdf", default));
+
+        Assert.AreEqual(status, exception.Status);
+        Assert.AreEqual(errorCode, exception.ErrorCode);
+        CollectionAssert.AreEqual(new[] { HttpMethod.Head }, transport.Methods);
+    }
+
+    [TestMethod]
+    public async Task GetPdfVersionAsync_InvalidNameDoesNotReachStorage()
+    {
+        var transport = new RecordingHandler((_, _) =>
+            throw new AssertFailedException("Storage must not be contacted for an invalid PDF name."));
+        var service = CreateService(transport);
+
+        Assert.IsNull(await service.GetPdfVersionAsync("https://storage.test/secret.pdf", default));
+        Assert.IsEmpty(transport.Methods);
+    }
+
     private static BlobStorageService CreateService(HttpMessageHandler transport)
     {
         var options = new BlobClientOptions

@@ -1220,6 +1220,9 @@ public sealed class TechnicalSourceReferenceResolverTests
 
         public Task<Stream?> OpenPdfAsync(string blobName, CancellationToken cancellationToken) =>
             Task.FromResult<Stream?>(null);
+
+        public Task<string?> GetPdfVersionAsync(string blobName, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>(null);
     }
 
 }

@@ -293,6 +293,9 @@ public sealed class TechnicalSourceAccessTests
             RequestedPdfBlobName = blobName;
             return Task.FromResult<Stream?>(PdfContent is null ? null : new MemoryStream(PdfContent));
         }
+
+        public Task<string?> GetPdfVersionAsync(string blobName, CancellationToken cancellationToken) =>
+            Task.FromResult(SourceVersion);
     }
 
     private sealed record EndpointFixture(long SourceId, string Token);

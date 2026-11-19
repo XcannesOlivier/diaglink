@@ -65,6 +65,25 @@ public sealed partial class TechnicalPageMapResolver(
             pageMap.PdfPages);
     }
 
+    public async Task<bool> HasCurrentSourceVersionAsync(
+        TechnicalPageMapResolution pageMap,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(pageMap.VersionToken))
+        {
+            return false;
+        }
+
+        var currentSourceVersion = await blobReader.GetPdfVersionAsync(
+            pageMap.SourceBlob,
+            cancellationToken);
+        return !string.IsNullOrEmpty(currentSourceVersion) &&
+            string.Equals(
+                pageMap.VersionToken,
+                TechnicalSourcePageStorage.CreateVersionToken(currentSourceVersion),
+                StringComparison.Ordinal);
+    }
+
     internal static string GetDocumentName(string sourceBlob)
     {
         var separator = sourceBlob.LastIndexOf('/');
