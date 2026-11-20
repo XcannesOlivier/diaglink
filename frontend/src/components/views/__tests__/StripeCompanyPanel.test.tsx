@@ -30,6 +30,7 @@ vi.mock('../WalletTopUpPanel', () => ({
     return <>
       {technicalTarget && createPortal(<section aria-label="Détails wallet" />, technicalTarget)}
       {repairTarget && createPortal(<section aria-label="Réparation wallet" />, repairTarget)}
+      <article aria-label="Recharge de crédit">Recharge de crédit</article>
       <article aria-label="Historique des recharges de crédit">Historique des recharges de crédit</article>
     </>;
   },
@@ -94,13 +95,13 @@ describe('StripeCompanyPanel', () => {
     expect([...container.querySelectorAll('button')].some(button => button.textContent?.startsWith('Actualiser'))).toBe(false);
   });
 
-  it('supprime la facturation autonome et affiche les cinq cartes globales', async () => {
+  it('supprime la facturation autonome et affiche les six cartes globales', async () => {
     request.mockResolvedValue({ kind: 'success', data });
     await render();
     expect([...container.querySelectorAll('summary')].map(summary => summary.textContent)).toEqual([
       'Consommation globale', 'Consommation par machine', 'Détails techniques', 'Outils de réparation',
     ]);
-    expect(container.querySelectorAll('[data-global-cards] > article')).toHaveLength(5);
+    expect(container.querySelectorAll('[data-global-cards] > article')).toHaveLength(6);
     expect(container.textContent).toContain('Historique des recharges de crédit');
     expect(container.textContent).toContain('Montant en attente');
     expect(container.textContent).toContain('Opérations nécessitant une intervention');

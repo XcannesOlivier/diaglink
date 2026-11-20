@@ -54,8 +54,10 @@ describe('Super Admin wallet consultation', () => {
   it('shows the existing recharge history in a collapsed card and toggles a full-width detail', async () => {
     await render();
 
+    const rechargeCard=box.querySelector<HTMLElement>('[aria-label="Recharge de crédit"]')!;
     const card=box.querySelector<HTMLElement>('[aria-label="Historique des recharges de crédit"]')!;
     const toggle=card.querySelector<HTMLButtonElement>('button')!;
+    expect(rechargeCard.classList.contains(styles.walletTopUpCard)).toBe(true);
     expect(card.classList.contains(styles.consumptionSummaryCard)).toBe(true);
     expect(toggle.textContent).toBe('Voir l’historique des recharges');expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(box.querySelector('[aria-label="Détail de l’historique des recharges de crédit"]')).toBeNull();
@@ -64,7 +66,13 @@ describe('Super Admin wallet consultation', () => {
     expect(history.classList.contains(styles.topUpHistoryDetail)).toBe(true);
     const css=readFileSync(resolve('src/components/views/CompanyFinancePanel.module.css'),'utf8');
     expect(css).toMatch(/\.topUpHistoryDetail\{grid-column:1\/-1;/);
-    expect(css).toMatch(/globalConsumptionMetrics:not\(\.machineConsumptionMetrics\)\{grid-template-columns:minmax\(0,2fr\) repeat\(4,minmax\(0,1fr\)\)/);
+    expect(css).toContain('.adminFinanceRoot .walletTopUpCard .buttons{display:grid;grid-template-columns:repeat(5,minmax(64px,1fr))');
+    expect(css).toContain('@media(max-width:760px){');
+    expect(css).toContain('.adminFinanceRoot .walletTopUpCard .buttons{grid-template-columns:repeat(3,minmax(0,1fr))}');
+    expect(css).toContain('@media(max-width:480px){');
+    expect(css).toContain('.adminFinanceRoot .walletTopUpCard .buttons{grid-template-columns:repeat(2,minmax(0,1fr))}');
+    expect(css).toContain('@media(min-width:1101px){.adminFinanceRoot .globalConsumptionMetrics:not(.machineConsumptionMetrics){grid-template-columns:repeat(4,minmax(0,1fr))}');
+    expect(css).toContain('@media(min-width:1001px){.adminFinanceRoot .machineConsumptionMetrics{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr)}}');
     expect(history.textContent).toContain('20,00');expect(history.textContent).toContain('50,00');
     expect(history.textContent).toContain('Payé');expect(history.textContent).toContain('En attente de paiement');
     expect(toggle.textContent).toBe('Masquer l’historique des recharges');expect(toggle.getAttribute('aria-expanded')).toBe('true');

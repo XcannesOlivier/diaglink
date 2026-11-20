@@ -104,7 +104,7 @@
 @media(max-width:480px){.consumptionMetrics{grid-template-columns:minmax(0,1fr)}}
 
 /* Super Admin finishing layer. Scoped to avoid changing Company Admin surfaces. */
-.adminFinanceRoot{width:100%;max-width:100%;min-width:0;overflow-x:hidden}
+.adminFinanceRoot{width:100%;max-width:100%;min-width:0}
 .adminFinanceRoot>.technical{margin-block:10px;border-radius:12px}
 .adminFinanceRoot>.technical>summary{display:flex;align-items:center;min-height:48px;box-sizing:border-box;padding:14px 18px;font-size:15px;line-height:1.35}
 .adminFinanceRoot>.technical>summary::after{content:'›';flex-shrink:0;margin-left:auto;font-size:22px;line-height:1;color:var(--colorNeutralForeground2);transition:transform .15s ease}.adminFinanceRoot>.technical[open]>summary::after{transform:rotate(90deg)}
@@ -125,6 +125,7 @@
 .adminFinanceRoot .buttons.globalConsumptionControls label{display:flex;align-items:center;gap:8px}
 .adminFinanceRoot .buttons.globalConsumptionControls select{width:auto;min-width:160px}
 .adminFinanceRoot .globalConsumptionMetrics article{min-height:0;padding:12px}
+.adminFinanceRoot .globalConsumptionMetrics{align-items:start}
 .adminFinanceRoot .globalQuotaBreakdown{display:flex;align-items:center;flex-wrap:wrap;gap:4px 20px;margin:8px 0 10px;color:var(--colorNeutralForeground2);font-size:13px;line-height:1.45}
 .adminFinanceRoot .globalQuotaBreakdown strong{font-size:inherit;color:var(--colorNeutralForeground1)}
 .adminFinanceRoot .machineSubscriptionState{margin:0;color:var(--colorNeutralForeground2);font-size:14px;line-height:1.5}
@@ -138,10 +139,17 @@
 .adminFinanceRoot .machineToggle{min-height:40px}
 .adminFinanceRoot .recharge{max-width:100%;box-sizing:border-box;margin-top:12px;padding-top:12px}
 .adminFinanceRoot .amountField{max-width:440px}
+.adminFinanceRoot .walletTopUpCard{min-width:0;max-width:100%}
+.adminFinanceRoot .walletTopUpCard .recharge{width:100%;min-width:0}
+.adminFinanceRoot .walletTopUpCard .buttons{display:grid;grid-template-columns:repeat(5,minmax(64px,1fr));width:100%;min-width:0;gap:8px}
+.adminFinanceRoot .walletTopUpCard .buttons button{width:100%;min-width:0}
+.adminFinanceRoot .walletTopUpCard .amountField{width:100%;max-width:none;min-width:0;box-sizing:border-box}
+.adminFinanceRoot .walletTopUpCard .recharge>button{width:100%;min-width:0}
 
 @media(max-width:1100px){
  .adminFinanceRoot .consumptionMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}
  .adminFinanceRoot .machineConsumptionMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .adminFinanceRoot .walletTopUpCard,.adminFinanceRoot .globalInterventionCard{grid-column:span 2}
  .adminFinanceRoot .buttons{grid-template-columns:repeat(2,minmax(0,1fr))}
  .adminFinanceRoot .buttons .machineToggle{grid-column:1/-1;width:max-content}
 }
@@ -157,7 +165,7 @@
  .adminFinanceRoot .consumptionMetrics>article{min-height:104px;padding:12px}
  .adminFinanceRoot .consumptionMobile article{box-shadow:0 1px 4px #00000012}
  .adminFinanceRoot .machineToggle,.adminFinanceRoot button,.adminFinanceRoot a{min-height:44px}
- .adminFinanceRoot .recharge .buttons{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .adminFinanceRoot .walletTopUpCard .buttons{grid-template-columns:repeat(3,minmax(0,1fr))}
  .adminFinanceRoot .amountField{max-width:none;width:100%}
  .adminFinanceRoot .rechargeHistory{align-items:flex-start}
 }
@@ -168,12 +176,13 @@
  .adminFinanceRoot .consumptionMetrics{grid-template-columns:minmax(0,1fr)}
  .adminFinanceRoot .machineConsumptionMetrics{grid-template-columns:minmax(0,1fr)}
  .adminFinanceRoot .consumptionMetrics>article{min-height:auto}
- .adminFinanceRoot .recharge .buttons{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .adminFinanceRoot .walletTopUpCard .buttons{grid-template-columns:repeat(2,minmax(0,1fr))}
  .adminFinanceRoot .metric strong{font-size:27px;overflow-wrap:anywhere}
  .adminFinanceRoot .cardHeading{align-items:center}
  .adminFinanceRoot .cardHeading>*{max-width:100%}
 }
-@media(min-width:1001px){.adminFinanceRoot .globalConsumptionMetrics:not(.machineConsumptionMetrics){grid-template-columns:minmax(0,2fr) repeat(4,minmax(0,1fr))}.adminFinanceRoot .machineConsumptionMetrics{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr)}}
-@media(max-width:760px){.adminFinanceRoot .globalConsumptionMetrics{grid-template-columns:minmax(0,1fr)}.adminFinanceRoot .buttons.globalConsumptionControls label{flex:1 1 220px}.adminFinanceRoot .buttons.globalConsumptionControls select{flex:1;min-width:0}.adminFinanceRoot .buttons.globalConsumptionControls .machineToggle{width:auto}}
+@media(min-width:1101px){.adminFinanceRoot .globalConsumptionMetrics:not(.machineConsumptionMetrics){grid-template-columns:repeat(4,minmax(0,1fr))}.adminFinanceRoot .walletTopUpCard,.adminFinanceRoot .globalInterventionCard{grid-column:span 2}}
+@media(min-width:1001px){.adminFinanceRoot .machineConsumptionMetrics{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr)}}
+@media(max-width:760px){.adminFinanceRoot .globalConsumptionMetrics{grid-template-columns:minmax(0,1fr)}.adminFinanceRoot .walletTopUpCard,.adminFinanceRoot .globalInterventionCard{grid-column:auto}.adminFinanceRoot .buttons.globalConsumptionControls label{flex:1 1 220px}.adminFinanceRoot .buttons.globalConsumptionControls select{flex:1;min-width:0}.adminFinanceRoot .buttons.globalConsumptionControls .machineToggle{width:auto}}
 @media(max-width:760px){.adminFinanceRoot .buttons.machineConsumptionControls{align-items:stretch}.adminFinanceRoot .buttons.machineConsumptionControls label,.adminFinanceRoot .machineSearch{width:100%;max-width:none;min-width:0;flex-basis:100%}}
 .topUpHistoryCard>.machineToggle,.globalInterventionCard>.machineToggle{width:max-content;max-width:100%;margin:auto 0 0}.topUpHistoryDetail{grid-column:1/-1;min-width:0;padding:12px 14px;border:1px solid var(--colorNeutralStroke2);border-radius:8px;background:var(--colorNeutralBackground1)}.topUpHistoryDetail>.rechargeHistory:last-child{border-bottom:0}.topUpHistoryDetail h4{margin-top:0}.topUpHistoryDetail ul{margin:8px 0 12px;padding-inline-start:22px}

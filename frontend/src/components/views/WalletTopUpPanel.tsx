@@ -107,7 +107,7 @@ export function WalletTopUpPanel({ companyId, getAccessToken, onDiagLinkSessionE
     </section>
   );
   return <>
-    <article className={styles.consumptionSummaryCard} aria-label="Recharge de crédit">
+    <article className={`${styles.consumptionSummaryCard} ${styles.walletTopUpCard}`} aria-label="Recharge de crédit">
       <h4>Recharger le crédit</h4>
       {data && <>
         <div className={styles.metric}><strong>{euro(data.balance)}</strong><span> disponibles</span></div>
