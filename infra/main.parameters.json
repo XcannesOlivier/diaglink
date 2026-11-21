@@ -35,6 +35,9 @@
     "documentIngestionFunctionPrincipalId": {
       "value": "${DOCUMENT_INGESTION_FUNCTION_PRINCIPAL_ID=}"
     },
+    "senderAddress": {
+      "value": "${EMAIL_SENDER_ADDRESS=connexion@diaglink.com}"
+    },
     "authOtpPepper": {
       "value": "${AUTH_OTP_PEPPER}"
     },

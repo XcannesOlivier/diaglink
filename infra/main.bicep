@@ -37,8 +37,8 @@ param webImageName string = 'mcr.microsoft.com/k8se/quickstart:latest'  // Place
 @description('Default tags applied by Azure Policy (optional)')
 param defaultTags object = {}
 
-@description('ACS Email sender address on the Azure-managed domain (known only after first ACS deployment)')
-param senderAddress string = 'DoNotReply@60976bb3-7a7c-4471-818d-5d3fe79e4503.azurecomm.net'
+@description('Verified ACS Email MailFrom address used for transactional emails.')
+param senderAddress string = 'connexion@diaglink.com'
 
 @secure()
 @description('Pepper used to HMAC one-time login codes; supply from azd secret AUTH_OTP_PEPPER.')

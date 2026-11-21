@@ -26,7 +26,25 @@ resource domain 'Microsoft.Communication/emailServices/domains@2023-04-01' = {
   }
 }
 
-// Communication Service — the resource the app authenticates against; linked to the email domain.
+// Existing customer-managed domain. Its DNS verification records are managed outside this
+// deployment and must not be recreated or modified here.
+resource customDomain 'Microsoft.Communication/emailServices/domains@2023-04-01' existing = {
+  parent: emailService
+  name: 'diaglink.com'
+}
+
+// Static MailFrom identity used by DiagLink transactional emails.
+resource connexionSender 'Microsoft.Communication/emailServices/domains/senderUsernames@2023-04-01' = {
+  parent: customDomain
+  name: 'connexion'
+  properties: {
+    username: 'connexion'
+    displayName: 'DiagLink'
+  }
+}
+
+// Communication Service — the resource the app authenticates against; both domains stay linked
+// so the Azure-managed sender remains available for rollback.
 resource communicationService 'Microsoft.Communication/communicationServices@2023-04-01' = {
   name: 'acs-${resourceToken}'
   location: location
@@ -35,6 +53,7 @@ resource communicationService 'Microsoft.Communication/communicationServices@202
     dataLocation: dataLocation
     linkedDomains: [
       domain.id
+      customDomain.id
     ]
   }
 }
@@ -77,6 +96,8 @@ output communicationServiceId string = communicationService.id
 output emailServiceId string = emailService.id
 output domainId string = domain.id
 output domainName string = domain.name
+output customDomainId string = customDomain.id
+output customSenderAddress string = '${connexionSender.properties.username}@${customDomain.name}'
 // The actual Azure-generated sender FQDN/address (e.g. DoNotReply@<guid>.azurecomm.net) is not exposed
 // as a documented, readable Bicep property on this resource/API version — it must be read post-deployment
 // (Azure Portal or `az communication email domain show`) and is intentionally NOT output here.
