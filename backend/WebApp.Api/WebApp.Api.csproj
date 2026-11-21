@@ -30,6 +30,7 @@
   <ItemGroup>
     <None Update="Prompts\*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Prompts\Skills\**\SKILL.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <EmbeddedResource Include="EmailAssets\diaglink-logo.png" />
   </ItemGroup>
 
 </Project>

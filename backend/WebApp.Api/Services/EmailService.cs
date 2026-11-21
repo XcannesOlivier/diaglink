@@ -12,6 +12,11 @@ namespace WebApp.Api.Services;
 /// </summary>
 public class EmailService : ITransactionalEmailSender
 {
+    internal const string LoginLogoContentId = "diaglink-logo";
+    internal const string LoginLogoFileName = "diaglink-logo.png";
+    internal const string LoginLogoContentType = "image/png";
+    private const string LoginLogoResourceName = "WebApp.Api.EmailAssets.diaglink-logo.png";
+
     private readonly EmailClient? _emailClient;
     private readonly string _senderAddress;
     private readonly string? _acsEndpoint;
@@ -19,10 +24,17 @@ public class EmailService : ITransactionalEmailSender
     private readonly string? _managedIdentityClientId;
     private readonly bool _devNoAcs;
     private readonly ILogger<EmailService> _logger;
+    private readonly BinaryData? _loginLogoContent;
 
     public EmailService(IConfiguration configuration, ILogger<EmailService> logger, IHostEnvironment environment)
     {
         _logger = logger;
+        _loginLogoContent = LoadEmbeddedLoginLogo();
+        if (_loginLogoContent is null)
+        {
+            _logger.LogWarning(
+                "Embedded OTP email logo is unavailable; login codes will be sent without the inline logo.");
+        }
 
         // Read ACS endpoint and sender address. In Development, allow missing ACS and fall back to logging.
         var acsEndpointValue = configuration["Email:AcsEndpoint"];
@@ -86,10 +98,7 @@ public class EmailService : ITransactionalEmailSender
     /// </summary>
     public async Task SendLoginCodeAsync(string recipientEmail, string code, CancellationToken cancellationToken)
     {
-        var emailMessage = new EmailMessage(
-            senderAddress: _senderAddress,
-            recipientAddress: recipientEmail,
-            content: BuildLoginCodeContent(code));
+        var emailMessage = BuildLoginCodeMessage(_senderAddress, recipientEmail, code, _loginLogoContent);
 
         _logger.LogInformation(
             "OTP email send starting. Recipient={MaskedRecipient} AcsEndpoint={AcsEndpoint} Sender={Sender} Credential={CredentialKind} ManagedIdentityClientId={ManagedIdentityClientId} DevNoAcs={DevNoAcs}",
@@ -123,10 +132,32 @@ public class EmailService : ITransactionalEmailSender
         }
     }
 
+    internal static EmailMessage BuildLoginCodeMessage(
+        string senderAddress,
+        string recipientEmail,
+        string code,
+        BinaryData? logoContent)
+    {
+        var message = new EmailMessage(
+            senderAddress: senderAddress,
+            recipientAddress: recipientEmail,
+            content: BuildLoginCodeContent(code));
+
+        if (logoContent is not null)
+        {
+            var logo = new EmailAttachment(LoginLogoFileName, LoginLogoContentType, logoContent)
+            {
+                ContentId = LoginLogoContentId
+            };
+            message.Attachments.Add(logo);
+        }
+
+        return message;
+    }
+
     internal static EmailContent BuildLoginCodeContent(string code)
     {
         const string subject = "Votre code de connexion DiagLink";
-        const string logoUrl = "https://diaglink.com/assets/Logo%20DiagLink.png";
         const string loginUrl = "https://app.diaglink.com/login";
         var plainText =
             $"Votre code de connexion DiagLink est : {code}\n\n" +
@@ -144,7 +175,7 @@ public class EmailService : ITransactionalEmailSender
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:560px; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px;">
                         <tr>
                           <td align="center" style="padding:32px 24px 12px;">
-                            <img src="{logoUrl}" alt="DiagLink" width="190" style="display:block; width:100%; max-width:190px; height:auto; border:0;" />
+                            <img src="cid:{LoginLogoContentId}" alt="DiagLink" width="190" style="display:block; width:100%; max-width:190px; height:auto; border:0;" />
                           </td>
                         </tr>
                         <tr>
@@ -174,6 +205,24 @@ public class EmailService : ITransactionalEmailSender
             PlainText = plainText,
             Html = html
         };
+    }
+
+    internal static BinaryData? LoadEmbeddedLoginLogo()
+    {
+        try
+        {
+            using var stream = typeof(EmailService).Assembly.GetManifestResourceStream(LoginLogoResourceName);
+            if (stream is null) return null;
+
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            return new BinaryData(buffer.ToArray());
+        }
+        catch (Exception)
+        {
+            // Branding must never prevent delivery of a login code.
+            return null;
+        }
     }
 
     public async Task<string?> SendAsync(string recipientEmail, string subject, string textBody,
