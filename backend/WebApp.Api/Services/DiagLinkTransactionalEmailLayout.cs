@@ -5,7 +5,6 @@ namespace WebApp.Api.Services;
 
 internal static class DiagLinkTransactionalEmailLayout
 {
-    internal const string LogoUrl = "https://diaglink.com/assets/Logo%20DiagLink.png";
     internal const string LoginUrl = "https://app.diaglink.com/login";
     private const string Footer = "DiagLink · Assistant Technique";
 
@@ -47,7 +46,7 @@ internal static class DiagLinkTransactionalEmailLayout
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:560px; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px;">
                         <tr>
                           <td align="center" style="padding:32px 24px 12px;">
-                            <img src="{LogoUrl}" alt="DiagLink" width="190" style="display:block; width:100%; max-width:190px; height:auto; border:0;" />
+                            <img src="cid:{EmailService.LogoContentId}" alt="DiagLink" width="190" style="display:block; width:100%; max-width:190px; height:auto; border:0;" />
                           </td>
                         </tr>
                         <tr>

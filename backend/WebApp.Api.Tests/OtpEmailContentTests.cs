@@ -36,7 +36,7 @@ public sealed class OtpEmailContentTests
     [TestMethod]
     public void BuildLoginCodeMessage_AttachesOptimizedInlinePngLogo()
     {
-        var logoContent = EmailService.LoadEmbeddedLoginLogo();
+        var logoContent = EmailService.LoadEmbeddedLogo();
         Assert.IsNotNull(logoContent);
 
         var message = EmailService.BuildLoginCodeMessage(
@@ -60,6 +60,9 @@ public sealed class OtpEmailContentTests
             $"Le logo fait {logoBytes.Length} octets.");
         StringAssert.Contains(message.Content.Html, "src=\"cid:diaglink-logo\"");
         StringAssert.Contains(message.Content.Html, "alt=\"DiagLink\"");
+
+        Assert.IsTrue(EmailService.TryAddInlineLogo(message, message.Content.Html, logoContent));
+        Assert.AreEqual(1, message.Attachments.Count);
     }
 
     [TestMethod]

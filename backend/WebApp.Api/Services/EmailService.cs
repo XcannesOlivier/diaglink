@@ -12,10 +12,10 @@ namespace WebApp.Api.Services;
 /// </summary>
 public class EmailService : ITransactionalEmailSender
 {
-    internal const string LoginLogoContentId = "diaglink-logo";
-    internal const string LoginLogoFileName = "diaglink-logo.png";
-    internal const string LoginLogoContentType = "image/png";
-    private const string LoginLogoResourceName = "WebApp.Api.EmailAssets.diaglink-logo.png";
+    internal const string LogoContentId = "diaglink-logo";
+    internal const string LogoFileName = "diaglink-logo.png";
+    internal const string LogoContentType = "image/png";
+    private const string LogoResourceName = "WebApp.Api.EmailAssets.diaglink-logo.png";
 
     private readonly EmailClient? _emailClient;
     private readonly string _senderAddress;
@@ -24,16 +24,16 @@ public class EmailService : ITransactionalEmailSender
     private readonly string? _managedIdentityClientId;
     private readonly bool _devNoAcs;
     private readonly ILogger<EmailService> _logger;
-    private readonly BinaryData? _loginLogoContent;
+    private readonly BinaryData? _logoContent;
 
     public EmailService(IConfiguration configuration, ILogger<EmailService> logger, IHostEnvironment environment)
     {
         _logger = logger;
-        _loginLogoContent = LoadEmbeddedLoginLogo();
-        if (_loginLogoContent is null)
+        _logoContent = LoadEmbeddedLogo();
+        if (_logoContent is null)
         {
             _logger.LogWarning(
-                "Embedded OTP email logo is unavailable; login codes will be sent without the inline logo.");
+                "Embedded email logo is unavailable; transactional emails will be sent without the inline logo.");
         }
 
         // Read ACS endpoint and sender address. In Development, allow missing ACS and fall back to logging.
@@ -98,7 +98,7 @@ public class EmailService : ITransactionalEmailSender
     /// </summary>
     public async Task SendLoginCodeAsync(string recipientEmail, string code, CancellationToken cancellationToken)
     {
-        var emailMessage = BuildLoginCodeMessage(_senderAddress, recipientEmail, code, _loginLogoContent);
+        var emailMessage = BuildLoginCodeMessage(_senderAddress, recipientEmail, code, _logoContent);
 
         _logger.LogInformation(
             "OTP email send starting. Recipient={MaskedRecipient} AcsEndpoint={AcsEndpoint} Sender={Sender} Credential={CredentialKind} ManagedIdentityClientId={ManagedIdentityClientId} DevNoAcs={DevNoAcs}",
@@ -143,16 +143,55 @@ public class EmailService : ITransactionalEmailSender
             recipientAddress: recipientEmail,
             content: BuildLoginCodeContent(code));
 
-        if (logoContent is not null)
-        {
-            var logo = new EmailAttachment(LoginLogoFileName, LoginLogoContentType, logoContent)
-            {
-                ContentId = LoginLogoContentId
-            };
-            message.Attachments.Add(logo);
-        }
+        TryAddInlineLogo(message, message.Content.Html, logoContent);
 
         return message;
+    }
+
+    internal static EmailMessage BuildTransactionalMessage(
+        string senderAddress,
+        string recipientEmail,
+        string subject,
+        string textBody,
+        string? htmlBody,
+        BinaryData? logoContent,
+        string? replyToEmail = null,
+        string? replyToName = null)
+    {
+        var content = new EmailContent(subject) { PlainText = textBody };
+        if (!string.IsNullOrWhiteSpace(htmlBody)) content.Html = htmlBody;
+        var message = new EmailMessage(senderAddress, recipientEmail, content);
+        if (!string.IsNullOrWhiteSpace(replyToEmail))
+            message.ReplyTo.Add(new EmailAddress(replyToEmail, replyToName));
+
+        TryAddInlineLogo(message, htmlBody, logoContent);
+        return message;
+    }
+
+    internal static bool TryAddInlineLogo(EmailMessage message, string? htmlBody, BinaryData? logoContent)
+    {
+        if (logoContent is null || string.IsNullOrWhiteSpace(htmlBody)
+            || !htmlBody.Contains($"cid:{LogoContentId}", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (message.Attachments.Any(attachment =>
+                string.Equals(attachment.ContentId, LogoContentId, StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        try
+        {
+            var logo = new EmailAttachment(LogoFileName, LogoContentType, logoContent)
+            {
+                ContentId = LogoContentId
+            };
+            message.Attachments.Add(logo);
+            return true;
+        }
+        catch (Exception)
+        {
+            // Branding must never prevent delivery of a transactional email.
+            return false;
+        }
     }
 
     internal static EmailContent BuildLoginCodeContent(string code)
@@ -175,7 +214,7 @@ public class EmailService : ITransactionalEmailSender
                       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:560px; background-color:#ffffff; border:1px solid #e5e7eb; border-radius:12px;">
                         <tr>
                           <td align="center" style="padding:32px 24px 12px;">
-                            <img src="cid:{LoginLogoContentId}" alt="DiagLink" width="190" style="display:block; width:100%; max-width:190px; height:auto; border:0;" />
+                            <img src="cid:{LogoContentId}" alt="DiagLink" width="190" style="display:block; width:100%; max-width:190px; height:auto; border:0;" />
                           </td>
                         </tr>
                         <tr>
@@ -207,11 +246,11 @@ public class EmailService : ITransactionalEmailSender
         };
     }
 
-    internal static BinaryData? LoadEmbeddedLoginLogo()
+    internal static BinaryData? LoadEmbeddedLogo()
     {
         try
         {
-            using var stream = typeof(EmailService).Assembly.GetManifestResourceStream(LoginLogoResourceName);
+            using var stream = typeof(EmailService).Assembly.GetManifestResourceStream(LogoResourceName);
             if (stream is null) return null;
 
             using var buffer = new MemoryStream();
@@ -220,7 +259,7 @@ public class EmailService : ITransactionalEmailSender
         }
         catch (Exception)
         {
-            // Branding must never prevent delivery of a login code.
+            // Branding must never prevent delivery of a transactional email.
             return null;
         }
     }
@@ -229,11 +268,8 @@ public class EmailService : ITransactionalEmailSender
         string? htmlBody, CancellationToken cancellationToken,
         string? replyToEmail = null, string? replyToName = null)
     {
-        var content = new EmailContent(subject) { PlainText = textBody };
-        if (!string.IsNullOrWhiteSpace(htmlBody)) content.Html = htmlBody;
-        var message = new EmailMessage(_senderAddress, recipientEmail, content);
-        if (!string.IsNullOrWhiteSpace(replyToEmail))
-            message.ReplyTo.Add(new EmailAddress(replyToEmail, replyToName));
+        var message = BuildTransactionalMessage(_senderAddress, recipientEmail, subject, textBody,
+            htmlBody, _logoContent, replyToEmail, replyToName);
 
         if (_devNoAcs)
         {
